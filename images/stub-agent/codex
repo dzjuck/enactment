@@ -1,0 +1,25 @@
+#!/bin/sh
+# Stands in for the provider CLI so parsing, redaction, timeout and failure handling are
+# testable without spending tokens. Behavior is chosen by STUB_MODE; arguments are ignored,
+# which is the point: the harness's argv must work unchanged.
+case "${STUB_MODE:-events}" in
+  events|malformed)
+    printf '%s\n' "$STUB_EVENTS"
+    ;;
+  fail)
+    printf 'stub agent failed\n' >&2
+    exit 4
+    ;;
+  hang)
+    trap '' TERM
+    while true; do sleep 1; done
+    ;;
+  write)
+    printf 'agent was here\n' > /workspace/AGENT_WROTE
+    printf '%s\n' "$STUB_EVENTS"
+    ;;
+  *)
+    printf 'unknown STUB_MODE: %s\n' "$STUB_MODE" >&2
+    exit 64
+    ;;
+esac

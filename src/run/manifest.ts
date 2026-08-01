@@ -16,6 +16,23 @@ export interface RuntimeSection {
   proxy_image_digest: string;
 }
 
+/** DESIGN.md §33: usage is recorded per run so cost and routing can be reasoned about. */
+export interface UsageSection {
+  model?: string;
+  input_tokens: number;
+  output_tokens: number;
+  cached_input_tokens: number;
+}
+
+export function usageSection(usage: UsageSection): UsageSection {
+  return {
+    model: usage.model,
+    input_tokens: usage.input_tokens,
+    output_tokens: usage.output_tokens,
+    cached_input_tokens: usage.cached_input_tokens,
+  };
+}
+
 export interface NetworkPolicySection {
   allowed_hosts: string[];
   /** The version the list was discovered against; §7 makes the list version-specific. */
