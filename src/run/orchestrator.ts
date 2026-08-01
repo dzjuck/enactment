@@ -1,0 +1,356 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { execa } from 'execa';
+
+import { compileCodexPolicy, materializeCodexHome } from '../adapters/codex/policy.js';
+import { runCodexAgent } from '../adapters/codex/run.js';
+import { providerSmokeTest } from '../adapters/codex/smoke.js';
+import { ArtifactStore } from '../artifacts/store.js';
+import { collectSecrets, createRedactor } from '../artifacts/redact.js';
+import { copyBackAuth, authMount, prepareRunAuth, seedAuthStore } from '../auth/store.js';
+import { PROVIDER_ALLOWLIST } from '../config/pins.js';
+import { dependencyCacheKey, installCommand, lockfileHash } from '../deps/cache-key.js';
+import { DependencyCache, ensureDependencySnapshot } from '../deps/setup.js';
+import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
+import { sourceDiff } from '../diff/source-diff.js';
+import { DiffValidationError, validateChanges } from '../diff/validate.js';
+import { resolveImageDigests } from '../docker/images.js';
+import { acceptChanges } from '../git/accept.js';
+import { exportCommit } from '../git/export.js';
+import { idempotencyKey } from '../git/idempotency.js';
+import { withPhaseNetworks } from '../net/manage.js';
+import { proxyEnvironment, withProxy, writeProxyRecords } from '../proxy/container.js';
+import { loadTask } from '../task/load.js';
+import { runVerification } from '../verify/run.js';
+import { newAttemptId } from '../volume/naming.js';
+import { snapshotWorkspace, restoreWorkspace } from '../volume/snapshot.js';
+import { initSyntheticGit } from '../volume/synthetic-git.js';
+import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
+import { PhaseFailure, type FailureCategory } from './failure.js';
+import { networkPolicySection, runtimeSection, usageSection } from './manifest.js';
+import { resolveTimeouts } from './timeout.js';
+
+/** The Milestone 1 phase order. §21's richer step types arrive with Milestone 2. */
+export const RUN_PHASES = [
+  'export',
+  'setup',
+  'workspace',
+  'connectivity',
+  'agent',
+  'diff',
+  'verify',
+  'commit',
+] as const;
+
+export type RunPhase = (typeof RUN_PHASES)[number];
+
+export interface RunOptions {
+  taskFile: string;
+  repoPath: string;
+  artifactDir: string;
+  baseCommit?: string;
+  baseBranch?: string;
+  sourceCodexHome?: string;
+  storeDirectory?: string;
+  dependencyCacheDirectory?: string;
+  agentImage?: string;
+  agentEnv?: Record<string, string>;
+  onPhase?: (phase: RunPhase) => void | Promise<void>;
+  signal?: AbortSignal;
+}
+
+export interface RunReport {
+  status: 'succeeded' | 'failed';
+  attempt: string;
+  failedPhase?: RunPhase;
+  category?: FailureCategory;
+  message?: string;
+  commit?: string;
+  branch?: string;
+}
+
+const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
+  export: 'internal_error',
+  setup: 'setup_failed',
+  workspace: 'internal_error',
+  connectivity: 'provider_connectivity_timeout',
+  agent: 'agent_failed',
+  diff: 'invalid_change',
+  verify: 'verification_failed',
+  commit: 'internal_error',
+};
+
+/** Harness state — credentials and caches — lives outside the artifact directory. */
+export function stateDirectory(): string {
+  return process.env.HARNESS_STATE_DIR ?? join(homedir(), '.local', 'state', 'ai-harness');
+}
+
+function classify(phase: RunPhase, error: unknown): FailureCategory {
+  if (error instanceof PhaseFailure) return error.category;
+  if (error instanceof DiffValidationError) return 'invalid_change';
+  return PHASE_CATEGORY[phase];
+}
+
+async function git(repoPath: string, args: string[]): Promise<string> {
+  const { stdout } = await execa('git', ['-C', repoPath, ...args]);
+  return stdout;
+}
+
+/**
+ * Drive one task from export to commit.
+ *
+ * Every resource is registered for teardown as soon as it exists, and teardown runs in a
+ * `finally` in reverse order — so an interrupt or a failure in any phase leaves no
+ * attempt-scoped container, volume or network behind.
+ */
+export async function runTask(options: RunOptions): Promise<RunReport> {
+  const attempt = newAttemptId();
+  const teardown: (() => Promise<void>)[] = [];
+  const snapshots = new ArtifactStore(join(options.artifactDir, 'snapshots'));
+
+  let report: RunReport = { status: 'failed', attempt };
+  let current: RunPhase = 'export';
+  const manifest: Record<string, unknown> = { attempt };
+  let redact = createRedactor([]);
+
+  const phase = async (next: RunPhase): Promise<void> => {
+    current = next;
+    if (options.signal?.aborted === true) {
+      throw new PhaseFailure(next, 'internal_error', 'run was interrupted');
+    }
+    await options.onPhase?.(next);
+  };
+
+  try {
+    await phase('export');
+    const { task, hash: taskHash } = await loadTask(options.taskFile);
+    const baseCommit = options.baseCommit ?? (await git(options.repoPath, ['rev-parse', 'HEAD']));
+    const baseBranch =
+      options.baseBranch ?? (await git(options.repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']));
+    const digests = await resolveImageDigests();
+    const { tar, hash: exportHash } = await exportCommit(options.repoPath, baseCommit);
+    const timeouts = resolveTimeouts(task.timeouts);
+
+    await phase('setup');
+    const install = installCommand('denied');
+    const cacheKey = dependencyCacheKey({
+      setupImageDigest: digests.setup,
+      lockfileHash: await lockfileHash(options.repoPath, baseCommit),
+      installCommand: install,
+      lifecycleScripts: 'denied',
+    });
+    const cache = new DependencyCache(
+      options.dependencyCacheDirectory ?? join(stateDirectory(), 'dependency-cache'),
+    );
+    await withPhaseNetworks(attempt, 'setup', (networks) =>
+      ensureDependencySnapshot({
+        cache,
+        key: cacheKey,
+        attempt,
+        workspaceTar: tar,
+        installCommand: install,
+        network: networks.registry ?? 'none',
+      }),
+    );
+    const dependencySnapshot = await cache.read(cacheKey);
+
+    await phase('workspace');
+    const workspace = await createWorkspaceVolume(attempt, tar);
+    teardown.push(() => removeVolume(workspace));
+    await initSyntheticGit(workspace);
+
+    const agentDependencies = await createDependencyVolume(attempt, 'agent', dependencySnapshot);
+    teardown.push(() => removeVolume(agentDependencies));
+
+    const authStore = await seedAuthStore(
+      options.storeDirectory ?? join(stateDirectory(), 'auth'),
+      options.sourceCodexHome,
+    );
+    redact = createRedactor(collectSecrets(await readAuth(authStore.file)));
+
+    // Never inside the artifact directory: it holds auth.json, and §32 forbids storing raw
+    // authentication among the artifacts.
+    const runHome = await mkdtemp(join(tmpdir(), 'harness-codex-home-'));
+    teardown.push(() => rm(runHome, { recursive: true, force: true }));
+    await prepareRunAuth(authStore, runHome);
+
+    const policy = compileCodexPolicy({ prompt: task.prompt, workdir: '/workspace' });
+    await materializeCodexHome(policy, runHome);
+
+    const preAgent = await snapshotWorkspace(workspace, snapshots);
+
+    const agentRun = await withPhaseNetworks(attempt, 'agent', (networks) =>
+      withProxy(
+        {
+          attempt,
+          egressNetwork: networks.egress ?? '',
+          outwardNetwork: networks['proxy-egress'] ?? '',
+          allowlist: PROVIDER_ALLOWLIST,
+          ports: [443],
+        },
+        async (handle) => {
+          const proxied = proxyEnvironment(handle);
+
+          try {
+            await phase('connectivity');
+            await providerSmokeTest({
+              url: `https://${PROVIDER_ALLOWLIST[0] ?? 'chatgpt.com'}/`,
+              network: networks.egress ?? '',
+              env: proxied,
+              timeoutSeconds: timeouts.connectivity_smoke_seconds,
+            });
+
+            await phase('agent');
+            return await runCodexAgent({
+              prompt: task.prompt,
+              policy,
+              network: networks.egress ?? '',
+              env: { ...proxied, ...options.agentEnv },
+              mounts: [
+                workspaceMount(workspace),
+                dependencyMount(agentDependencies),
+                authMount(runHome),
+              ],
+              timeoutSeconds: timeouts.agent_seconds,
+              graceSeconds: timeouts.termination_grace_seconds,
+              artifactDir: options.artifactDir,
+              secrets: collectSecrets(await readAuth(authStore.file)),
+              ...(options.agentImage === undefined ? {} : { image: options.agentImage }),
+              onTimeout: () => restoreWorkspace(workspace, preAgent),
+            });
+          } finally {
+            await writeProxyRecords(handle, options.artifactDir);
+          }
+        },
+      ),
+    );
+
+    await copyBackAuth(runHome, authStore);
+    manifest.usage = usageSection(agentRun.usage);
+
+    // §32: container logs are artifacts, and they pass through redaction like everything else.
+    await writeLog(options.artifactDir, 'agent.log', redact(agentRun.stdout + agentRun.stderr));
+
+    if (agentRun.status !== 'completed') {
+      throw new PhaseFailure(
+        'agent',
+        agentRun.status === 'timeout' ? 'agent_timeout' : 'agent_failed',
+        `agent run ${agentRun.status} (exit ${String(agentRun.exitCode)})`,
+      );
+    }
+
+    await phase('diff');
+    const implementation = await snapshotWorkspace(workspace, snapshots);
+    const changes = sourceDiff(tar, await snapshots.read(implementation.hash));
+    const validated = validateChanges(changes, task.implementation_paths);
+    await writeFile(
+      join(options.artifactDir, 'source-diff.json'),
+      redact(
+        `${JSON.stringify(
+          validated.changes.map((change) => ({ kind: change.kind, path: change.path })),
+          null,
+          2,
+        )}\n`,
+      ),
+    );
+
+    await phase('verify');
+    const verification = await runVerification({
+      attempt,
+      snapshot: implementation,
+      dependencySnapshot,
+      commands: task.verification.commands,
+      artifactDir: options.artifactDir,
+      graceSeconds: timeouts.termination_grace_seconds,
+    });
+
+    await writeLog(
+      options.artifactDir,
+      'verification.log',
+      redact(
+        verification.commands
+          .map((command) => `$ ${command.argv.join(' ')}\n${command.stdout}${command.stderr}`)
+          .join('\n'),
+      ),
+    );
+
+    if (verification.status !== 'pass') {
+      throw new PhaseFailure(
+        'verify',
+        'verification_failed',
+        `verification ${verification.status}`,
+      );
+    }
+
+    await phase('commit');
+    const accepted = await acceptChanges({
+      repoPath: options.repoPath,
+      baseCommit,
+      branch: `ai-harness/${task.id}-${attempt}`,
+      taskId: task.id,
+      attempt,
+      idempotencyKey: idempotencyKey({ taskId: task.id, taskHash, baseCommit, attempt }),
+      verificationStatus: verification.status,
+      changes: validated.changes,
+    });
+
+    manifest.repository = { base_branch: baseBranch, base_commit: baseCommit };
+    manifest.inputs = {
+      task_hash: taskHash,
+      export_hash: exportHash,
+      policy_hash: policy.hash,
+      dependency_cache_key: cacheKey,
+      ...networkPolicySection(),
+    };
+    manifest.runtime = runtimeSection(digests);
+    manifest.snapshots = { pre_agent: preAgent.hash, implementation: implementation.hash };
+
+    report = {
+      status: 'succeeded',
+      attempt,
+      commit: accepted.commit,
+      branch: accepted.branch,
+    };
+  } catch (error) {
+    report = {
+      status: 'failed',
+      attempt,
+      failedPhase: current,
+      category: classify(current, error),
+      message: redact(error instanceof Error ? error.message : String(error)),
+    };
+  } finally {
+    for (const remove of teardown.reverse()) {
+      await remove().catch(() => undefined);
+    }
+
+    manifest.result = {
+      status: report.status,
+      phase: report.failedPhase,
+      category: report.category,
+      message: report.message,
+      commit: report.commit,
+      branch: report.branch,
+    };
+
+    await mkdir(options.artifactDir, { recursive: true });
+    await writeFile(
+      join(options.artifactDir, 'run-manifest.json'),
+      redact(`${JSON.stringify(manifest, null, 2)}\n`),
+    );
+  }
+
+  return report;
+}
+
+function readAuth(path: string): Promise<string> {
+  return readFile(path, 'utf8');
+}
+
+async function writeLog(artifactDir: string, name: string, content: string): Promise<void> {
+  const logs = join(artifactDir, 'logs');
+  await mkdir(logs, { recursive: true });
+  await writeFile(join(logs, name), content);
+}

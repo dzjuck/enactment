@@ -8,8 +8,9 @@
   },
   "scripts": {
     "test": "vitest run --project hermetic",
-    "test:docker": "vitest run --project docker",
+    "test:docker": "vitest run --project docker --no-file-parallelism",
     "test:live": "vitest run --project live",
+    "build": "tsc --project tsconfig.build.json && echo '{\"type\":\"module\"}' > dist/package.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },

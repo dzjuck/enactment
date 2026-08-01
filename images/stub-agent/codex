@@ -15,7 +15,7 @@ case "${STUB_MODE:-events}" in
     while true; do sleep 1; done
     ;;
   write)
-    printf 'agent was here\n' > /workspace/AGENT_WROTE
+    printf '%s' "$STUB_WRITE_CONTENT" > "/workspace/${STUB_WRITE_PATH:-AGENT_WROTE}"
     printf '%s\n' "$STUB_EVENTS"
     ;;
   *)
