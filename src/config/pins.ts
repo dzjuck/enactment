@@ -42,9 +42,26 @@ export interface ImagePin {
   /** Dockerfile path, when it is not `<context>/Dockerfile`. */
   dockerfile?: string;
   buildArgs: Record<string, string>;
-  /** When set, the built image must resolve to exactly this digest. */
-  digest?: string;
 }
+
+/**
+ * Locally built images have no registry digest, and their image ID changes on every build.
+ * The pin is therefore a content digest over layers plus config (see `resolveContentDigest`),
+ * which is platform-specific. Pins are **required**: an unpinned image is a configuration
+ * error, not a permissive default.
+ *
+ * Refreshing a pin is an explicit source change. Nothing updates this table at runtime.
+ */
+export const BUILT_IMAGE_PINS: Record<string, Record<ImageRole, string>> = {
+  'linux/arm64': {
+    agent: 'sha256:9fe344e1bd32870b1b9d5a9271a7827a9a909b7de79a7a4b186d1cd1bcffe6d5',
+    verifier: 'sha256:33a2d53e43d9fe1c4e34317dea36f7428c051c2cbeaa60195d11db25bf6c119c',
+    setup: 'sha256:038a161bf2739ccc58dae0b1b38a370c9a7ddaa561c1928806036e82ce380dee',
+    proxy: 'sha256:a4741dc58bf67ff444d69a574b9c4eeb9de12ff9b0217a9ab7a11605e352cb98',
+  },
+};
+
+export const SUPPORTED_PLATFORMS: readonly string[] = Object.keys(BUILT_IMAGE_PINS);
 
 const COMMON_BUILD_ARGS = {
   BASE_IMAGE: NODE_BASE_IMAGE,

@@ -1,59 +1,120 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
-import { IMAGE_PINS, IMAGE_ROLES, type ImagePin, type ImageRole } from '../../src/config/pins.js';
+import {
+  BUILT_IMAGE_PINS,
+  IMAGE_ROLES,
+  SUPPORTED_PLATFORMS,
+  type ImageRole,
+} from '../../src/config/pins.js';
 import { ImagePinError, resolveImageDigests } from '../../src/docker/images.js';
 import { runtimeSection } from '../../src/run/manifest.js';
 
-const DIGESTS: Record<ImageRole, string> = {
-  agent: `sha256:${'a'.repeat(64)}`,
-  verifier: `sha256:${'b'.repeat(64)}`,
-  setup: `sha256:${'c'.repeat(64)}`,
-  proxy: `sha256:${'d'.repeat(64)}`,
+const PLATFORM = 'linux/arm64';
+
+/** What `docker image inspect --format '{{json .RootFS.Layers}}'` returns. */
+const LAYERS: Record<ImageRole, string> = {
+  agent: '["sha256:aaa","sha256:aab"]',
+  verifier: '["sha256:bbb"]',
+  setup: '["sha256:ccc"]',
+  proxy: '["sha256:ddd"]',
 };
 
-function pinnedTo(digests: Record<ImageRole, string>): Record<ImageRole, ImagePin> {
-  const pins = {} as Record<ImageRole, ImagePin>;
-  for (const role of IMAGE_ROLES) {
-    pins[role] = { ...IMAGE_PINS[role], digest: digests[role] };
-  }
-  return pins;
-}
+const contentDigest = (layers: string): string =>
+  `sha256:${createHash('sha256').update(layers).digest('hex')}`;
+
+const DIGESTS = Object.fromEntries(
+  IMAGE_ROLES.map((role) => [role, contentDigest(LAYERS[role])]),
+) as Record<ImageRole, string>;
 
 /** Records every docker invocation so the tests can prove what was never attempted. */
-function recordingExec(digests: Record<ImageRole, string>) {
+function recordingExec(layers: Record<ImageRole, string>, platform = PLATFORM) {
   const calls: string[][] = [];
-  const byTag = new Map(IMAGE_ROLES.map((role) => [IMAGE_PINS[role].tag, digests[role]]));
 
   const exec = async (args: string[]): Promise<string> => {
     calls.push(args);
+
+    if (args[0] === 'version') return platform;
+
     const tag = args.at(-1) ?? '';
-    const digest = byTag.get(tag);
-    if (digest === undefined) throw new Error(`unexpected docker invocation: ${args.join(' ')}`);
-    return digest;
+    const role = IMAGE_ROLES.find((candidate) => tag.includes(candidate));
+    if (role === undefined) throw new Error(`unexpected docker invocation: ${args.join(' ')}`);
+    return layers[role];
   };
 
-  return { calls, exec };
+  const containerCommands = (): string[][] =>
+    calls.filter((args) => ['run', 'create', 'start', 'image'].includes(args[0] ?? ''));
+
+  return { calls, exec, containerCommands };
 }
 
-describe('resolveImageDigests', () => {
-  it('returns the resolved digest of every image when the pins match', async () => {
-    const { exec } = recordingExec(DIGESTS);
+describe('built-image pins', () => {
+  it('declares non-empty digests for every role on every supported platform', () => {
+    expect(SUPPORTED_PLATFORMS.length).toBeGreaterThan(0);
 
-    await expect(resolveImageDigests({ pins: pinnedTo(DIGESTS), exec })).resolves.toEqual(DIGESTS);
+    for (const platform of SUPPORTED_PLATFORMS) {
+      const pins = BUILT_IMAGE_PINS[platform];
+      expect(pins).toBeDefined();
+
+      for (const role of IMAGE_ROLES) {
+        expect(pins?.[role]).toMatch(/^sha256:[0-9a-f]{64}$/);
+      }
+    }
   });
 
-  it('rejects a resolved digest that differs from the pin, without starting a container', async () => {
-    const resolved = { ...DIGESTS, verifier: `sha256:${'e'.repeat(64)}` };
-    const { calls, exec } = recordingExec(resolved);
+  it('pins image content, so a rebuild that changes nothing still matches', async () => {
+    const { exec } = recordingExec(LAYERS);
 
-    const error = await resolveImageDigests({ pins: pinnedTo(DIGESTS), exec }).catch(
-      (cause: unknown) => cause,
+    // Two resolutions of the same layer set agree, regardless of when the image was built.
+    await expect(resolveImageDigests({ pins: DIGESTS, platform: PLATFORM, exec })).resolves.toEqual(
+      DIGESTS,
     );
+    await expect(resolveImageDigests({ pins: DIGESTS, platform: PLATFORM, exec })).resolves.toEqual(
+      DIGESTS,
+    );
+  });
+
+  it('treats a missing role digest as a configuration error before any container command', async () => {
+    const { exec, containerCommands } = recordingExec(LAYERS);
+    const incomplete = { ...DIGESTS } as Partial<Record<ImageRole, string>>;
+    delete incomplete.verifier;
+
+    const error = await resolveImageDigests({
+      pins: incomplete as Record<ImageRole, string>,
+      platform: PLATFORM,
+      exec,
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ImagePinError);
+    expect((error as Error).message).toContain('verifier');
+    expect(containerCommands()).toEqual([]);
+  });
+
+  it('stops on an unsupported Docker server platform, naming it', async () => {
+    const { exec, containerCommands } = recordingExec(LAYERS, 'linux/riscv64');
+
+    const error = await resolveImageDigests({ exec }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ImagePinError);
+    expect((error as Error).message).toContain('linux/riscv64');
+    expect(containerCommands()).toEqual([]);
+  });
+
+  it('rejects changed image content, before any container is started', async () => {
+    const changed = { ...LAYERS, verifier: '["sha256:bbb","sha256:injected"]' };
+    const { exec, calls } = recordingExec(changed);
+
+    const error = await resolveImageDigests({
+      pins: DIGESTS,
+      platform: PLATFORM,
+      exec,
+    }).catch((cause: unknown) => cause);
 
     expect(error).toBeInstanceOf(ImagePinError);
     expect((error as Error).message).toContain('verifier');
     expect((error as Error).message).toContain(DIGESTS.verifier);
-    expect((error as Error).message).toContain(resolved.verifier);
+    expect((error as Error).message).toContain(contentDigest(changed.verifier));
 
     const attempted = calls.flat();
     expect(attempted).not.toContain('run');
