@@ -1,4 +1,6 @@
 #!/bin/sh
-# A repository hook that always fails. The harness must never run it.
+# A repository hook that always fails, and leaves evidence when it runs.
+# The harness must never execute it.
 echo "pre-commit hook ran" >&2
+: > HOOK_RAN
 exit 1
