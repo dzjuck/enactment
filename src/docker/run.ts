@@ -10,6 +10,8 @@ export interface RunResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  /** Raw stdout, for commands whose output is binary (a tar stream, say). */
+  stdoutBytes: Buffer;
   durationMs: number;
   status: RunStatus;
 }
@@ -40,10 +42,16 @@ export async function runContainer(
   const grace = options.graceSeconds ?? DEFAULT_GRACE_SECONDS;
   const started = Date.now();
 
-  const child = execa('docker', buildRunArgs({ ...spec, name, interactive: options.input !== undefined }), {
-    reject: false,
-    ...(options.input === undefined ? {} : { input: options.input }),
-  });
+  const child = execa(
+    'docker',
+    buildRunArgs({ ...spec, name, interactive: options.input !== undefined }),
+    {
+      reject: false,
+      // Always capture bytes; text is derived. Decoding a tar stream would corrupt it.
+      encoding: 'buffer',
+      ...(options.input === undefined ? {} : { input: options.input }),
+    },
+  );
 
   let timedOut = false;
   const timer =
@@ -56,11 +64,13 @@ export async function runContainer(
 
   try {
     const result = await child;
+    const stdoutBytes = Buffer.from(result.stdout ?? []);
 
     return {
       exitCode: result.exitCode ?? -1,
-      stdout: result.stdout,
-      stderr: result.stderr,
+      stdout: stdoutBytes.toString('utf8'),
+      stderr: Buffer.from(result.stderr ?? []).toString('utf8'),
+      stdoutBytes,
       durationMs: Date.now() - started,
       status: timedOut ? 'timeout' : 'completed',
     };

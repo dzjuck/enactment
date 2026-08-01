@@ -28,6 +28,11 @@ export async function removeVolume(name: string): Promise<void> {
   await execa('docker', ['volume', 'rm', '--force', name], { reject: false });
 }
 
+export async function createVolume(name: string, labels: Record<string, string>): Promise<void> {
+  const flags = Object.entries(labels).flatMap(([key, value]) => ['--label', `${key}=${value}`]);
+  await execa('docker', ['volume', 'create', ...flags, name]);
+}
+
 /**
  * Create an attempt-scoped workspace volume and seed it from a canonical export.
  *
@@ -42,11 +47,7 @@ export async function createWorkspaceVolume(attempt: string, tar: Buffer): Promi
     throw new WorkspaceVolumeError(`workspace volume ${name} already exists`);
   }
 
-  const labels = Object.entries(attemptLabels(attempt, 'workspace')).flatMap(([key, value]) => [
-    '--label',
-    `${key}=${value}`,
-  ]);
-  await execa('docker', ['volume', 'create', ...labels, name]);
+  await createVolume(name, attemptLabels(attempt, 'workspace'));
 
   try {
     const result = await runContainer(
