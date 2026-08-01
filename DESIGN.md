@@ -180,6 +180,8 @@ container:
   host_network: false
 
   limits:
+    # Exceeds the 8 GB OrbStack VM, so on that host it is a nominal limit rather than a
+    # real one. Applied as declared; revisit when the VM is sized independently.
     memory_mb: 8192
     cpus: 4
     pids: 512
@@ -486,6 +488,15 @@ restore the snapshot.
 
 No phase inherits a half-written workspace.
 
+Restore validates the archive before deleting anything, so a corrupt or truncated snapshot
+leaves the workspace untouched rather than half-written.
+
+### Retention
+
+Snapshots are per-attempt tars of a whole workspace, so storage grows without bound. Milestone 1
+keeps every snapshot — one task per run, so the volume is small — and defers a retention policy.
+Any milestone that runs multi-step plans needs one before it ships.
+
 ---
 
 ## 12. Dependency handling
@@ -539,6 +550,12 @@ lifecycle_scripts: denied
 ```
 
 Exceptions require explicit package approval.
+
+`denied` implies a restricted dependency set. The packages listed above as motivating a writable
+dependency volume — esbuild, sharp, Playwright — are precisely the ones that are non-functional
+without `postinstall`, so a repository that depends on them cannot run under the default. Either
+the repository avoids them, as the Milestone 1 fixture does, or the per-package approval
+mechanism must exist before that repository is supported.
 
 ---
 
@@ -648,6 +665,10 @@ execa("npx", [
 ```
 
 Never execute arbitrary model-generated shell strings.
+
+This rule governs the *harness*. Inside its container the agent runs arbitrary shell by design —
+that is what the container is for. The rule is about what crosses the boundary back to the host:
+nothing a model produced may become an argument the harness executes.
 
 Prefer direct commands over mutable package scripts.
 
@@ -1542,6 +1563,30 @@ Regression suite:
 * invalid configuration rejected by `--strict-config`;
 * valid configuration accepted;
 * workspace restored after timeout.
+
+### Findings from the Milestone 1 implementation
+
+Established while building against `codex-cli 0.146.0`; each changed a decision.
+
+* **Provider config keys are version-specific and must be validated empirically.**
+  `[features].web_search_request` and `web_search_cached` are deprecated in this version and
+  produce errors; the working key is top-level `web_search = "disabled"`. `--strict-config`
+  turns a wrong key into a loud failure, which is why it is mandatory rather than advisory.
+* **Model names carry metadata.** `gpt-5.6-luna` resolves cleanly; `gpt-5.1-codex-max` logs
+  "model metadata not found" and falls back, degrading performance silently.
+* **Bind-mount ownership mapping is runtime-specific.** On OrbStack and Docker Desktop a host
+  directory owned by the invoking user appears inside the container as the container's own uid,
+  which is what makes the read-write `/run/agent-auth` mount work. On native Linux the numeric
+  ownership must match, so the auth store and per-run `CODEX_HOME` need explicit `chown` there.
+* **Named volumes take their ownership from the image's mount point.** A fresh volume mounted at
+  a path the image owns as `1001:1001` comes up writable; mounted at a path the image does not
+  have, it comes up `root:root` and a non-root container cannot write it.
+* **The setup phase needs the timeout ladder too.** `npm ci` without network exhausts a registry
+  retry ladder for roughly 70 seconds before failing — the same "hang, not error" shape §5
+  describes for the agent phase. Every phase that can reach a network needs a deadline.
+* **Network teardown must account for attached containers.** `docker network rm` fails while a
+  container is still attached, and a tolerant remove hides that as a silent leak. Containers must
+  be destroyed before the networks they sit on.
 
 ### Conclusion
 
