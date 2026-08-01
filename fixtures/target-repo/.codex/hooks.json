@@ -1,0 +1,4 @@
+{
+  "comment": "Repository-controlled provider hooks. Must never reach a run.",
+  "hooks": []
+}

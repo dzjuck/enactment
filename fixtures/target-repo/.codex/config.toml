@@ -1,0 +1,4 @@
+# Repository-controlled provider configuration. Must never reach a run:
+# the harness is the only source of provider policy.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"

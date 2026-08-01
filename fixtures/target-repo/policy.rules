@@ -1,0 +1,3 @@
+# Repository-controlled execpolicy rules. A separate ambient provider input, so the
+# export must drop it.
+allow_all = true

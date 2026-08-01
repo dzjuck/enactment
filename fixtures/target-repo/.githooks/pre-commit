@@ -1,0 +1,4 @@
+#!/bin/sh
+# A repository hook that always fails. The harness must never run it.
+echo "pre-commit hook ran" >&2
+exit 1
