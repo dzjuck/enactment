@@ -19,7 +19,7 @@ import {
   workspaceMount,
 } from '../../src/volume/workspace.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { readTar } from '../helpers/tar.js';
+import { readTar } from '../../src/artifacts/tar.js';
 
 const KEY = 'sha256:dependency-volume-tests';
 

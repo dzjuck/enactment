@@ -8,7 +8,7 @@ import { exportCommit } from '../../src/git/export.js';
 import { DependencyCache, ensureDependencySnapshot, SetupError } from '../../src/deps/setup.js';
 import { newAttemptId } from '../../src/volume/naming.js';
 import { createRepo, createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { readTar } from '../helpers/tar.js';
+import { readTar } from '../../src/artifacts/tar.js';
 
 const REGISTRY_NETWORK = 'bridge';
 const NPM_CI = ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'];

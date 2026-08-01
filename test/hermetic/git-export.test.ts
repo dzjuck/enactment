@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { GitExportError, exportCommit } from '../../src/git/export.js';
 import { commitAll, createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { readTar, type TarEntry } from '../helpers/tar.js';
+import { readTar, type TarEntry } from '../../src/artifacts/tar.js';
 
 const FIXTURE = fileURLToPath(new URL('../../fixtures/target-repo', import.meta.url));
 

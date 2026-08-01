@@ -14,7 +14,7 @@ import {
   workspaceMount,
 } from '../../src/volume/workspace.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { readTar } from '../helpers/tar.js';
+import { readTar } from '../../src/artifacts/tar.js';
 
 let repo: TargetRepo;
 let tar: Buffer;
