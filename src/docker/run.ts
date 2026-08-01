@@ -18,6 +18,8 @@ export interface RunOptions {
   timeoutSeconds?: number;
   /** SIGTERM, then this long, then SIGKILL. DESIGN.md §5. */
   graceSeconds?: number;
+  /** Written to the container's stdin, which is opened only when this is present. */
+  input?: Buffer;
 }
 
 export const DEFAULT_GRACE_SECONDS = 10;
@@ -38,7 +40,10 @@ export async function runContainer(
   const grace = options.graceSeconds ?? DEFAULT_GRACE_SECONDS;
   const started = Date.now();
 
-  const child = execa('docker', buildRunArgs({ ...spec, name }), { reject: false });
+  const child = execa('docker', buildRunArgs({ ...spec, name, interactive: options.input !== undefined }), {
+    reject: false,
+    ...(options.input === undefined ? {} : { input: options.input }),
+  });
 
   let timedOut = false;
   const timer =

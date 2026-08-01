@@ -45,6 +45,8 @@ export interface ContainerSpec {
   /** Network name, or `none`. `host` is not expressible. */
   network: string;
   name?: string;
+  /** Keep stdin open, so the harness can stream a tar into the container. */
+  interactive?: boolean;
   workdir?: string;
   env?: Record<string, string>;
   labels?: Record<string, string>;
@@ -91,6 +93,7 @@ export function buildRunArgs(spec: ContainerSpec): string[] {
 
   const args = ['run', '--rm'];
 
+  if (spec.interactive === true) args.push('--interactive');
   if (spec.name !== undefined) args.push('--name', spec.name);
 
   args.push(

@@ -1,0 +1,80 @@
+import { execa } from 'execa';
+
+import { IMAGE_PINS } from '../config/pins.js';
+import type { Mount } from '../docker/args.js';
+import { runContainer } from '../docker/run.js';
+import { attemptLabels, workspaceVolumeName } from './naming.js';
+
+export class WorkspaceVolumeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkspaceVolumeError';
+  }
+}
+
+export const WORKSPACE_PATH = '/workspace';
+
+export function workspaceMount(name: string): Mount {
+  return { type: 'volume', source: name, target: WORKSPACE_PATH };
+}
+
+export async function volumeExists(name: string): Promise<boolean> {
+  const { exitCode } = await execa('docker', ['volume', 'inspect', name], { reject: false });
+  return exitCode === 0;
+}
+
+/** Removing a volume that is not there is success, not an error. */
+export async function removeVolume(name: string): Promise<void> {
+  await execa('docker', ['volume', 'rm', '--force', name], { reject: false });
+}
+
+/**
+ * Create an attempt-scoped workspace volume and seed it from a canonical export.
+ *
+ * The volume is populated by a helper container rather than from the host: a fresh named
+ * volume inherits the ownership of the image's mount point (uid/gid 1001), so nothing here
+ * needs root.
+ */
+export async function createWorkspaceVolume(attempt: string, tar: Buffer): Promise<string> {
+  const name = workspaceVolumeName(attempt);
+
+  if (await volumeExists(name)) {
+    throw new WorkspaceVolumeError(`workspace volume ${name} already exists`);
+  }
+
+  const labels = Object.entries(attemptLabels(attempt, 'workspace')).flatMap(([key, value]) => [
+    '--label',
+    `${key}=${value}`,
+  ]);
+  await execa('docker', ['volume', 'create', ...labels, name]);
+
+  try {
+    const result = await runContainer(
+      {
+        image: IMAGE_PINS.setup.tag,
+        argv: [
+          'tar',
+          '--extract',
+          '--preserve-permissions',
+          '--file',
+          '-',
+          '--directory',
+          WORKSPACE_PATH,
+        ],
+        network: 'none',
+        mounts: [workspaceMount(name)],
+        labels: attemptLabels(attempt, 'seed'),
+      },
+      { input: tar },
+    );
+
+    if (result.exitCode !== 0) {
+      throw new WorkspaceVolumeError(`seeding ${name} failed (${result.exitCode}): ${result.stderr}`);
+    }
+  } catch (error) {
+    await removeVolume(name);
+    throw error;
+  }
+
+  return name;
+}
