@@ -1,0 +1,6 @@
+id: add-slugify
+implementation_paths:
+  - src/slugify.js
+verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]

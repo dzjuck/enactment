@@ -1,0 +1,5 @@
+id: add-slugify
+prompt: Implement the slugify function in src/slugify.js.
+verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]
