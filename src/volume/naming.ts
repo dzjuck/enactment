@@ -17,6 +17,10 @@ export function dependencyVolumeName(attempt: string, phase: string): string {
   return `${LABEL_PREFIX}-deps-${attempt}-${phase}`;
 }
 
+export function networkName(attempt: string, role: string): string {
+  return `${LABEL_PREFIX}-net-${attempt}-${role}`;
+}
+
 /** Every attempt-scoped resource carries these, so cleanup can sweep by label. */
 export function attemptLabels(attempt: string, role: string): Record<string, string> {
   return { [ATTEMPT_LABEL]: attempt, [ROLE_LABEL]: role };
