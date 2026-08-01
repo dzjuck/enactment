@@ -1,0 +1,4 @@
+- When reporting information to me, be extremely concise. Prioritize brevity over grammar.
+- Do not preserve backward compatability.
+- Choose the simplest implementation that fully meets the current requirements.
+- Prefer established, well-maintained libraries over custom implementation.
