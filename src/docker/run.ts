@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { execa } from 'execa';
 
+import { withTimeoutLadder } from '../run/timeout.js';
 import { buildRunArgs, type ContainerSpec } from './args.js';
 
 export type RunStatus = 'completed' | 'timeout';
@@ -72,16 +73,16 @@ export async function runContainer(
     },
   );
 
-  let timedOut = false;
-  const timer =
-    options.timeoutSeconds === undefined
-      ? undefined
-      : setTimeout(() => {
-          timedOut = true;
-          void docker(['stop', '--timeout', String(grace), name]);
-        }, options.timeoutSeconds * 1000);
-
   try {
+    // The §5 ladder, not a second implementation of it.
+    const ladder = await withTimeoutLadder({
+      name,
+      work: child,
+      graceSeconds: grace,
+      ...(options.timeoutSeconds === undefined ? {} : { timeoutSeconds: options.timeoutSeconds }),
+    });
+
+    // Settles promptly either way: on the timeout path the container is already gone.
     const result = await child;
     const stdoutBytes = Buffer.from(result.stdout ?? []);
 
@@ -91,10 +92,9 @@ export async function runContainer(
       stderr: Buffer.from(result.stderr ?? []).toString('utf8'),
       stdoutBytes,
       durationMs: Date.now() - started,
-      status: timedOut ? 'timeout' : 'completed',
+      status: ladder.timedOut ? 'timeout' : 'completed',
     };
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
     // `--rm` normally suffices; this closes the paths where it does not.
     await docker(['rm', '--force', name]);
   }
