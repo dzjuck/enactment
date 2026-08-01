@@ -171,7 +171,7 @@ Default agent container:
 
 ```yaml
 container:
-  user: agent
+  user: "1001:1001"
   privileged: false
   root_filesystem: read_only
   no_new_privileges: true
@@ -184,20 +184,73 @@ container:
     cpus: 4
     pids: 512
 
+  environment:
+    HOME: /home/agent
+
   tmpfs:
-    - /tmp
-    - /home/agent
+    - /tmp:rw,nosuid,nodev,mode=1777
+    - /home/agent:rw,nosuid,nodev,uid=1001,gid=1001,mode=0700
 ```
+
+### Writable home tmpfs
+
+Numeric ownership is mandatory, not decorative.
+
+Docker special-cases `/tmp` to mode `1777`. Every other tmpfs target is created
+`0755 root:root`, which a non-root agent cannot write. A tmpfs `/home/agent` declared without
+`uid`/`gid` therefore produces a container that starts normally and then fails on the first write
+to the agent's own home directory.
+
+The image must define the agent user with fixed UID and GID `1001`, so that the numeric
+ownership above and the numeric `user` match.
+
+`HOME` must be set explicitly to `/home/agent`.
 
 Mounted:
 
 ```text
 /workspace        writable Docker volume
 /context          read-only context
-/run/agent-auth   provider authentication
+/run/agent-auth   provider authentication, read-write
 ```
 
+`/run/agent-auth` is read-write because the provider CLI persists rotated credentials there.
+
 Verifier, reviewer and setup containers receive no provider authentication.
+
+### Execution timeouts
+
+The provider CLI does not terminate quickly when provider access fails. It retries and reconnects
+indefinitely. A misconfigured network therefore produces a hang, not an error, and no phase may
+rely on the agent exiting by itself.
+
+Every invocation declares:
+
+```yaml
+timeouts:
+  connectivity_smoke_seconds: 60
+  agent_seconds: 1200
+  termination_grace_seconds: 10
+```
+
+On timeout:
+
+```text
+SIGTERM
+→ wait termination_grace_seconds
+→ SIGKILL container
+→ restore pre-invocation workspace snapshot
+→ classify failure
+```
+
+Failure category:
+
+```text
+provider_connectivity_timeout
+```
+
+The shorter connectivity smoke-test timeout exists so that an unreachable provider is reported in
+under a minute rather than after the full agent budget.
 
 ---
 
@@ -258,7 +311,10 @@ Every topology is created per phase and destroyed afterward.
 
 ## 7. Egress proxy
 
-Use a CONNECT-level hostname allowlist.
+Use a CONNECT-level exact-hostname allowlist.
+
+Matching is exact. A hostname is allowed only if it appears in the list verbatim. No substring
+matching, no implicit subdomains, no wildcards.
 
 Record:
 
@@ -268,7 +324,27 @@ Record:
 * duration;
 * connection result.
 
+### The proxy remains permanently L4
+
 Do not terminate TLS.
+
+Codex communicates over a WebSocket:
+
+```text
+wss://chatgpt.com/backend-api/codex/responses
+```
+
+After the upgrade there is no request/response structure left to inspect, so TLS interception
+would buy nothing even if it were acceptable. This makes the decision permanent rather than
+provisional.
+
+Never add:
+
+* TLS interception;
+* CA injection;
+* HTTP method inspection;
+* path inspection;
+* response inspection.
 
 Therefore V1 cannot inspect:
 
@@ -277,14 +353,46 @@ Therefore V1 cannot inspect:
 * body;
 * response status.
 
-Provider-domain allowlists include all required:
+### Codex allowlist
 
-* API;
-* authentication;
-* refresh;
-* required feature endpoints.
+For the tested combination:
 
-Telemetry and auto-update are disabled where possible.
+```yaml
+codex_cli: 0.146.0
+authentication: existing ChatGPT subscription
+transport: WebSocket
+```
+
+Codex works with only:
+
+```yaml
+allowed_hosts:
+  - chatgpt.com
+```
+
+Deny `ab.chatgpt.com` and every other host.
+
+This allowlist is version-specific. Re-run domain discovery whenever:
+
+* the Codex version changes;
+* the authentication mode changes;
+* the image changes.
+
+### Network policy suppresses telemetry
+
+Do not claim telemetry is disabled by configuration.
+
+The correct statement is:
+
+```text
+Nonessential provider traffic is blocked by the exact-host egress allowlist.
+```
+
+Measured: `ab.chatgpt.com` attempted roughly 382 KB of traffic. The proxy denied it and normal
+execution continued unaffected.
+
+Provider configuration may request telemetry disablement, and auto-update is disabled where the
+provider supports it, but the proxy is the enforcement layer.
 
 ---
 
@@ -919,7 +1027,109 @@ Common responsibilities:
 * no MCP;
 * no web tools;
 * no auto-update;
-* internal sandbox disabled or unused.
+* internal sandbox disabled.
+
+#### Container contract
+
+```yaml
+codex:
+  version: 0.146.0
+
+  invocation:
+    strict_config: true
+    bypass_inner_sandbox: true
+    structured_output: true
+
+  network:
+    allowed_hosts:
+      - chatgpt.com
+
+  container:
+    user: "1001:1001"
+    root_filesystem: read_only
+    capabilities: []
+    no_new_privileges: true
+    direct_egress: false
+
+    tmpfs:
+      - target: /tmp
+        mode: "1777"
+
+      - target: /home/agent
+        uid: 1001
+        gid: 1001
+        mode: "0700"
+
+  timeouts:
+    connectivity_smoke_seconds: 60
+    agent_seconds: 1200
+    termination_grace_seconds: 10
+```
+
+Conceptual command:
+
+```bash
+codex exec \
+  --strict-config \
+  --dangerously-bypass-approvals-and-sandbox \
+  --json \
+  --ephemeral \
+  --ignore-rules \
+  --model "$MODEL" \
+  "$PROMPT"
+```
+
+#### Inner-sandbox bypass is mandatory
+
+Codex sandboxes itself with Bubblewrap, which requires unprivileged user namespaces. Inside the
+hardened container it cannot create them, because the container has:
+
+```yaml
+capabilities: []
+no_new_privileges: true
+```
+
+Every Codex execution must therefore pass:
+
+```text
+--dangerously-bypass-approvals-and-sandbox
+```
+
+This flag disables Codex's inner sandbox and command approvals. It does not bypass the outer
+Docker isolation. The container has no host filesystem, no canonical Git, no Docker daemon, no
+direct internet, no elevated capabilities and no unrelated credentials.
+
+This is safe only because:
+
+```text
+Docker container = security boundary
+Codex sandbox    = intentionally disabled
+```
+
+Do not weaken Docker to make nested Bubblewrap work.
+
+#### `--strict-config` is required on every execution
+
+Without it, Codex silently accepts unknown configuration fields, so a typo in a generated policy
+produces a silently weaker configuration and no error anywhere.
+
+`--strict-config` is accepted by `codex exec`. It is not accepted by `codex features` or other
+subcommands, so validation must never be routed through them — an unsupported-flag error looks
+like a rejection and scores as a false pass.
+
+A valid regression test distinguishes *flag unsupported* from *invalid configuration correctly
+rejected*:
+
+```text
+1. run `codex exec --strict-config` with a known-invalid key
+   → require non-zero exit
+   → require the expected configuration error naming the key
+2. run the same invocation with valid configuration
+   → require success
+```
+
+Step 2 is the positive control. Without it, step 1 alone cannot distinguish a working strict mode
+from a broken invocation.
 
 ### Claude
 
@@ -1309,6 +1519,45 @@ Validate before implementation planning:
 13. Auto-update and telemetry can be disabled.
 14. Authentication persistence mode is selected explicitly.
 
+### Status
+
+Gates 1, 2, 5–13 executed and passed against `codex-cli 0.146.0` on OrbStack `linux/arm64`.
+Gate 14 is selected. Gate 3 belongs to Milestone 4. Gate 4 is a human decision and remains open.
+
+The gates are now regression tests, not one-time checks. Each runs with a paired positive control;
+an unattempted operation is not evidence of enforcement, so a missing control makes the result
+inconclusive, and an inconclusive required check counts as a failure.
+
+Regression suite:
+
+* writable `/home/agent`;
+* non-root execution;
+* read-only root filesystem;
+* Codex inner sandbox disabled;
+* exact `chatgpt.com` egress;
+* `ab.chatgpt.com` denied;
+* WebSocket works through CONNECT;
+* direct egress unavailable;
+* provider outage terminates by timeout;
+* invalid configuration rejected by `--strict-config`;
+* valid configuration accepted;
+* workspace restored after timeout.
+
+### Conclusion
+
+Milestone 1 is feasible with a simpler security model than earlier drafts assumed:
+
+```text
+hardened Docker container
++ exact chatgpt.com egress
++ Codex inner sandbox disabled
++ strict configuration validation
++ mandatory timeouts
+```
+
+No Codex permission-profile compiler and no inner-sandbox self-test are needed. Provider-native
+confinement is not part of the security model; Docker is.
+
 ---
 
 ## 36. Recommended defaults
@@ -1331,10 +1580,27 @@ security:
 
 container:
   non_root: true
+  user: "1001:1001"
   read_only_root: true
   capabilities: []
   no_new_privileges: true
   docker_socket: false
+  tmpfs_numeric_ownership: required
+
+provider:
+  strict_config: true
+  bypass_inner_sandbox: true
+  structured_output: true
+
+network:
+  exact_host_matching: true
+  wildcards: unsupported
+  tls_interception: never
+
+timeouts:
+  connectivity_smoke_seconds: 60
+  agent_seconds: 1200
+  termination_grace_seconds: 10
 
 dependencies:
   writable_attempt_volume: true
