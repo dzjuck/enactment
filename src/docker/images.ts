@@ -28,7 +28,9 @@ export async function buildImage(role: ImageRole, exec: DockerExec = dockerExec)
     `${key}=${value}`,
   ]);
 
-  await exec(['build', ...buildArgs, '--tag', pin.tag, pin.context]);
+  const dockerfile = pin.dockerfile === undefined ? [] : ['--file', pin.dockerfile];
+
+  await exec(['build', ...buildArgs, ...dockerfile, '--tag', pin.tag, pin.context]);
   return pin.tag;
 }
 

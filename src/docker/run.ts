@@ -26,6 +26,25 @@ export interface RunOptions {
 
 export const DEFAULT_GRACE_SECONDS = 10;
 
+/**
+ * Start a container in the background under the same hardening as `runContainer`, for
+ * services that must outlive a single command. Returns its name.
+ */
+export async function startContainer(spec: ContainerSpec): Promise<string> {
+  const name = spec.name ?? `harness-${randomUUID()}`;
+  await execa('docker', buildRunArgs({ ...spec, name, detach: true }));
+  return name;
+}
+
+export async function stopContainer(name: string): Promise<void> {
+  await docker(['rm', '--force', name]);
+}
+
+export async function containerLogs(name: string): Promise<{ stdout: string; stderr: string }> {
+  const result = await execa('docker', ['logs', name], { reject: false });
+  return { stdout: result.stdout, stderr: result.stderr };
+}
+
 async function docker(args: string[]): Promise<void> {
   await execa('docker', args, { reject: false });
 }

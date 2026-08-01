@@ -1,4 +1,11 @@
-import { HARNESS_VERSION, type ImageRole } from '../config/pins.js';
+import { createHash } from 'node:crypto';
+
+import {
+  CODEX_VERSION,
+  HARNESS_VERSION,
+  PROVIDER_ALLOWLIST,
+  type ImageRole,
+} from '../config/pins.js';
 
 /** The `runtime` block of the DESIGN.md §20 execution manifest. */
 export interface RuntimeSection {
@@ -7,6 +14,27 @@ export interface RuntimeSection {
   verifier_image_digest: string;
   setup_image_digest: string;
   proxy_image_digest: string;
+}
+
+export interface NetworkPolicySection {
+  allowed_hosts: string[];
+  /** The version the list was discovered against; §7 makes the list version-specific. */
+  codex_version: string;
+  network_policy_hash: string;
+}
+
+export function networkPolicySection(
+  hosts: readonly string[] = PROVIDER_ALLOWLIST,
+  codexVersion: string = CODEX_VERSION,
+): NetworkPolicySection {
+  const allowed_hosts = [...hosts];
+  const canonical = JSON.stringify({ allowed_hosts, codex_version: codexVersion });
+
+  return {
+    allowed_hosts,
+    codex_version: codexVersion,
+    network_policy_hash: `sha256:${createHash('sha256').update(canonical).digest('hex')}`,
+  };
 }
 
 export function runtimeSection(digests: Record<ImageRole, string>): RuntimeSection {

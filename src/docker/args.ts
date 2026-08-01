@@ -47,6 +47,8 @@ export interface ContainerSpec {
   name?: string;
   /** Keep stdin open, so the harness can stream a tar into the container. */
   interactive?: boolean;
+  /** Run in the background: for the proxy, which must outlive a single command. */
+  detach?: boolean;
   workdir?: string;
   env?: Record<string, string>;
   labels?: Record<string, string>;
@@ -93,6 +95,7 @@ export function buildRunArgs(spec: ContainerSpec): string[] {
 
   const args = ['run', '--rm'];
 
+  if (spec.detach === true) args.push('--detach');
   if (spec.interactive === true) args.push('--interactive');
   if (spec.name !== undefined) args.push('--name', spec.name);
 

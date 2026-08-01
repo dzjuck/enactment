@@ -6,6 +6,22 @@ export const HARNESS_VERSION = '0.1.0';
  */
 export const CODEX_VERSION = '0.146.0';
 
+/**
+ * DESIGN.md §7: exactly this, exact-match, no wildcards. Measured, not guessed —
+ * `ab.chatgpt.com` appears but is not required, and denying it costs nothing.
+ */
+export const PROVIDER_ALLOWLIST: readonly string[] = ['chatgpt.com'];
+
+/**
+ * The Codex version domain discovery was actually run against. Kept as its own literal so
+ * that bumping CODEX_VERSION without re-running discovery is a test failure rather than a
+ * silently stale allowlist.
+ */
+export const PROVIDER_ALLOWLIST_CODEX_VERSION = '0.146.0';
+
+export const TYPESCRIPT_VERSION = '5.9.3';
+export const TYPES_NODE_VERSION = '24.10.1';
+
 /** Multi-arch index digest, resolved from the registry. One base for all four images. */
 export const NODE_BASE_IMAGE =
   'node:22-bookworm-slim@sha256:f32b81066cde10a75dbac96646099533316d94bac4150c55da1636e1f0ffdc46';
@@ -23,6 +39,8 @@ export interface ImagePin {
   tag: string;
   /** Build context, relative to the repository root. */
   context: string;
+  /** Dockerfile path, when it is not `<context>/Dockerfile`. */
+  dockerfile?: string;
   buildArgs: Record<string, string>;
   /** When set, the built image must resolve to exactly this digest. */
   digest?: string;
@@ -53,10 +71,12 @@ export const IMAGE_PINS: Record<ImageRole, ImagePin> = {
     context: 'images/setup',
     buildArgs: { ...COMMON_BUILD_ARGS },
   },
+  // Built from the repository root: the proxy sources are compiled inside the image.
   proxy: {
     role: 'proxy',
     tag: `ai-harness/proxy:${HARNESS_VERSION}`,
-    context: 'images/proxy',
-    buildArgs: { ...COMMON_BUILD_ARGS },
+    context: '.',
+    dockerfile: 'images/proxy/Dockerfile',
+    buildArgs: { ...COMMON_BUILD_ARGS, TYPESCRIPT_VERSION, TYPES_NODE_VERSION },
   },
 };
