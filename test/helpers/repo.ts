@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { execa } from 'execa';
 
-const FIXTURE = fileURLToPath(new URL('../../fixtures/target-repo', import.meta.url));
+const FIXTURES = fileURLToPath(new URL('../../fixtures', import.meta.url));
 
 /** Isolated from the user's global/system git config, and deterministic. */
 const GIT_ENV = {
@@ -29,13 +29,17 @@ export interface TargetRepo {
   commit: string;
 }
 
-/** Materialize `fixtures/target-repo` into a temp dir and make it a git repository. */
-export async function createTargetRepo(): Promise<TargetRepo> {
+/** Materialize a fixture repository into a temp dir and make it a git repository. */
+export async function createRepo(fixture: string): Promise<TargetRepo> {
   const dir = await mkdtemp(join(tmpdir(), 'harness-repo-'));
-  await cp(FIXTURE, dir, { recursive: true, verbatimSymlinks: true });
+  await cp(join(FIXTURES, fixture), dir, { recursive: true, verbatimSymlinks: true });
   await git(dir, ['init', '-q', '-b', 'main']);
   const commit = await commitAll(dir, 'Initial commit');
   return { dir, commit };
+}
+
+export function createTargetRepo(): Promise<TargetRepo> {
+  return createRepo('target-repo');
 }
 
 export async function commitAll(dir: string, message: string): Promise<string> {

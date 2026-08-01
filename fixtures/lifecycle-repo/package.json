@@ -1,0 +1,8 @@
+{
+  "name": "lifecycle-repo",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "node -e \"console.log('POSTINSTALL_RAN')\""
+  }
+}

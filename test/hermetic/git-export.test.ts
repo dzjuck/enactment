@@ -39,6 +39,7 @@ describe('exportCommit', () => {
         'AGENTS.md',
         'README.md',
         'docs/readme.md',
+        'package-lock.json',
         'package.json',
         'src/slugify.js',
         'test/slugify.test.js',
