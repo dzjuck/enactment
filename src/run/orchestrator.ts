@@ -16,7 +16,7 @@ import { DependencyCache, ensureDependencySnapshot } from '../deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
 import { sourceDiff } from '../diff/source-diff.js';
 import { DiffValidationError, validateChanges } from '../diff/validate.js';
-import { resolveImageDigests } from '../docker/images.js';
+import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
 import { acceptChanges } from '../git/accept.js';
 import { exportCommit } from '../git/export.js';
 import { idempotencyKey } from '../git/idempotency.js';
@@ -29,6 +29,7 @@ import { snapshotWorkspace, restoreWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
 import { PhaseFailure, type FailureCategory } from './failure.js';
+import type { RunInjection } from './inject.js';
 import { networkPolicySection, runtimeSection, usageSection } from './manifest.js';
 import { resolveTimeouts } from './timeout.js';
 
@@ -55,8 +56,8 @@ export interface RunOptions {
   sourceCodexHome?: string;
   storeDirectory?: string;
   dependencyCacheDirectory?: string;
-  agentImage?: string;
-  agentEnv?: Record<string, string>;
+  /** Test-only substitution of runtime images and agent environment. See `RunInjection`. */
+  injection?: RunInjection;
   onPhase?: (phase: RunPhase) => void | Promise<void>;
   signal?: AbortSignal;
 }
@@ -129,14 +130,23 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     const baseCommit = options.baseCommit ?? (await git(options.repoPath, ['rev-parse', 'HEAD']));
     const baseBranch =
       options.baseBranch ?? (await git(options.repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']));
-    const digests = await resolveImageDigests();
+    // One immutable image set for the whole run: every container below is started from it,
+    // and the manifest records this same value rather than a separately resolved one.
+    const images: RuntimeImages = await resolveRuntimeImages();
+
+    // Harness-owned helpers keep the verified set even where they use the agent role; only
+    // the agent invocation itself is substitutable, and only by a test.
+    const agentImages: RuntimeImages = {
+      ...images,
+      agent: options.injection?.agent ?? images.agent,
+    };
     const { tar, hash: exportHash } = await exportCommit(options.repoPath, baseCommit);
     const timeouts = resolveTimeouts(task.timeouts);
 
     await phase('setup');
     const install = installCommand('denied');
     const cacheKey = dependencyCacheKey({
-      setupImageDigest: digests.setup,
+      setupImageDigest: images.setup.digest,
       lockfileHash: await lockfileHash(options.repoPath, baseCommit),
       installCommand: install,
       lifecycleScripts: 'denied',
@@ -152,16 +162,22 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
         workspaceTar: tar,
         installCommand: install,
         network: networks.registry ?? 'none',
+        images,
       }),
     );
     const dependencySnapshot = await cache.read(cacheKey);
 
     await phase('workspace');
-    const workspace = await createWorkspaceVolume(attempt, tar);
+    const workspace = await createWorkspaceVolume(attempt, tar, images);
     teardown.push(() => removeVolume(workspace));
-    await initSyntheticGit(workspace);
+    await initSyntheticGit(workspace, images);
 
-    const agentDependencies = await createDependencyVolume(attempt, 'agent', dependencySnapshot);
+    const agentDependencies = await createDependencyVolume(
+      attempt,
+      'agent',
+      dependencySnapshot,
+      images,
+    );
     teardown.push(() => removeVolume(agentDependencies));
 
     const authStore = await seedAuthStore(
@@ -179,7 +195,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     const policy = compileCodexPolicy({ prompt: task.prompt, workdir: '/workspace' });
     await materializeCodexHome(policy, runHome);
 
-    const preAgent = await snapshotWorkspace(workspace, snapshots);
+    const preAgent = await snapshotWorkspace(workspace, snapshots, images);
 
     const agentRun = await withPhaseNetworks(attempt, 'agent', (networks) =>
       withProxy(
@@ -189,6 +205,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
           outwardNetwork: networks['proxy-egress'] ?? '',
           allowlist: PROVIDER_ALLOWLIST,
           ports: [443],
+          images,
         },
         async (handle) => {
           const proxied = proxyEnvironment(handle);
@@ -200,6 +217,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
               network: networks.egress ?? '',
               env: proxied,
               timeoutSeconds: timeouts.connectivity_smoke_seconds,
+              images,
             });
 
             await phase('agent');
@@ -207,7 +225,9 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
               prompt: task.prompt,
               policy,
               network: networks.egress ?? '',
-              env: { ...proxied, ...options.agentEnv },
+              // The harness's own proxy configuration is last: an injected environment
+              // may add to the container, never redirect its egress.
+              env: { ...options.injection?.agentEnv, ...proxied },
               mounts: [
                 workspaceMount(workspace),
                 dependencyMount(agentDependencies),
@@ -217,8 +237,8 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
               graceSeconds: timeouts.termination_grace_seconds,
               artifactDir: options.artifactDir,
               secrets: collectSecrets(await readAuth(authStore.file)),
-              ...(options.agentImage === undefined ? {} : { image: options.agentImage }),
-              onTimeout: () => restoreWorkspace(workspace, preAgent),
+              images: agentImages,
+              onTimeout: () => restoreWorkspace(workspace, preAgent, images),
             });
           } finally {
             await writeProxyRecords(handle, options.artifactDir);
@@ -242,7 +262,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     }
 
     await phase('diff');
-    const implementation = await snapshotWorkspace(workspace, snapshots);
+    const implementation = await snapshotWorkspace(workspace, snapshots, images);
     const changes = sourceDiff(tar, await snapshots.read(implementation.hash));
     const validated = validateChanges(changes, task.implementation_paths);
     await writeFile(
@@ -264,6 +284,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       commands: task.verification.commands,
       artifactDir: options.artifactDir,
       graceSeconds: timeouts.termination_grace_seconds,
+      images,
     });
 
     await writeLog(
@@ -304,7 +325,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       dependency_cache_key: cacheKey,
       ...networkPolicySection(),
     };
-    manifest.runtime = runtimeSection(digests);
+    manifest.runtime = runtimeSection(agentImages);
     manifest.snapshots = { pre_agent: preAgent.hash, implementation: implementation.hash };
 
     report = {

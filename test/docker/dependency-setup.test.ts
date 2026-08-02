@@ -7,8 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { exportCommit } from '../../src/git/export.js';
 import { DependencyCache, ensureDependencySnapshot, SetupError } from '../../src/deps/setup.js';
 import { newAttemptId } from '../../src/volume/naming.js';
+import { runtimeImages } from '../helpers/images.js';
 import { createRepo, createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { readTar } from '../../src/artifacts/tar.js';
+import type { RuntimeImages } from '../../src/docker/images.js';
 
 const REGISTRY_NETWORK = 'bridge';
 const NPM_CI = ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'];
@@ -19,9 +21,11 @@ let tar: Buffer;
 let lifecycleTar: Buffer;
 let cache: DependencyCache;
 let cacheRoot: string;
+let images: RuntimeImages;
 const coldKey = 'sha256:cold';
 
 beforeAll(async () => {
+  images = await runtimeImages();
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
 
@@ -47,6 +51,7 @@ describe('dependency setup', () => {
       workspaceTar: tar,
       installCommand: NPM_CI,
       network: REGISTRY_NETWORK,
+      images,
     });
 
     expect(result.cached).toBe(false);
@@ -67,6 +72,7 @@ describe('dependency setup', () => {
       workspaceTar: tar,
       installCommand: NPM_CI,
       network: REGISTRY_NETWORK,
+      images,
     });
 
     expect(result.cached).toBe(true);
@@ -81,6 +87,7 @@ describe('dependency setup', () => {
       workspaceTar: lifecycleTar,
       installCommand: ['npm', 'install', '--ignore-scripts', '--no-audit', '--no-fund'],
       network: 'none',
+      images,
     });
 
     expect(denied.output).not.toContain('POSTINSTALL_RAN');
@@ -94,6 +101,7 @@ describe('dependency setup', () => {
       workspaceTar: lifecycleTar,
       installCommand: ['npm', 'install', '--no-audit', '--no-fund'],
       network: 'none',
+      images,
     });
 
     expect(allowed.output).toContain('POSTINSTALL_RAN');
@@ -115,6 +123,7 @@ describe('dependency setup', () => {
         ].join('; '),
       ],
       network: REGISTRY_NETWORK,
+      images,
     });
 
     expect(probe.output).toContain('NETS=eth0,lo,');
@@ -135,6 +144,7 @@ describe('dependency setup', () => {
         // after npm's ~70s registry retry ladder.
         installCommand: [...NPM_CI, '--offline'],
         network: 'none',
+        images,
       }),
     ).rejects.toThrow(SetupError);
 

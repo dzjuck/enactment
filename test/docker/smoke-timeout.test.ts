@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { ArtifactStore } from '../../src/artifacts/store.js';
 import { IMAGE_PINS } from '../../src/config/pins.js';
+import type { RuntimeImages } from '../../src/docker/images.js';
 import { runContainer } from '../../src/docker/run.js';
 import { exportCommit } from '../../src/git/export.js';
 import { withPhaseNetworks } from '../../src/net/manage.js';
@@ -16,6 +17,7 @@ import { newAttemptId } from '../../src/volume/naming.js';
 import { restoreWorkspace, snapshotWorkspace } from '../../src/volume/snapshot.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../../src/volume/workspace.js';
 import { ORIGIN_PORT, startOriginContainer } from '../helpers/origin-server.js';
+import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
 const ORIGIN = 'ai-harness-smoke-origin';
@@ -24,8 +26,10 @@ let repo: TargetRepo;
 let tar: Buffer;
 let store: ArtifactStore;
 let storeRoot: string;
+let images: RuntimeImages;
 
 beforeAll(async () => {
+  images = await runtimeImages();
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
   storeRoot = await mkdtemp(join(tmpdir(), 'harness-smoke-'));
@@ -57,6 +61,7 @@ async function inAgentPhase<T>(
           outwardNetwork: outward,
           allowlist: [ORIGIN],
           ports: [ORIGIN_PORT],
+          images,
         },
         (handle) => run({ network: networks.egress ?? '', env: proxyEnvironment(handle) }),
       );
@@ -71,7 +76,7 @@ const SMOKE_URL = `http://${ORIGIN}:${ORIGIN_PORT}/`;
 describe('provider connectivity smoke test', () => {
   it('control: passes against a reachable allowlisted origin', async () => {
     const result = await inAgentPhase(({ network, env }) =>
-      providerSmokeTest({ url: SMOKE_URL, network, env, timeoutSeconds: 20 }),
+      providerSmokeTest({ url: SMOKE_URL, network, env, timeoutSeconds: 20, images }),
     );
 
     expect(result.ok).toBe(true);
@@ -82,7 +87,7 @@ describe('provider connectivity smoke test', () => {
 
     const failure = await inAgentPhase(
       ({ network, env }) =>
-        providerSmokeTest({ url: SMOKE_URL, network, env, timeoutSeconds: 15 }).catch(
+        providerSmokeTest({ url: SMOKE_URL, network, env, timeoutSeconds: 15, images }).catch(
           (cause: unknown) => cause,
         ),
       { withOrigin: false },
@@ -99,7 +104,7 @@ describe('provider connectivity smoke test', () => {
     const failure = await inAgentPhase(
       ({ network, env }) =>
         withProviderSmokeTest(
-          { url: SMOKE_URL, network, env, timeoutSeconds: 15 },
+          { url: SMOKE_URL, network, env, timeoutSeconds: 15, images },
           async () => {
             agentStarted = true;
             return 'agent ran';
@@ -131,7 +136,7 @@ describe('termination ladder against a real container', () => {
   }, 120_000);
 
   it('restores the pre-invocation workspace after a timeout', async () => {
-    const volume = await createWorkspaceVolume(newAttemptId(), tar);
+    const volume = await createWorkspaceVolume(newAttemptId(), tar, images);
 
     try {
       const before = await runContainer({
@@ -140,7 +145,7 @@ describe('termination ladder against a real container', () => {
         network: 'none',
         mounts: [workspaceMount(volume)],
       });
-      const snapshot = await snapshotWorkspace(volume, store);
+      const snapshot = await snapshotWorkspace(volume, store, images);
 
       const timedOut = await runContainer(
         {
@@ -157,7 +162,7 @@ describe('termination ladder against a real container', () => {
       );
       expect(timedOut.status).toBe('timeout');
 
-      await restoreWorkspace(volume, snapshot);
+      await restoreWorkspace(volume, snapshot, images);
 
       const after = await runContainer({
         image: IMAGE_PINS.agent.tag,

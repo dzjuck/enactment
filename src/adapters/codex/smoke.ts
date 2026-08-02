@@ -1,4 +1,4 @@
-import { IMAGE_PINS } from '../../config/pins.js';
+import type { RuntimeImages } from '../../docker/images.js';
 import { runContainer } from '../../docker/run.js';
 import { PhaseFailure } from '../../run/failure.js';
 
@@ -8,7 +8,7 @@ export interface SmokeOptions {
   network: string;
   env: Record<string, string>;
   timeoutSeconds: number;
-  image?: string;
+  images: RuntimeImages;
 }
 
 export interface SmokeResult {
@@ -29,7 +29,7 @@ export async function providerSmokeTest(options: SmokeOptions): Promise<SmokeRes
 
   const result = await runContainer(
     {
-      image: options.image ?? IMAGE_PINS.agent.tag,
+      image: options.images.agent.reference,
       argv: [
         'curl',
         '-sS',

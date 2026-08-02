@@ -1,20 +1,23 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { IMAGE_PINS } from '../../src/config/pins.js';
+import type { RuntimeImages } from '../../src/docker/images.js';
 import { exportCommit } from '../../src/git/export.js';
 import { runContainer, type RunResult } from '../../src/docker/run.js';
 import { newAttemptId } from '../../src/volume/naming.js';
 import { initSyntheticGit, SYNTHETIC_COMMIT_SUBJECT } from '../../src/volume/synthetic-git.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../../src/volume/workspace.js';
+import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
 let repo: TargetRepo;
 let tar: Buffer;
 let volume: string;
+let images: RuntimeImages;
 const created: string[] = [];
 
 async function seed(): Promise<string> {
-  const name = await createWorkspaceVolume(newAttemptId(), tar);
+  const name = await createWorkspaceVolume(newAttemptId(), tar, images);
   created.push(name);
   return name;
 }
@@ -30,10 +33,11 @@ function inWorkspace(name: string, argv: string[], env?: Record<string, string>)
 }
 
 beforeAll(async () => {
+  images = await runtimeImages();
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
   volume = await seed();
-  await initSyntheticGit(volume);
+  await initSyntheticGit(volume, images);
 });
 
 afterAll(async () => {

@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { ArtifactStore } from '../../src/artifacts/store.js';
 import { IMAGE_PINS } from '../../src/config/pins.js';
+import type { RuntimeImages } from '../../src/docker/images.js';
 import { exportCommit } from '../../src/git/export.js';
 import { runContainer, type RunResult } from '../../src/docker/run.js';
 import { SnapshotError, restoreWorkspace, snapshotWorkspace } from '../../src/volume/snapshot.js';
@@ -16,6 +17,7 @@ import {
   removeVolume,
   workspaceMount,
 } from '../../src/volume/workspace.js';
+import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { readTar } from '../../src/artifacts/tar.js';
 
@@ -23,9 +25,11 @@ let repo: TargetRepo;
 let tar: Buffer;
 let store: ArtifactStore;
 let storeRoot: string;
+let images: RuntimeImages;
 const created: string[] = [];
 
 beforeAll(async () => {
+  images = await runtimeImages();
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
   storeRoot = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
@@ -42,7 +46,7 @@ afterEach(async () => {
 });
 
 async function seed(): Promise<string> {
-  const name = await createWorkspaceVolume(newAttemptId(), tar);
+  const name = await createWorkspaceVolume(newAttemptId(), tar, images);
   created.push(name);
   return name;
 }
@@ -72,7 +76,7 @@ describe('workspace snapshots', () => {
     const volume = await seed();
     const before = await listing(volume);
 
-    const snapshot = await snapshotWorkspace(volume, store);
+    const snapshot = await snapshotWorkspace(volume, store, images);
 
     await inWorkspace(volume, [
       'sh',
@@ -80,7 +84,7 @@ describe('workspace snapshots', () => {
       'echo mutated > /workspace/README.md && rm /workspace/AGENTS.md && touch /workspace/EXTRA',
     ]);
 
-    await restoreWorkspace(volume, snapshot);
+    await restoreWorkspace(volume, snapshot, images);
 
     const after = await listing(volume);
     const readme = await inWorkspace(volume, ['cat', '/workspace/README.md']);
@@ -92,7 +96,7 @@ describe('workspace snapshots', () => {
 
   it('stores the snapshot as a read-only, content-addressed artifact', async () => {
     const volume = await seed();
-    const snapshot = await snapshotWorkspace(volume, store);
+    const snapshot = await snapshotWorkspace(volume, store, images);
 
     expect(snapshot.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(snapshot.path).toContain(snapshot.hash.slice('sha256:'.length));
@@ -104,18 +108,18 @@ describe('workspace snapshots', () => {
   it('hashes an unchanged workspace identically', async () => {
     const volume = await seed();
 
-    const first = await snapshotWorkspace(volume, store);
-    const second = await snapshotWorkspace(volume, store);
+    const first = await snapshotWorkspace(volume, store, images);
+    const second = await snapshotWorkspace(volume, store, images);
 
     expect(second.hash).toBe(first.hash);
   });
 
   it('restores into a fresh, empty volume', async () => {
     const source = await seed();
-    const snapshot = await snapshotWorkspace(source, store);
+    const snapshot = await snapshotWorkspace(source, store, images);
 
     const target = await emptyVolume();
-    await restoreWorkspace(target, snapshot);
+    await restoreWorkspace(target, snapshot, images);
 
     expect((await listing(target)).stdout).toBe((await listing(source)).stdout);
   });
@@ -128,7 +132,7 @@ describe('workspace snapshots', () => {
       'mkdir -p /workspace/node_modules/pkg && touch /workspace/node_modules/pkg/index.js',
     ]);
 
-    const snapshot = await snapshotWorkspace(volume, store);
+    const snapshot = await snapshotWorkspace(volume, store, images);
     const entries = readTar(await store.read(snapshot.hash)).map((entry) => entry.path);
 
     expect(entries.filter((path) => path.includes('node_modules'))).toEqual([]);
@@ -137,10 +141,10 @@ describe('workspace snapshots', () => {
 
   it('preserves symlinks and modes across the round trip', async () => {
     const source = await seed();
-    const snapshot = await snapshotWorkspace(source, store);
+    const snapshot = await snapshotWorkspace(source, store, images);
 
     const target = await emptyVolume();
-    await restoreWorkspace(target, snapshot);
+    await restoreWorkspace(target, snapshot, images);
 
     const link = await inWorkspace(target, ['readlink', '/workspace/docs/readme.md']);
     const executable = await inWorkspace(target, [
@@ -159,7 +163,7 @@ describe('workspace snapshots', () => {
 
     const corrupt = await store.put(Buffer.from('this is not a tar archive'), '.tar');
 
-    await expect(restoreWorkspace(volume, corrupt)).rejects.toThrow(SnapshotError);
+    await expect(restoreWorkspace(volume, corrupt, images)).rejects.toThrow(SnapshotError);
     expect((await listing(volume)).stdout).toBe(before.stdout);
   });
 });

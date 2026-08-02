@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { IMAGE_PINS } from '../config/pins.js';
+import type { RuntimeImages } from '../docker/images.js';
 import { runContainer } from '../docker/run.js';
 import { newAttemptId } from '../volume/naming.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
@@ -59,6 +59,7 @@ export interface SetupOptions {
   workspaceTar: Buffer;
   installCommand: readonly string[];
   network: string;
+  images: RuntimeImages;
 }
 
 export interface DependencyResult {
@@ -97,11 +98,15 @@ export async function ensureDependencySnapshot(options: SetupOptions): Promise<D
     };
   }
 
-  const volume = await createWorkspaceVolume(`${options.attempt}-setup-${newAttemptId()}`, options.workspaceTar);
+  const volume = await createWorkspaceVolume(
+    `${options.attempt}-setup-${newAttemptId()}`,
+    options.workspaceTar,
+    options.images,
+  );
 
   try {
     const install = await runContainer({
-      image: IMAGE_PINS.setup.tag,
+      image: options.images.setup.reference,
       argv: [...options.installCommand],
       network: options.network,
       mounts: [workspaceMount(volume)],
@@ -114,7 +119,7 @@ export async function ensureDependencySnapshot(options: SetupOptions): Promise<D
     }
 
     const capture = await runContainer({
-      image: IMAGE_PINS.setup.tag,
+      image: options.images.setup.reference,
       // An install that produced no packages still yields a valid, empty snapshot.
       argv: ['sh', '-c', `mkdir -p /workspace/${NODE_MODULES} && exec ${CAPTURE_ARGV.join(' ')}`],
       network: 'none',

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { sha256, type ArtifactStore, type StoredArtifact } from '../artifacts/store.js';
-import { IMAGE_PINS } from '../config/pins.js';
+import type { RuntimeImages } from '../docker/images.js';
 import { runContainer } from '../docker/run.js';
 import { WORKSPACE_PATH, workspaceMount } from './workspace.js';
 
@@ -47,9 +47,10 @@ const RESTORE_SCRIPT = [
 export async function snapshotWorkspace(
   volume: string,
   store: ArtifactStore,
+  images: RuntimeImages,
 ): Promise<StoredArtifact> {
   const result = await runContainer({
-    image: IMAGE_PINS.setup.tag,
+    image: images.setup.reference,
     argv: SNAPSHOT_ARGV,
     network: 'none',
     mounts: [workspaceMount(volume)],
@@ -62,7 +63,11 @@ export async function snapshotWorkspace(
   return store.put(result.stdoutBytes);
 }
 
-export async function restoreWorkspace(volume: string, snapshot: StoredArtifact): Promise<void> {
+export async function restoreWorkspace(
+  volume: string,
+  snapshot: StoredArtifact,
+  images: RuntimeImages,
+): Promise<void> {
   const bytes = await readFile(snapshot.path);
 
   if (sha256(bytes) !== snapshot.hash) {
@@ -71,7 +76,7 @@ export async function restoreWorkspace(volume: string, snapshot: StoredArtifact)
 
   const result = await runContainer(
     {
-      image: IMAGE_PINS.setup.tag,
+      image: images.setup.reference,
       argv: ['sh', '-c', RESTORE_SCRIPT],
       network: 'none',
       mounts: [workspaceMount(volume)],

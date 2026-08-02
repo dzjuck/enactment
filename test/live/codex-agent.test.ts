@@ -10,6 +10,7 @@ import { authMount, prepareRunAuth, seedAuthStore } from '../../src/auth/store.j
 import { IMAGE_PINS, PROVIDER_ALLOWLIST } from '../../src/config/pins.js';
 import { DependencyCache, ensureDependencySnapshot } from '../../src/deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../../src/deps/volume.js';
+import type { RuntimeImages } from '../../src/docker/images.js';
 import { runContainer } from '../../src/docker/run.js';
 import { exportCommit } from '../../src/git/export.js';
 import { withPhaseNetworks } from '../../src/net/manage.js';
@@ -17,6 +18,7 @@ import { proxyEnvironment, withProxy } from '../../src/proxy/container.js';
 import { newAttemptId } from '../../src/volume/naming.js';
 import { initSyntheticGit } from '../../src/volume/synthetic-git.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../../src/volume/workspace.js';
+import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
 const PROMPT =
@@ -29,8 +31,10 @@ let tar: Buffer;
 let deps: Buffer;
 let root: string;
 let runHome: string;
+let images: RuntimeImages;
 
 beforeAll(async () => {
+  images = await runtimeImages();
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
 
@@ -43,6 +47,7 @@ beforeAll(async () => {
     workspaceTar: tar,
     installCommand: ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
     network: 'bridge',
+    images,
   });
   deps = await cache.read('sha256:live-agent');
 
@@ -63,11 +68,11 @@ afterAll(async () => {
 describe('real Codex agent run', () => {
   it('completes the fixture task and modifies files under /workspace', async () => {
     const attempt = newAttemptId();
-    const workspace = await createWorkspaceVolume(attempt, tar);
-    const depsVolume = await createDependencyVolume(attempt, 'agent', deps);
+    const workspace = await createWorkspaceVolume(attempt, tar, images);
+    const depsVolume = await createDependencyVolume(attempt, 'agent', deps, images);
     const artifacts = join(root, 'artifacts');
 
-    await initSyntheticGit(workspace);
+    await initSyntheticGit(workspace, images);
     const policy = compileCodexPolicy({ prompt: PROMPT, workdir: '/workspace' });
     await materializeCodexHome(policy, runHome);
 
@@ -87,6 +92,7 @@ describe('real Codex agent run', () => {
             outwardNetwork: networks['proxy-egress'] ?? '',
             allowlist: PROVIDER_ALLOWLIST,
             ports: [443],
+            images,
           },
           async (handle) => {
             const run = await runCodexAgent({
@@ -102,6 +108,7 @@ describe('real Codex agent run', () => {
               timeoutSeconds: 1200,
               graceSeconds: 10,
               artifactDir: artifacts,
+              images,
             });
 
             const records = await handle.records();

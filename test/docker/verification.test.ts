@@ -8,6 +8,7 @@ import { ArtifactStore, type StoredArtifact } from '../../src/artifacts/store.js
 import { DependencyCache, ensureDependencySnapshot } from '../../src/deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../../src/deps/volume.js';
 import { sourceDiff } from '../../src/diff/source-diff.js';
+import type { RuntimeImages } from '../../src/docker/images.js';
 import { runContainer } from '../../src/docker/run.js';
 import { IMAGE_PINS } from '../../src/config/pins.js';
 import { exportCommit } from '../../src/git/export.js';
@@ -18,6 +19,7 @@ import {
 } from '../../src/verify/run.js';
 import { newAttemptId } from '../../src/volume/naming.js';
 import { volumeExists } from '../../src/volume/workspace.js';
+import { runtimeImages } from '../helpers/images.js';
 import { commitAll, createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
 const SLUGIFY = `export function slugify(title) {
@@ -36,8 +38,10 @@ let root: string;
 let deps: Buffer;
 let passing: StoredArtifact;
 let failing: StoredArtifact;
+let images: RuntimeImages;
 
 beforeAll(async () => {
+  images = await runtimeImages();
   repo = await createTargetRepo();
   root = await mkdtemp(join(tmpdir(), 'harness-verify-'));
   store = new ArtifactStore(join(root, 'artifacts'));
@@ -58,6 +62,7 @@ beforeAll(async () => {
     workspaceTar: original,
     installCommand: ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
     network: 'bridge',
+    images,
   });
   deps = await cache.read('sha256:verification-tests');
 }, 600_000);
@@ -80,6 +85,7 @@ async function verify(
     dependencySnapshot: deps,
     commands,
     artifactDir,
+    images,
     timeoutSeconds: 120,
     graceSeconds: 2,
     ...overrides,
@@ -129,7 +135,7 @@ describe('verification phase', () => {
 
   it('uses a fresh dependency volume, never the agent one', async () => {
     const attempt = newAttemptId();
-    const agentDeps = await createDependencyVolume(attempt, 'agent', deps);
+    const agentDeps = await createDependencyVolume(attempt, 'agent', deps, images);
 
     try {
       await runContainer({

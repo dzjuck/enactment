@@ -80,7 +80,23 @@ export async function resolveDockerPlatform(exec: DockerExec = dockerExec): Prom
   return platform.trim();
 }
 
-export interface ResolveImageDigestsOptions {
+/**
+ * One role's verified runtime identity.
+ *
+ * `reference` is what containers are started from — the immutable image ID, not the mutable
+ * tag, which is a build alias only. `digest` is the content identity the pin table declares
+ * and the run manifest records. Keeping both means "what ran" and "what was recorded" are the
+ * same value rather than two independently resolved ones.
+ */
+export interface RuntimeImage {
+  role: ImageRole;
+  reference: string;
+  digest: string;
+}
+
+export type RuntimeImages = Record<ImageRole, RuntimeImage>;
+
+export interface ResolveRuntimeImagesOptions {
   /** The digest table for the platform; defaults to the committed pins. */
   pins?: Record<ImageRole, string>;
   platform?: string;
@@ -88,17 +104,17 @@ export interface ResolveImageDigestsOptions {
 }
 
 /**
- * Resolve every runtime image to a digest and refuse anything that is not exactly its pin.
+ * Resolve every runtime image and refuse anything that is not exactly its pin.
  *
  * The pin table is validated first, so a missing or unsupported entry is a configuration
  * error reported before a single image is inspected — an unpinned image never becomes a
  * runnable reference.
  */
-export async function resolveImageDigests({
+export async function resolveRuntimeImages({
   pins,
   platform,
   exec = dockerExec,
-}: ResolveImageDigestsOptions = {}): Promise<Record<ImageRole, string>> {
+}: ResolveRuntimeImagesOptions = {}): Promise<RuntimeImages> {
   const target = platform ?? (await resolveDockerPlatform(exec));
 
   const table = pins ?? BUILT_IMAGE_PINS[target];
@@ -116,21 +132,22 @@ export async function resolveImageDigests({
     }
   }
 
-  const digests = {} as Record<ImageRole, string>;
+  const images = {} as RuntimeImages;
 
   for (const role of IMAGE_ROLES) {
     const pin = IMAGE_PINS[role];
     const pinned = table[role] ?? '';
-    const resolved = await resolveContentDigest(pin.tag, exec);
+    const digest = await resolveContentDigest(pin.tag, exec);
 
-    if (pinned !== resolved) {
+    if (pinned !== digest) {
       throw new ImagePinError(
-        `image ${role} (${pin.tag}) has content digest ${resolved}, but is pinned to ${pinned}`,
+        `image ${role} (${pin.tag}) has content digest ${digest}, but is pinned to ${pinned}`,
       );
     }
 
-    digests[role] = resolved;
+    // Resolved only after the pin holds: an unverified tag never yields a runnable reference.
+    images[role] = { role, reference: await resolveDigest(pin.tag, exec), digest };
   }
 
-  return digests;
+  return images;
 }

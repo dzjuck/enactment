@@ -1,26 +1,14 @@
-import { runTask, type RunOptions } from './run/orchestrator.js';
+import { CliUsageError, parseRunOptions } from './run/options.js';
+import { runTask } from './run/orchestrator.js';
 
-function optionValue(argv: string[], name: string): string | undefined {
-  const index = argv.indexOf(`--${name}`);
-  return index === -1 ? undefined : argv[index + 1];
-}
+let options;
 
-function parseAgentEnv(): Record<string, string> | undefined {
-  const raw = process.env.HARNESS_AGENT_ENV;
-  return raw === undefined ? undefined : (JSON.parse(raw) as Record<string, string>);
-}
-
-function usage(): never {
-  process.stderr.write('usage: harness run <task.yml> --repo <path> [--artifacts <dir>]\n');
+try {
+  options = parseRunOptions(process.argv.slice(2));
+} catch (error) {
+  process.stderr.write(`${error instanceof CliUsageError ? error.message : String(error)}\n`);
   process.exit(2);
 }
-
-const [command, taskFile, ...rest] = process.argv.slice(2);
-
-if (command !== 'run' || taskFile === undefined) usage();
-
-const repoPath = optionValue(rest, 'repo');
-if (repoPath === undefined) usage();
 
 const controller = new AbortController();
 let interrupted = false;
@@ -34,30 +22,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 
-const options: RunOptions = {
-  taskFile,
-  repoPath,
-  artifactDir: optionValue(rest, 'artifacts') ?? 'artifacts',
-  signal: controller.signal,
-};
-
-const agentImage = optionValue(rest, 'agent-image');
-if (agentImage !== undefined) options.agentImage = agentImage;
-
-const agentEnv = parseAgentEnv();
-if (agentEnv !== undefined) options.agentEnv = agentEnv;
-
-if (process.env.HARNESS_SOURCE_CODEX_HOME !== undefined) {
-  options.sourceCodexHome = process.env.HARNESS_SOURCE_CODEX_HOME;
-}
-if (process.env.HARNESS_STORE_DIR !== undefined) {
-  options.storeDirectory = process.env.HARNESS_STORE_DIR;
-}
-if (process.env.HARNESS_DEPS_DIR !== undefined) {
-  options.dependencyCacheDirectory = process.env.HARNESS_DEPS_DIR;
-}
-
-const report = await runTask(options);
+const report = await runTask({ ...options, signal: controller.signal });
 
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 process.exit(report.status === 'succeeded' && !interrupted ? 0 : 1);

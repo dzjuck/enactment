@@ -1,7 +1,7 @@
 import { execa } from 'execa';
 
-import { IMAGE_PINS } from '../config/pins.js';
 import type { Mount } from '../docker/args.js';
+import type { RuntimeImages } from '../docker/images.js';
 import { runContainer } from '../docker/run.js';
 import { attemptLabels, workspaceVolumeName } from './naming.js';
 
@@ -40,7 +40,11 @@ export async function createVolume(name: string, labels: Record<string, string>)
  * volume inherits the ownership of the image's mount point (uid/gid 1001), so nothing here
  * needs root.
  */
-export async function createWorkspaceVolume(attempt: string, tar: Buffer): Promise<string> {
+export async function createWorkspaceVolume(
+  attempt: string,
+  tar: Buffer,
+  images: RuntimeImages,
+): Promise<string> {
   const name = workspaceVolumeName(attempt);
 
   if (await volumeExists(name)) {
@@ -52,7 +56,7 @@ export async function createWorkspaceVolume(attempt: string, tar: Buffer): Promi
   try {
     const result = await runContainer(
       {
-        image: IMAGE_PINS.setup.tag,
+        image: images.setup.reference,
         argv: [
           'tar',
           '--extract',

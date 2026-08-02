@@ -6,9 +6,11 @@ import { execa } from 'execa';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { AUTH_FILE } from '../../src/auth/store.js';
+import { resolveRuntimeImages, type RuntimeImage } from '../../src/docker/images.js';
+import type { RunInjection } from '../../src/run/inject.js';
 import { runTask, RUN_PHASES, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
 import { createTargetRepo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { STUB_AGENT_IMAGE, buildStubAgent, cannedEvents } from '../helpers/stub-agent.js';
+import { buildStubAgent, cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 const CANARY = 'sk-orchestrator-canary-77d3f19a';
 const LABEL = 'ai-harness.attempt';
@@ -24,6 +26,8 @@ const SLUGIFY = `export function slugify(title) {
 let repo: TargetRepo;
 let root: string;
 let taskFile: string;
+let stub: RuntimeImage;
+let runnerScript: string;
 const dirs: string[] = [];
 
 /** The stub writes the implementation, so the whole pipeline can reach a real commit. */
@@ -36,9 +40,15 @@ function stubEnv(mode = 'write'): Record<string, string> {
   };
 }
 
+/** The only seam a test may use: an explicit runtime identity, recorded like any other. */
+function injection(mode = 'write'): RunInjection {
+  return { agent: stub, agentEnv: stubEnv(mode) };
+}
+
 beforeAll(async () => {
   await buildStubAgent();
   await execa('npm', ['run', 'build']);
+  stub = await stubAgentImage();
 
   repo = await createTargetRepo();
   root = await mkdtemp(join(tmpdir(), 'harness-run-'));
@@ -65,6 +75,26 @@ beforeAll(async () => {
       '  connectivity_smoke_seconds: 20',
       '  agent_seconds: 120',
       '  termination_grace_seconds: 2',
+      '',
+    ].join('\n'),
+  );
+
+  // The production CLI has no image or environment override, so the interrupt test drives
+  // `runTask` in a child process of its own rather than through an escape hatch.
+  runnerScript = join(root, 'run-with-stub.mjs');
+  await writeFile(
+    runnerScript,
+    [
+      `import { runTask } from ${JSON.stringify(join(process.cwd(), 'dist/run/orchestrator.js'))};`,
+      'const controller = new AbortController();',
+      "for (const signal of ['SIGINT', 'SIGTERM']) {",
+      '  process.on(signal, () => { controller.abort(); });',
+      '}',
+      'const report = await runTask({',
+      '  ...JSON.parse(process.env.HARNESS_TEST_RUN),',
+      '  signal: controller.signal,',
+      '});',
+      "process.exit(report.status === 'succeeded' ? 0 : 1);",
       '',
     ].join('\n'),
   );
@@ -107,8 +137,7 @@ async function run(
     sourceCodexHome: join(root, 'codex-source'),
     storeDirectory: join(root, 'store'),
     dependencyCacheDirectory: join(root, 'deps'),
-    agentImage: STUB_AGENT_IMAGE,
-    agentEnv: stubEnv(),
+    injection: injection(),
     ...overrides,
   });
 
@@ -179,7 +208,7 @@ describe('orchestrator', () => {
   );
 
   it('classifies an agent timeout and restores the pre-invocation workspace', async () => {
-    const { report, artifacts } = await run({ agentEnv: stubEnv('hang') });
+    const { report, artifacts } = await run({ injection: injection('hang') });
 
     expect(report.status).toBe('failed');
     expect(report.failedPhase).toBe('agent');
@@ -221,6 +250,23 @@ describe('orchestrator', () => {
     expect(manifest.runtime.proxy_image_digest).toMatch(/^sha256:/);
   }, 900_000);
 
+  it('records the digest of the image it actually ran, not the production agent pin', async () => {
+    const { artifacts } = await run();
+    const production = await resolveRuntimeImages();
+
+    const manifest = JSON.parse(await readFile(join(artifacts, 'run-manifest.json'), 'utf8')) as {
+      runtime: Record<string, string>;
+    };
+
+    expect(manifest.runtime.agent_image_digest).toBe(stub.digest);
+    expect(manifest.runtime.agent_image_digest).not.toBe(production.agent.digest);
+
+    // Every role the injection did not replace is still the production identity.
+    expect(manifest.runtime.verifier_image_digest).toBe(production.verifier.digest);
+    expect(manifest.runtime.setup_image_digest).toBe(production.setup.digest);
+    expect(manifest.runtime.proxy_image_digest).toBe(production.proxy.digest);
+  }, 900_000);
+
   it('writes no raw authentication material into the artifact tree', async () => {
     const { artifacts } = await run();
 
@@ -232,29 +278,20 @@ describe('orchestrator', () => {
   it('tears down every attempt resource when the run is interrupted', async () => {
     const artifacts = await artifactDir();
 
-    const child = execa(
-      'node',
-      [
-        'dist/cli.js',
-        'run',
-        taskFile,
-        '--repo',
-        repo.dir,
-        '--artifacts',
-        artifacts,
-        '--agent-image',
-        STUB_AGENT_IMAGE,
-      ],
-      {
-        reject: false,
-        env: {
-          HARNESS_SOURCE_CODEX_HOME: join(root, 'codex-source'),
-          HARNESS_STORE_DIR: join(root, 'store'),
-          HARNESS_DEPS_DIR: join(root, 'deps'),
-          HARNESS_AGENT_ENV: JSON.stringify(stubEnv()),
-        },
+    const child = execa('node', [runnerScript], {
+      reject: false,
+      env: {
+        HARNESS_TEST_RUN: JSON.stringify({
+          taskFile,
+          repoPath: repo.dir,
+          artifactDir: artifacts,
+          sourceCodexHome: join(root, 'codex-source'),
+          storeDirectory: join(root, 'store'),
+          dependencyCacheDirectory: join(root, 'deps'),
+          injection: injection(),
+        }),
       },
-    );
+    });
 
     await new Promise((resolve) => setTimeout(resolve, 6_000));
     child.kill('SIGINT');

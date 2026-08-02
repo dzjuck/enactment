@@ -6,6 +6,7 @@ import { execa } from 'execa';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { IMAGE_PINS } from '../../src/config/pins.js';
+import type { RuntimeImages } from '../../src/docker/images.js';
 import { runContainer, type RunResult } from '../../src/docker/run.js';
 import { withPhaseNetworks } from '../../src/net/manage.js';
 import {
@@ -15,15 +16,18 @@ import {
   type ProxyHandle,
 } from '../../src/proxy/container.js';
 import { newAttemptId } from '../../src/volume/naming.js';
+import { runtimeImages } from '../helpers/images.js';
 import { ORIGIN_PORT, startOriginContainer, type OriginContainer } from '../helpers/origin-server.js';
 
 const ALLOWED_ORIGIN = 'ai-harness-origin-allowed';
 const DENIED_ORIGIN = 'ai-harness-origin-denied';
 
 let artifactDir: string;
+let images: RuntimeImages;
 const origins: OriginContainer[] = [];
 
 beforeAll(async () => {
+  images = await runtimeImages();
   artifactDir = await mkdtemp(join(tmpdir(), 'harness-proxy-artifacts-'));
 });
 
@@ -68,6 +72,7 @@ async function inAgentPhase<T>(
           outwardNetwork: outward,
           allowlist,
           ports: [ORIGIN_PORT],
+          images,
         },
         (handle) => run({ handle, agentNetwork: networks.egress ?? '' }),
       );

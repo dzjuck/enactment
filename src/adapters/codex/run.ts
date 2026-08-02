@@ -2,8 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createRedactor } from '../../artifacts/redact.js';
-import { IMAGE_PINS } from '../../config/pins.js';
 import type { ContainerSpec, Mount } from '../../docker/args.js';
+import type { RuntimeImages } from '../../docker/images.js';
 import { runContainer } from '../../docker/run.js';
 import type { CompiledAgentPolicy } from '../types.js';
 import { extractUsage, parseEvents, type AgentEvent, type UsageMetadata } from './events.js';
@@ -19,7 +19,7 @@ export interface AgentRunOptions {
   timeoutSeconds: number;
   graceSeconds: number;
   artifactDir: string;
-  image?: string;
+  images: RuntimeImages;
   workdir?: string;
   policy?: CompiledAgentPolicy;
   secrets?: readonly string[];
@@ -56,11 +56,12 @@ export function buildAgentSpec(options: AgentRunOptions): ContainerSpec {
   const policy = policyFor(options);
 
   return {
-    image: options.image ?? IMAGE_PINS.agent.tag,
+    image: options.images.agent.reference,
     argv: policy.args,
     network: options.network,
     workdir: options.workdir ?? '/workspace',
-    env: { ...policy.env, ...options.env },
+    // The compiled policy wins: nothing a caller supplies may displace CODEX_HOME.
+    env: { ...options.env, ...policy.env },
     mounts: options.mounts,
     // No stdin: Codex reads it when it is not a TTY and would wait for input that never comes.
   };

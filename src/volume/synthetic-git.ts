@@ -1,4 +1,4 @@
-import { IMAGE_PINS } from '../config/pins.js';
+import type { RuntimeImages } from '../docker/images.js';
 import { runContainer } from '../docker/run.js';
 import { WORKSPACE_PATH, workspaceMount } from './workspace.js';
 
@@ -44,9 +44,9 @@ const INIT_SCRIPT = [
  * Give the agent a disposable single-commit repository (DESIGN.md §10). It exposes no
  * canonical history, refs, remotes or credentials, and is discarded with the attempt.
  */
-export async function initSyntheticGit(volumeName: string): Promise<void> {
+export async function initSyntheticGit(volumeName: string, images: RuntimeImages): Promise<void> {
   const result = await runContainer({
-    image: IMAGE_PINS.agent.tag,
+    image: images.agent.reference,
     argv: ['sh', '-c', INIT_SCRIPT],
     network: 'none',
     workdir: WORKSPACE_PATH,

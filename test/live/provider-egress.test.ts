@@ -6,6 +6,7 @@ import { runContainer } from '../../src/docker/run.js';
 import { withPhaseNetworks } from '../../src/net/manage.js';
 import { proxyEnvironment, withProxy } from '../../src/proxy/container.js';
 import { newAttemptId } from '../../src/volume/naming.js';
+import { runtimeImages } from '../helpers/images.js';
 
 const PROVIDER = 'chatgpt.com';
 const DENIED = 'ab.chatgpt.com';
@@ -17,6 +18,7 @@ const DENIED = 'ab.chatgpt.com';
 describe('real provider egress', () => {
   it('reaches chatgpt.com through the proxy, denies ab.chatgpt.com, and has no direct egress', async () => {
     const attempt = newAttemptId();
+    const images = await runtimeImages();
 
     await withPhaseNetworks(attempt, 'agent', async (networks) => {
       const network = networks.egress ?? '';
@@ -28,6 +30,7 @@ describe('real provider egress', () => {
           outwardNetwork: networks['proxy-egress'] ?? '',
           allowlist: PROVIDER_ALLOWLIST,
           ports: [443],
+          images,
         },
         async (handle) => {
           const env = proxyEnvironment(handle);
@@ -37,6 +40,7 @@ describe('real provider egress', () => {
             network,
             env,
             timeoutSeconds: 30,
+            images,
           });
           expect(smoke.ok).toBe(true);
 

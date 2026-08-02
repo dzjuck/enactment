@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { BUILT_IMAGE_PINS, IMAGE_PINS, IMAGE_ROLES } from '../../src/config/pins.js';
-import { buildImage, resolveDockerPlatform, resolveImageDigests } from '../../src/docker/images.js';
+import {
+  buildImage,
+  resolveDockerPlatform,
+  resolveRuntimeImages,
+} from '../../src/docker/images.js';
 
 describe('committed built-image pins', () => {
   it('match the images built on this platform', async () => {
@@ -10,19 +14,20 @@ describe('committed built-image pins', () => {
 
     expect(pins, `no committed pins for ${platform}`).toBeDefined();
 
-    const resolved = await resolveImageDigests();
+    const resolved = await resolveRuntimeImages();
 
     for (const role of IMAGE_ROLES) {
-      expect(resolved[role], `${role} (${IMAGE_PINS[role].tag})`).toBe(pins?.[role]);
+      expect(resolved[role].digest, `${role} (${IMAGE_PINS[role].tag})`).toBe(pins?.[role]);
     }
   }, 120_000);
 
   it('survive a rebuild that changes nothing', async () => {
-    const before = await resolveImageDigests();
+    const before = await resolveRuntimeImages();
 
     await buildImage('verifier');
 
     // The pin follows image content, not the moment the image was built.
-    await expect(resolveImageDigests()).resolves.toEqual(before);
+    const after = await resolveRuntimeImages();
+    for (const role of IMAGE_ROLES) expect(after[role].digest).toBe(before[role].digest);
   }, 300_000);
 });

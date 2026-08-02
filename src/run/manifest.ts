@@ -1,11 +1,7 @@
 import { createHash } from 'node:crypto';
 
-import {
-  CODEX_VERSION,
-  HARNESS_VERSION,
-  PROVIDER_ALLOWLIST,
-  type ImageRole,
-} from '../config/pins.js';
+import { CODEX_VERSION, HARNESS_VERSION, PROVIDER_ALLOWLIST } from '../config/pins.js';
+import type { RuntimeImages } from '../docker/images.js';
 
 /** The `runtime` block of the DESIGN.md §20 execution manifest. */
 export interface RuntimeSection {
@@ -54,12 +50,16 @@ export function networkPolicySection(
   };
 }
 
-export function runtimeSection(digests: Record<ImageRole, string>): RuntimeSection {
+/**
+ * Built from the same `RuntimeImages` value the phases ran, so the manifest cannot record an
+ * image set that differs from the executed one.
+ */
+export function runtimeSection(images: RuntimeImages): RuntimeSection {
   return {
     harness_version: HARNESS_VERSION,
-    agent_image_digest: digests.agent,
-    verifier_image_digest: digests.verifier,
-    setup_image_digest: digests.setup,
-    proxy_image_digest: digests.proxy,
+    agent_image_digest: images.agent.digest,
+    verifier_image_digest: images.verifier.digest,
+    setup_image_digest: images.setup.digest,
+    proxy_image_digest: images.proxy.digest,
   };
 }

@@ -10,6 +10,7 @@ import { AUTH_FILE, authMount, prepareRunAuth, seedAuthStore } from '../../src/a
 import { DependencyCache, ensureDependencySnapshot } from '../../src/deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../../src/deps/volume.js';
 import { exportCommit } from '../../src/git/export.js';
+import type { RuntimeImages } from '../../src/docker/images.js';
 import { runContainer } from '../../src/docker/run.js';
 import { usageSection } from '../../src/run/manifest.js';
 import { newAttemptId } from '../../src/volume/naming.js';
@@ -17,7 +18,13 @@ import { restoreWorkspace, snapshotWorkspace } from '../../src/volume/snapshot.j
 import { ArtifactStore } from '../../src/artifacts/store.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../../src/volume/workspace.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { STUB_AGENT_IMAGE, buildStubAgent, cannedEvents } from '../helpers/stub-agent.js';
+import { runtimeImages } from '../helpers/images.js';
+import {
+  STUB_AGENT_IMAGE,
+  buildStubAgent,
+  cannedEvents,
+  stubAgentImage,
+} from '../helpers/stub-agent.js';
 
 const PROMPT = 'Implement the slugify function in src/slugify.js';
 const CANARY = 'sk-live-canary-4b81f0c2d7e6a9';
@@ -27,11 +34,15 @@ let tar: Buffer;
 let deps: Buffer;
 let runHome: string;
 let root: string;
+let images: RuntimeImages;
+let stubImages: RuntimeImages;
 const volumes: string[] = [];
 const artifactDirs: string[] = [];
 
 beforeAll(async () => {
   await buildStubAgent();
+  images = await runtimeImages();
+  stubImages = { ...images, agent: await stubAgentImage() };
 
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
@@ -46,6 +57,7 @@ beforeAll(async () => {
     workspaceTar: tar,
     installCommand: ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
     network: 'bridge',
+    images,
   });
   deps = await cache.read('sha256:agent-run-tests');
 
@@ -78,8 +90,8 @@ afterEach(async () => {
 
 async function attemptResources(): Promise<{ workspace: string; depsVolume: string; artifacts: string }> {
   const attempt = newAttemptId();
-  const workspace = await createWorkspaceVolume(attempt, tar);
-  const depsVolume = await createDependencyVolume(attempt, 'agent', deps);
+  const workspace = await createWorkspaceVolume(attempt, tar, images);
+  const depsVolume = await createDependencyVolume(attempt, 'agent', deps, images);
   const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
 
   volumes.push(workspace, depsVolume);
@@ -96,7 +108,7 @@ async function runStub(
   const { workspace, depsVolume, artifacts } = await attemptResources();
 
   const result = await runCodexAgent({
-    image: STUB_AGENT_IMAGE,
+    images: stubImages,
     prompt: PROMPT,
     network: 'none',
     env: { STUB_MODE: mode, STUB_EVENTS: events },
@@ -148,7 +160,7 @@ describe('agent invocation', () => {
       timeoutSeconds: 60,
       graceSeconds: 2,
       artifactDir: artifacts,
-      image: STUB_AGENT_IMAGE,
+      images: stubImages,
     });
 
     const result = await runContainer({
@@ -215,10 +227,10 @@ describe('agent invocation', () => {
       }).then((run) => run.stdout);
 
     const before = await listing();
-    const snapshot = await snapshotWorkspace(workspace, store);
+    const snapshot = await snapshotWorkspace(workspace, store, images);
 
     const result = await runCodexAgent({
-      image: STUB_AGENT_IMAGE,
+      images: stubImages,
       prompt: PROMPT,
       network: 'none',
       env: { STUB_MODE: 'hang', STUB_EVENTS: '' },
@@ -227,7 +239,7 @@ describe('agent invocation', () => {
       graceSeconds: 2,
       artifactDir: artifacts,
       onTimeout: async () => {
-        await restoreWorkspace(workspace, snapshot);
+        await restoreWorkspace(workspace, snapshot, images);
       },
     });
 

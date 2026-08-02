@@ -8,6 +8,7 @@ import { ArtifactStore } from '../../src/artifacts/store.js';
 import { IMAGE_PINS } from '../../src/config/pins.js';
 import { DependencyCache, ensureDependencySnapshot } from '../../src/deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../../src/deps/volume.js';
+import type { RuntimeImages } from '../../src/docker/images.js';
 import { runContainer, type RunResult } from '../../src/docker/run.js';
 import { exportCommit } from '../../src/git/export.js';
 import { dependencyVolumeName, newAttemptId } from '../../src/volume/naming.js';
@@ -18,6 +19,7 @@ import {
   volumeExists,
   workspaceMount,
 } from '../../src/volume/workspace.js';
+import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { readTar } from '../../src/artifacts/tar.js';
 
@@ -27,9 +29,11 @@ let repo: TargetRepo;
 let tar: Buffer;
 let deps: Buffer;
 let root: string;
+let images: RuntimeImages;
 const created: string[] = [];
 
 beforeAll(async () => {
+  images = await runtimeImages();
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
 
@@ -42,6 +46,7 @@ beforeAll(async () => {
     workspaceTar: tar,
     installCommand: ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
     network: 'bridge',
+    images,
   });
   deps = await cache.read(KEY);
 }, 600_000);
@@ -56,13 +61,13 @@ afterEach(async () => {
 });
 
 async function seedWorkspace(): Promise<string> {
-  const name = await createWorkspaceVolume(newAttemptId(), tar);
+  const name = await createWorkspaceVolume(newAttemptId(), tar, images);
   created.push(name);
   return name;
 }
 
 async function seedDeps(attempt: string, phase: string): Promise<string> {
-  const name = await createDependencyVolume(attempt, phase, deps);
+  const name = await createDependencyVolume(attempt, phase, deps, images);
   created.push(name);
   return name;
 }
@@ -149,7 +154,7 @@ describe('per-phase dependency volume', () => {
     ]);
 
     const store = new ArtifactStore(join(root, 'snapshots'));
-    const snapshot = await snapshotWorkspace(workspace, store);
+    const snapshot = await snapshotWorkspace(workspace, store, images);
     const entries = readTar(await store.read(snapshot.hash)).map((entry) => entry.path);
 
     expect(entries.filter((path) => path.includes('node_modules'))).toEqual([]);

@@ -7,19 +7,23 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ArtifactStore } from '../../src/artifacts/store.js';
 import { IMAGE_PINS } from '../../src/config/pins.js';
 import { sourceDiff } from '../../src/diff/source-diff.js';
+import type { RuntimeImages } from '../../src/docker/images.js';
 import { runContainer } from '../../src/docker/run.js';
 import { exportCommit } from '../../src/git/export.js';
 import { newAttemptId } from '../../src/volume/naming.js';
 import { snapshotWorkspace } from '../../src/volume/snapshot.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../../src/volume/workspace.js';
+import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
 let repo: TargetRepo;
 let tar: Buffer;
 let store: ArtifactStore;
 let root: string;
+let images: RuntimeImages;
 
 beforeAll(async () => {
+  images = await runtimeImages();
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
   root = await mkdtemp(join(tmpdir(), 'harness-implsnap-'));
@@ -33,7 +37,7 @@ afterAll(async () => {
 
 describe('implementation snapshot', () => {
   it('is immutable: later workspace mutations do not change what was captured', async () => {
-    const volume = await createWorkspaceVolume(newAttemptId(), tar);
+    const volume = await createWorkspaceVolume(newAttemptId(), tar, images);
 
     try {
       await runContainer({
@@ -44,7 +48,7 @@ describe('implementation snapshot', () => {
       });
 
       // §15: the pre-verification snapshot is the only acceptance candidate.
-      const snapshot = await snapshotWorkspace(volume, store);
+      const snapshot = await snapshotWorkspace(volume, store, images);
       const captured = await store.read(snapshot.hash);
 
       await runContainer({

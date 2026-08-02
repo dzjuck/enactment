@@ -4,7 +4,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { execa } from 'execa';
 
-import { IMAGE_PINS, PROVIDER_ALLOWLIST } from '../config/pins.js';
+import { PROVIDER_ALLOWLIST } from '../config/pins.js';
+import type { RuntimeImages } from '../docker/images.js';
 import { containerLogs, startContainer, stopContainer } from '../docker/run.js';
 import { attemptLabels } from '../volume/naming.js';
 import { DEFAULT_PORTS } from './allowlist.js';
@@ -32,6 +33,7 @@ export interface ProxyContainerOptions {
   egressNetwork: string;
   /** Outward leg; only the proxy is attached to both. */
   outwardNetwork: string;
+  images: RuntimeImages;
   allowlist?: readonly string[];
   ports?: readonly number[];
 }
@@ -67,7 +69,7 @@ export async function startProxyContainer(
   const ports = options.ports ?? DEFAULT_PORTS;
 
   await startContainer({
-    image: IMAGE_PINS.proxy.tag,
+    image: options.images.proxy.reference,
     argv: ['node', '/app/main.js'],
     network: options.egressNetwork,
     name,

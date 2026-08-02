@@ -1,5 +1,5 @@
-import { IMAGE_PINS } from '../config/pins.js';
 import type { Mount } from '../docker/args.js';
+import type { RuntimeImages } from '../docker/images.js';
 import { runContainer } from '../docker/run.js';
 import { attemptLabels, dependencyVolumeName } from '../volume/naming.js';
 import { WORKSPACE_PATH, createVolume, removeVolume, volumeExists } from '../volume/workspace.js';
@@ -30,6 +30,7 @@ export async function createDependencyVolume(
   attempt: string,
   phase: string,
   snapshot: Buffer,
+  images: RuntimeImages,
 ): Promise<string> {
   const name = dependencyVolumeName(attempt, phase);
 
@@ -42,7 +43,7 @@ export async function createDependencyVolume(
   try {
     const result = await runContainer(
       {
-        image: IMAGE_PINS.setup.tag,
+        image: images.setup.reference,
         argv: [
           'tar',
           '--extract',

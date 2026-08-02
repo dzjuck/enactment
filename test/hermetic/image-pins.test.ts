@@ -8,7 +8,11 @@ import {
   SUPPORTED_PLATFORMS,
   type ImageRole,
 } from '../../src/config/pins.js';
-import { ImagePinError, resolveImageDigests } from '../../src/docker/images.js';
+import {
+  ImagePinError,
+  resolveRuntimeImages,
+  type RuntimeImages,
+} from '../../src/docker/images.js';
 import { runtimeSection } from '../../src/run/manifest.js';
 
 const PLATFORM = 'linux/arm64';
@@ -28,6 +32,15 @@ const DIGESTS = Object.fromEntries(
   IMAGE_ROLES.map((role) => [role, contentDigest(LAYERS[role])]),
 ) as Record<ImageRole, string>;
 
+/** The image IDs the daemon would report; `{{.Id}}` is what a container is started from. */
+const IDS = Object.fromEntries(
+  IMAGE_ROLES.map((role, index) => [role, `sha256:${String(index + 1).repeat(64)}`]),
+) as Record<ImageRole, string>;
+
+const IMAGES = Object.fromEntries(
+  IMAGE_ROLES.map((role) => [role, { role, reference: IDS[role], digest: DIGESTS[role] }]),
+) as RuntimeImages;
+
 /** Records every docker invocation so the tests can prove what was never attempted. */
 function recordingExec(layers: Record<ImageRole, string>, platform = PLATFORM) {
   const calls: string[][] = [];
@@ -40,7 +53,7 @@ function recordingExec(layers: Record<ImageRole, string>, platform = PLATFORM) {
     const tag = args.at(-1) ?? '';
     const role = IMAGE_ROLES.find((candidate) => tag.includes(candidate));
     if (role === undefined) throw new Error(`unexpected docker invocation: ${args.join(' ')}`);
-    return layers[role];
+    return args.includes('{{.Id}}') ? IDS[role] : layers[role];
   };
 
   const containerCommands = (): string[][] =>
@@ -67,12 +80,12 @@ describe('built-image pins', () => {
     const { exec } = recordingExec(LAYERS);
 
     // Two resolutions of the same layer set agree, regardless of when the image was built.
-    await expect(resolveImageDigests({ pins: DIGESTS, platform: PLATFORM, exec })).resolves.toEqual(
-      DIGESTS,
-    );
-    await expect(resolveImageDigests({ pins: DIGESTS, platform: PLATFORM, exec })).resolves.toEqual(
-      DIGESTS,
-    );
+    await expect(
+      resolveRuntimeImages({ pins: DIGESTS, platform: PLATFORM, exec }),
+    ).resolves.toEqual(IMAGES);
+    await expect(
+      resolveRuntimeImages({ pins: DIGESTS, platform: PLATFORM, exec }),
+    ).resolves.toEqual(IMAGES);
   });
 
   it('treats a missing role digest as a configuration error before any container command', async () => {
@@ -80,7 +93,7 @@ describe('built-image pins', () => {
     const incomplete = { ...DIGESTS } as Partial<Record<ImageRole, string>>;
     delete incomplete.verifier;
 
-    const error = await resolveImageDigests({
+    const error = await resolveRuntimeImages({
       pins: incomplete as Record<ImageRole, string>,
       platform: PLATFORM,
       exec,
@@ -94,7 +107,7 @@ describe('built-image pins', () => {
   it('stops on an unsupported Docker server platform, naming it', async () => {
     const { exec, containerCommands } = recordingExec(LAYERS, 'linux/riscv64');
 
-    const error = await resolveImageDigests({ exec }).catch((cause: unknown) => cause);
+    const error = await resolveRuntimeImages({ exec }).catch((cause: unknown) => cause);
 
     expect(error).toBeInstanceOf(ImagePinError);
     expect((error as Error).message).toContain('linux/riscv64');
@@ -105,7 +118,7 @@ describe('built-image pins', () => {
     const changed = { ...LAYERS, verifier: '["sha256:bbb","sha256:injected"]' };
     const { exec, calls } = recordingExec(changed);
 
-    const error = await resolveImageDigests({
+    const error = await resolveRuntimeImages({
       pins: DIGESTS,
       platform: PLATFORM,
       exec,
@@ -125,7 +138,7 @@ describe('built-image pins', () => {
 
 describe('runtimeSection', () => {
   it('records all four image digests', () => {
-    expect(runtimeSection(DIGESTS)).toEqual({
+    expect(runtimeSection(IMAGES)).toEqual({
       harness_version: expect.any(String),
       agent_image_digest: DIGESTS.agent,
       verifier_image_digest: DIGESTS.verifier,

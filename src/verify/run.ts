@@ -2,8 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { StoredArtifact } from '../artifacts/store.js';
-import { IMAGE_PINS } from '../config/pins.js';
 import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
+import type { RuntimeImages } from '../docker/images.js';
 import { runContainer, type RunStatus } from '../docker/run.js';
 import { attemptLabels, workspaceVolumeName } from '../volume/naming.js';
 import { restoreWorkspace } from '../volume/snapshot.js';
@@ -35,6 +35,7 @@ export interface VerificationOptions {
   /** Fixed argument arrays from `task.yml`; never shell strings (§16). */
   commands: readonly (readonly string[])[];
   artifactDir: string;
+  images: RuntimeImages;
   timeoutSeconds?: number;
   graceSeconds?: number;
 }
@@ -61,18 +62,19 @@ export async function runVerification(
     `${options.attempt}-verify`,
     'verifier',
     options.dependencySnapshot,
+    options.images,
   );
 
   const commands: CommandResult[] = [];
   let status: VerificationResult['status'] = 'pass';
 
   try {
-    await restoreWorkspace(workspaceVolume, options.snapshot);
+    await restoreWorkspace(workspaceVolume, options.snapshot, options.images);
 
     for (const argv of options.commands) {
       const run = await runContainer(
         {
-          image: IMAGE_PINS.verifier.tag,
+          image: options.images.verifier.reference,
           argv: [...argv],
           // DESIGN.md §6: no network at all, so verification cannot reach a model.
           network: 'none',

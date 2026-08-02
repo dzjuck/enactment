@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { IMAGE_PINS } from '../../src/config/pins.js';
+import type { RuntimeImages } from '../../src/docker/images.js';
 import { exportCommit } from '../../src/git/export.js';
 import { runContainer } from '../../src/docker/run.js';
 import { newAttemptId, workspaceVolumeName } from '../../src/volume/naming.js';
@@ -13,14 +14,17 @@ import {
   volumeExists,
   workspaceMount,
 } from '../../src/volume/workspace.js';
+import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { readTar } from '../../src/artifacts/tar.js';
 
 let repo: TargetRepo;
 let tar: Buffer;
+let images: RuntimeImages;
 const created: string[] = [];
 
 beforeAll(async () => {
+  images = await runtimeImages();
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
 });
@@ -34,7 +38,7 @@ afterEach(async () => {
 });
 
 async function seed(): Promise<string> {
-  const name = await createWorkspaceVolume(newAttemptId(), tar);
+  const name = await createWorkspaceVolume(newAttemptId(), tar, images);
   created.push(name);
   return name;
 }
@@ -110,8 +114,10 @@ describe('workspace volume', () => {
     const attempt = newAttemptId();
     created.push(workspaceVolumeName(attempt));
 
-    await createWorkspaceVolume(attempt, tar);
-    await expect(createWorkspaceVolume(attempt, tar)).rejects.toThrow(WorkspaceVolumeError);
+    await createWorkspaceVolume(attempt, tar, images);
+    await expect(createWorkspaceVolume(attempt, tar, images)).rejects.toThrow(
+      WorkspaceVolumeError,
+    );
   });
 
   it('removes a volume, and removing a missing one is a no-op', async () => {
