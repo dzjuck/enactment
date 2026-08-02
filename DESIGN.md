@@ -258,6 +258,18 @@ SIGTERM
 → classify failure
 ```
 
+Restoration is not specific to the timeout path. Once the pre-agent snapshot exists, **every**
+failure that can leave the agent workspace half-written restores it before the error propagates:
+a killed agent, one that exited non-zero, an unparseable event stream, and a change that fails
+scope, dependency-manifest or symlink validation. The restored workspace is snapshotted again and
+both hashes are recorded, so "it was restored" is checkable rather than asserted — equal hashes
+are the evidence. A restoration that fails is reported alongside the phase failure, never in
+place of it.
+
+Verifier failure is deliberately excluded. Verification runs against a disposable copy of the
+implementation snapshot, so there is nothing in the agent workspace to undo; the copy is simply
+removed. Restoring there would be a no-op dressed up as a safety property.
+
 Failure category:
 
 ```text

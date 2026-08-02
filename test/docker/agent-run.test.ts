@@ -23,7 +23,6 @@ import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.j
 import { runtimeImages } from '../helpers/images.js';
 import {
   STUB_AGENT_IMAGE,
-  buildStubAgent,
   cannedEvents,
   stubAgentImage,
 } from '../helpers/stub-agent.js';
@@ -42,7 +41,6 @@ const volumes: string[] = [];
 const artifactDirs: string[] = [];
 
 beforeAll(async () => {
-  await buildStubAgent();
   images = await runtimeImages();
   stubImages = { ...images, agent: await stubAgentImage() };
 

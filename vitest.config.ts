@@ -29,6 +29,8 @@ const docker = {
     name: 'docker',
     include: ['test/docker/**/*.test.ts'],
     exclude: IMAGE_BUILDERS,
+    // Shared images are built once here, never per file: see test/setup/stub-agent.ts.
+    globalSetup: ['test/setup/stub-agent.ts'],
     testTimeout: 120_000,
     hookTimeout: 300_000,
   },
@@ -38,6 +40,8 @@ const dockerImages = {
   test: {
     name: 'docker-images',
     include: IMAGE_BUILDERS,
+    // Also passed on the command line: these files rebuild the shared image tags, and two of
+    // them in flight at once makes `docker image inspect` fail while a tag is reassigned.
     fileParallelism: false,
     testTimeout: 300_000,
     hookTimeout: 300_000,

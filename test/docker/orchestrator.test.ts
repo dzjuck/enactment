@@ -10,7 +10,7 @@ import { resolveRuntimeImages, type RuntimeImage } from '../../src/docker/images
 import type { RunInjection } from '../../src/run/inject.js';
 import { runTask, RUN_PHASES, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
 import { createTargetRepo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { buildStubAgent, cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
+import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 const CANARY = 'sk-orchestrator-canary-77d3f19a';
 const LABEL = 'ai-harness.attempt';
@@ -46,7 +46,6 @@ function injection(mode = 'write'): RunInjection {
 }
 
 beforeAll(async () => {
-  await buildStubAgent();
   await execa('npm', ['run', 'build']);
   stub = await stubAgentImage();
 
@@ -212,12 +211,23 @@ describe('orchestrator', () => {
     expect(seen.indexOf('verify')).toBeLessThan(seen.indexOf('commit'));
   }, 900_000);
 
+  /**
+   * Only a phase that runs after the agent has actually written can owe a restoration.
+   *
+   * `onPhase` fires at the phase boundary, so a failure injected at `agent` lands before the
+   * agent container starts and leaves the workspace clean — restoring there would be a no-op
+   * dressed up as a safety property. Restoration after a real agent failure is covered in
+   * `workspace-restoration.test.ts`; what this matrix pins is that every other phase reports
+   * correctly and claims nothing it did not do.
+   */
+  const DIRTYING_PHASES = new Set<RunPhase>(['diff']);
+
   it.each(RUN_PHASES.filter((phase) => phase !== 'commit'))(
-    'reports a failure injected in the %s phase and commits nothing',
+    'reports a failure injected in the %s phase, restores if it could have dirtied the workspace, and commits nothing',
     async (phase) => {
       const before = await git(repo.dir, ['rev-list', '--all', '--count']);
 
-      const { report } = await run({
+      const { report, artifacts } = await run({
         onPhase: (current) => {
           if (current === phase) throw new Error(`injected ${phase} failure`);
         },
@@ -227,6 +237,17 @@ describe('orchestrator', () => {
       expect(report.failedPhase).toBe(phase);
       expect(report.commit).toBeUndefined();
       expect(await git(repo.dir, ['rev-list', '--all', '--count'])).toBe(before);
+
+      const manifest = JSON.parse(
+        await readFile(join(artifacts, 'run-manifest.json'), 'utf8'),
+      ) as { restoration?: { pre_agent: string; restored: string } };
+
+      if (DIRTYING_PHASES.has(phase)) {
+        expect(manifest.restoration?.restored).toBe(manifest.restoration?.pre_agent);
+        expect(manifest.restoration?.pre_agent).toMatch(/^sha256:/);
+      } else {
+        expect(manifest.restoration).toBeUndefined();
+      }
 
       await expectNoResources(report.attempt);
     },

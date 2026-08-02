@@ -1,9 +1,25 @@
 #!/bin/sh
 # Stands in for the provider CLI so parsing, redaction, timeout and failure handling are
-# testable without spending tokens. Behavior is chosen by STUB_MODE; arguments are ignored,
-# which is the point: the harness's argv must work unchanged.
+# testable without spending tokens. Arguments are ignored, which is the point: the harness's
+# argv must work unchanged.
+#
+# Writing is deliberately independent of the outcome. A real agent dirties the workspace and
+# *then* fails, so restoration has something to undo; a stub that only wrote on the success
+# path would make every restoration test vacuous.
+set -e
+
+if [ -n "$STUB_WRITE_PATH" ]; then
+  mkdir -p "$(dirname "/workspace/${STUB_WRITE_PATH}")"
+  printf '%s' "$STUB_WRITE_CONTENT" > "/workspace/${STUB_WRITE_PATH}"
+fi
+
+if [ -n "$STUB_SYMLINK_PATH" ]; then
+  mkdir -p "$(dirname "/workspace/${STUB_SYMLINK_PATH}")"
+  ln -sf "${STUB_SYMLINK_TARGET}" "/workspace/${STUB_SYMLINK_PATH}"
+fi
+
 case "${STUB_MODE:-events}" in
-  events|malformed)
+  events|malformed|write)
     printf '%s\n' "$STUB_EVENTS"
     ;;
   fail)
@@ -13,10 +29,6 @@ case "${STUB_MODE:-events}" in
   hang)
     trap '' TERM
     while true; do sleep 1; done
-    ;;
-  write)
-    printf '%s' "$STUB_WRITE_CONTENT" > "/workspace/${STUB_WRITE_PATH:-AGENT_WROTE}"
-    printf '%s\n' "$STUB_EVENTS"
     ;;
   *)
     printf 'unknown STUB_MODE: %s\n' "$STUB_MODE" >&2

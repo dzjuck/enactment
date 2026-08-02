@@ -152,6 +152,19 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     const { tar, hash: exportHash } = await exportCommit(options.repoPath, baseCommit);
     const timeouts = resolveTimeouts(task.timeouts);
 
+    // Recorded now rather than on the success path: a failure manifest without the run's
+    // identity cannot be used as evidence of anything.
+    manifest.repository = { base_branch: baseBranch, base_commit: baseCommit };
+    manifest.runtime = runtimeSection(agentImages);
+    const inputs: Record<string, unknown> = {
+      task_hash: taskHash,
+      export_hash: exportHash,
+      ...networkPolicySection(),
+    };
+    manifest.inputs = inputs;
+    const snapshotHashes: Record<string, string> = {};
+    manifest.snapshots = snapshotHashes;
+
     await phase('setup');
     const install = installCommand('denied');
     const cacheKey = dependencyCacheKey({
@@ -177,6 +190,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       }),
     );
     const dependencySnapshot = await cache.read(cacheKey);
+    inputs.dependency_cache_key = cacheKey;
 
     await phase('workspace');
     const workspace = await createWorkspaceVolume(attempt, tar, images);
@@ -199,6 +213,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     redact = createRedactor(collectSecrets(stored));
 
     const policy = compileCodexPolicy({ prompt: task.prompt, workdir: '/workspace' });
+    inputs.policy_hash = policy.hash;
 
     // CODEX_HOME is a per-attempt volume, not a bind of the host store: no host directory is
     // ever mounted into a container, so no host uid mapping is part of the contract.
@@ -206,84 +221,129 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     teardown.push(() => removeVolume(runAuth));
 
     const preAgent = await snapshotWorkspace(workspace, snapshots, images);
+    snapshotHashes.pre_agent = preAgent.hash;
 
-    const agentRun = await withPhaseNetworks(attempt, 'agent', (networks) =>
-      withProxy(
-        {
-          attempt,
-          egressNetwork: networks.egress ?? '',
-          outwardNetwork: networks['proxy-egress'] ?? '',
-          allowlist: PROVIDER_ALLOWLIST,
-          ports: [443],
-          images,
-        },
-        async (handle) => {
-          const proxied = proxyEnvironment(handle);
+    const restore = options.injection?.restoreWorkspace
+      ?? ((volume, snapshot) => restoreWorkspace(volume, snapshot, images));
 
-          try {
-            await phase('connectivity');
-            await providerSmokeTest({
-              url: `https://${PROVIDER_ALLOWLIST[0] ?? 'chatgpt.com'}/`,
-              network: networks.egress ?? '',
-              env: proxied,
-              timeoutSeconds: timeouts.connectivity_smoke_seconds,
-              images,
-            });
+    /**
+     * Put the workspace back the way the agent found it, and record proof that it worked.
+     *
+     * Every failure from here to the end of validation can leave the workspace half-written:
+     * a killed agent, one that exited non-zero, an unparseable event stream, a change that
+     * fails scope validation. None of them may hand a dirty workspace to anything downstream.
+     * The restored snapshot's hash is stored beside the pre-agent hash so the claim is
+     * checkable rather than asserted — equal hashes are the evidence.
+     */
+    const restorePreAgent = async (error: unknown): Promise<never> => {
+      try {
+        await restore(workspace, preAgent);
+        const restored = await snapshotWorkspace(workspace, snapshots, images);
 
-            await phase('agent');
-            return await runCodexAgent({
-              prompt: task.prompt,
-              policy,
-              network: networks.egress ?? '',
-              // The harness's own proxy configuration is last: an injected environment
-              // may add to the container, never redirect its egress.
-              env: { ...options.injection?.agentEnv, ...proxied },
-              mounts: [
-                workspaceMount(workspace),
-                dependencyMount(agentDependencies),
-                authMount(runAuth),
-              ],
-              timeoutSeconds: timeouts.agent_seconds,
-              graceSeconds: timeouts.termination_grace_seconds,
-              artifactDir: options.artifactDir,
-              secrets: collectSecrets(stored),
-              images: agentImages,
-              onTimeout: () => restoreWorkspace(workspace, preAgent, images),
-            });
-          } finally {
-            await writeProxyRecords(handle, options.artifactDir);
-          }
-        },
-      ),
-    );
+        manifest.restoration = {
+          trigger: classify(current, error),
+          pre_agent: preAgent.hash,
+          restored: restored.hash,
+        };
+      } catch (restoreError) {
+        // Both survive: the phase failure is what the run is about, and a workspace that
+        // could not be restored is a separate fact nobody may discover later.
+        throw new OwnershipError(`workspace ${workspace}`, error, restoreError);
+      }
 
-    await copyBackAuth(runAuth, authStore, images);
-    manifest.usage = usageSection(agentRun.usage);
+      throw error;
+    };
 
-    // §32: container logs are artifacts, and they pass through redaction like everything else.
-    await writeLog(options.artifactDir, 'agent.log', redact(agentRun.stdout + agentRun.stderr));
+    let agentStarted = false;
 
-    if (agentRun.status !== 'completed') {
-      throw new PhaseFailure(
-        'agent',
-        agentRun.status === 'timeout' ? 'agent_timeout' : 'agent_failed',
-        `agent run ${agentRun.status} (exit ${String(agentRun.exitCode)})`,
+    // One boundary for everything that can dirty the workspace: the agent invocation and the
+    // validation of what it produced. A failure anywhere inside restores before it escapes.
+    const runAgentAndValidate = async () => {
+      const agentRun = await withPhaseNetworks(attempt, 'agent', (networks) =>
+        withProxy(
+          {
+            attempt,
+            egressNetwork: networks.egress ?? '',
+            outwardNetwork: networks['proxy-egress'] ?? '',
+            allowlist: PROVIDER_ALLOWLIST,
+            ports: [443],
+            images,
+          },
+          async (handle) => {
+            const proxied = proxyEnvironment(handle);
+
+            try {
+              await phase('connectivity');
+              await providerSmokeTest({
+                url: `https://${PROVIDER_ALLOWLIST[0] ?? 'chatgpt.com'}/`,
+                network: networks.egress ?? '',
+                env: proxied,
+                timeoutSeconds: timeouts.connectivity_smoke_seconds,
+                images,
+              });
+
+              await phase('agent');
+              agentStarted = true;
+              return await runCodexAgent({
+                prompt: task.prompt,
+                policy,
+                network: networks.egress ?? '',
+                // The harness's own proxy configuration is last: an injected environment
+                // may add to the container, never redirect its egress.
+                env: { ...options.injection?.agentEnv, ...proxied },
+                mounts: [
+                  workspaceMount(workspace),
+                  dependencyMount(agentDependencies),
+                  authMount(runAuth),
+                ],
+                timeoutSeconds: timeouts.agent_seconds,
+                graceSeconds: timeouts.termination_grace_seconds,
+                artifactDir: options.artifactDir,
+                secrets: collectSecrets(stored),
+                images: agentImages,
+              });
+            } finally {
+              await writeProxyRecords(handle, options.artifactDir);
+            }
+          },
+        ),
       );
-    }
 
-    await phase('diff');
-    const implementation = await snapshotWorkspace(workspace, snapshots, images);
-    const changes = await sourceDiff(tar, await snapshots.read(implementation.hash));
-    const validated = validateChanges(changes, task.implementation_paths);
-    await writeFile(
-      join(options.artifactDir, 'source-diff.json'),
-      redact(
-        `${JSON.stringify(
-          validated.changes.map((change) => ({ kind: change.kind, path: change.path })),
-          null,
-          2,
-        )}\n`,
-      ),
+      await copyBackAuth(runAuth, authStore, images);
+      manifest.usage = usageSection(agentRun.usage);
+
+      // §32: container logs are artifacts, and they pass through redaction like everything else.
+      await writeLog(options.artifactDir, 'agent.log', redact(agentRun.stdout + agentRun.stderr));
+
+      if (agentRun.status !== 'completed') {
+        throw new PhaseFailure(
+          'agent',
+          agentRun.status === 'timeout' ? 'agent_timeout' : 'agent_failed',
+          `agent run ${agentRun.status} (exit ${String(agentRun.exitCode)})`,
+        );
+      }
+
+      await phase('diff');
+      const implementation = await snapshotWorkspace(workspace, snapshots, images);
+      snapshotHashes.implementation = implementation.hash;
+      const changes = await sourceDiff(tar, await snapshots.read(implementation.hash));
+      const validated = validateChanges(changes, task.implementation_paths);
+      await writeFile(
+        join(options.artifactDir, 'source-diff.json'),
+        redact(
+          `${JSON.stringify(
+            validated.changes.map((change) => ({ kind: change.kind, path: change.path })),
+            null,
+            2,
+          )}\n`,
+        ),
+      );
+
+      return { implementation, validated };
+    };
+
+    const { implementation, validated } = await runAgentAndValidate().catch(
+      (error: unknown) => (agentStarted ? restorePreAgent(error) : Promise.reject(error)),
     );
 
     await phase('verify');
@@ -326,17 +386,6 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       verificationStatus: verification.status,
       changes: validated.changes,
     });
-
-    manifest.repository = { base_branch: baseBranch, base_commit: baseCommit };
-    manifest.inputs = {
-      task_hash: taskHash,
-      export_hash: exportHash,
-      policy_hash: policy.hash,
-      dependency_cache_key: cacheKey,
-      ...networkPolicySection(),
-    };
-    manifest.runtime = runtimeSection(agentImages);
-    manifest.snapshots = { pre_agent: preAgent.hash, implementation: implementation.hash };
 
     report = {
       status: 'succeeded',

@@ -143,16 +143,22 @@ describe('per-phase networks', () => {
       });
       listeners.push(listener);
 
-      // Control: a container on the agent network does reach it.
-      const reachable = await onNetwork(networks.egress ?? '', connectProbe(listener.ip));
-      expect(reachable.exitCode).toBe(0);
+      try {
+        // Control: a container on the agent network does reach it.
+        const reachable = await onNetwork(networks.egress ?? '', connectProbe(listener.ip));
+        expect(reachable.exitCode).toBe(0);
 
-      const verifier = await runContainer({
-        image: IMAGE_PINS.verifier.tag,
-        argv: connectProbe(listener.ip),
-        network: 'none',
-      });
-      expect(verifier.exitCode).not.toBe(0);
+        const verifier = await runContainer({
+          image: IMAGE_PINS.verifier.tag,
+          argv: connectProbe(listener.ip),
+          network: 'none',
+        });
+        expect(verifier.exitCode).not.toBe(0);
+      } finally {
+        // Stopped inside the phase: a container still holding an endpoint blocks the
+        // network's removal, and phase teardown now reports that rather than leaking.
+        await listener.stop();
+      }
     });
   }, 120_000);
 });
