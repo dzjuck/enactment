@@ -151,6 +151,7 @@ export async function ensureDependencySnapshot(options: SetupOptions): Promise<D
       argv: ['sh', '-c', `mkdir -p /workspace/${NODE_MODULES} && exec ${CAPTURE_ARGV.join(' ')}`],
       network: 'none',
       mounts: [workspaceMount(volume)],
+      labels: attemptLabels(options.attempt, 'setup-capture'),
     });
 
     if (capture.exitCode !== 0) {

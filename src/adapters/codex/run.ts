@@ -20,6 +20,8 @@ export interface AgentRunOptions {
   graceSeconds: number;
   artifactDir: string;
   images: RuntimeImages;
+  /** Attempt labels, so an orphaned container is findable by the cleanup sweep. */
+  labels?: Record<string, string>;
   workdir?: string;
   policy?: CompiledAgentPolicy;
   secrets?: readonly string[];
@@ -59,6 +61,7 @@ export function buildAgentSpec(options: AgentRunOptions): ContainerSpec {
     image: options.images.agent.reference,
     argv: policy.args,
     network: options.network,
+    ...(options.labels === undefined ? {} : { labels: options.labels }),
     workdir: options.workdir ?? '/workspace',
     // The compiled policy wins: nothing a caller supplies may displace CODEX_HOME.
     env: { ...options.env, ...policy.env },

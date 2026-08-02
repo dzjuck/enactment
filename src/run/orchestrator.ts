@@ -25,7 +25,7 @@ import { withPhaseNetworks } from '../net/manage.js';
 import { proxyEnvironment, withProxy, writeProxyRecords } from '../proxy/container.js';
 import { loadTask } from '../task/load.js';
 import { runVerification } from '../verify/run.js';
-import { newAttemptId } from '../volume/naming.js';
+import { attemptLabels, newAttemptId } from '../volume/naming.js';
 import { snapshotWorkspace, restoreWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
@@ -116,7 +116,7 @@ async function git(repoPath: string, args: string[]): Promise<string> {
  * attempt-scoped container, volume or network behind.
  */
 export async function runTask(options: RunOptions): Promise<RunReport> {
-  const attempt = newAttemptId();
+  const attempt = options.injection?.attempt ?? newAttemptId();
   const teardown: (() => Promise<void>)[] = [];
   const snapshots = new ArtifactStore(join(options.artifactDir, 'snapshots'));
 
@@ -195,7 +195,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     await phase('workspace');
     const workspace = await createWorkspaceVolume(attempt, tar, images);
     teardown.push(() => removeVolume(workspace));
-    await initSyntheticGit(workspace, images);
+    await initSyntheticGit(workspace, images, attemptLabels(attempt, 'synthetic-git'));
 
     const agentDependencies = await createDependencyVolume(
       attempt,
@@ -220,11 +220,17 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     const runAuth = await createAuthVolume(attempt, { auth: stored, policy: policy.files }, images);
     teardown.push(() => removeVolume(runAuth));
 
-    const preAgent = await snapshotWorkspace(workspace, snapshots, images);
+    const preAgent = await snapshotWorkspace(
+      workspace,
+      snapshots,
+      images,
+      attemptLabels(attempt, 'snapshot'),
+    );
     snapshotHashes.pre_agent = preAgent.hash;
 
     const restore = options.injection?.restoreWorkspace
-      ?? ((volume, snapshot) => restoreWorkspace(volume, snapshot, images));
+      ?? ((volume, snapshot) =>
+        restoreWorkspace(volume, snapshot, images, attemptLabels(attempt, 'restore')));
 
     /**
      * Put the workspace back the way the agent found it, and record proof that it worked.
@@ -238,7 +244,12 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     const restorePreAgent = async (error: unknown): Promise<never> => {
       try {
         await restore(workspace, preAgent);
-        const restored = await snapshotWorkspace(workspace, snapshots, images);
+        const restored = await snapshotWorkspace(
+          workspace,
+          snapshots,
+          images,
+          attemptLabels(attempt, 'snapshot'),
+        );
 
         manifest.restoration = {
           trigger: classify(current, error),
@@ -280,6 +291,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
                 env: proxied,
                 timeoutSeconds: timeouts.connectivity_smoke_seconds,
                 images,
+                labels: attemptLabels(attempt, 'connectivity'),
               });
 
               await phase('agent');
@@ -301,6 +313,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
                 artifactDir: options.artifactDir,
                 secrets: collectSecrets(stored),
                 images: agentImages,
+                labels: attemptLabels(attempt, 'agent'),
               });
             } finally {
               await writeProxyRecords(handle, options.artifactDir);
@@ -309,7 +322,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
         ),
       );
 
-      await copyBackAuth(runAuth, authStore, images);
+      await copyBackAuth(runAuth, authStore, images, {}, attemptLabels(attempt, 'auth-read'));
       manifest.usage = usageSection(agentRun.usage);
 
       // §32: container logs are artifacts, and they pass through redaction like everything else.
@@ -324,7 +337,12 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       }
 
       await phase('diff');
-      const implementation = await snapshotWorkspace(workspace, snapshots, images);
+      const implementation = await snapshotWorkspace(
+        workspace,
+        snapshots,
+        images,
+        attemptLabels(attempt, 'snapshot'),
+      );
       snapshotHashes.implementation = implementation.hash;
       const changes = await sourceDiff(tar, await snapshots.read(implementation.hash));
       const validated = validateChanges(changes, task.implementation_paths);

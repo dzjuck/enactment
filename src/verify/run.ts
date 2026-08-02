@@ -47,7 +47,12 @@ export interface VerificationOptions {
     images: RuntimeImages,
     owner: string,
   ) => Promise<string>;
-  restore?: (volume: string, snapshot: StoredArtifact, images: RuntimeImages) => Promise<void>;
+  restore?: (
+    volume: string,
+    snapshot: StoredArtifact,
+    images: RuntimeImages,
+    labels?: Record<string, string>,
+  ) => Promise<void>;
   removeVolume?: (name: string) => Promise<void>;
 }
 
@@ -91,7 +96,7 @@ export async function runVerification(
     );
     rollback.push(() => release(dependencyVolume));
 
-    await restore(workspaceVolume, options.snapshot, options.images);
+    await restore(workspaceVolume, options.snapshot, options.images, attemptLabels(options.attempt, 'verify-restore'));
 
     const commands: CommandResult[] = [];
     let status: VerificationResult['status'] = 'pass';

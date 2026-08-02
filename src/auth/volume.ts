@@ -14,8 +14,18 @@ export interface AuthVolumeContents {
 }
 
 export interface AuthVolumeDependencies {
-  seed?: (volume: string, contents: AuthVolumeContents, images: RuntimeImages) => Promise<void>;
-  read?: (volume: string, name: string, images: RuntimeImages) => Promise<string | undefined>;
+  seed?: (
+    volume: string,
+    contents: AuthVolumeContents,
+    images: RuntimeImages,
+    labels?: Record<string, string>,
+  ) => Promise<void>;
+  read?: (
+    volume: string,
+    name: string,
+    images: RuntimeImages,
+    labels?: Record<string, string>,
+  ) => Promise<string | undefined>;
 }
 
 /**
@@ -44,6 +54,7 @@ async function seedAuthVolume(
   volume: string,
   contents: AuthVolumeContents,
   images: RuntimeImages,
+  labels?: Record<string, string>,
 ): Promise<void> {
   const env: Record<string, string> = {};
   const script = ['set -e', 'umask 077', `cat > ${CODEX_HOME_PATH}/${AUTH_FILE}`];
@@ -64,6 +75,7 @@ async function seedAuthVolume(
       network: 'none',
       env,
       mounts: [authMount(volume)],
+      ...(labels === undefined ? {} : { labels }),
     },
     { input: Buffer.from(contents.auth) },
   );
@@ -79,12 +91,14 @@ export async function readAuthVolumeFile(
   volume: string,
   name: string,
   images: RuntimeImages,
+  labels?: Record<string, string>,
 ): Promise<string | undefined> {
   const result = await runContainer({
     image: images.agent.reference,
     argv: ['cat', `${CODEX_HOME_PATH}/${name}`],
     network: 'none',
     mounts: [authMount(volume)],
+    ...(labels === undefined ? {} : { labels }),
   });
 
   return result.exitCode === 0 ? result.stdoutBytes.toString('utf8') : undefined;
@@ -109,10 +123,11 @@ export async function createAuthVolume(
     throw new AuthError(`auth volume ${name} already exists`);
   }
 
-  await createVolume(name, attemptLabels(attempt, 'auth'));
+  const labels = attemptLabels(attempt, 'auth');
+  await createVolume(name, labels);
 
   return withOwnedResource(name, removeVolume, async () => {
-    await seed(name, contents, images);
+    await seed(name, contents, images, attemptLabels(attempt, 'auth-seed'));
     return name;
   });
 }
@@ -128,10 +143,11 @@ export async function copyBackAuth(
   store: AuthStore,
   images: RuntimeImages,
   dependencies: AuthVolumeDependencies = {},
+  labels?: Record<string, string>,
 ): Promise<boolean> {
   const read = dependencies.read ?? readAuthVolumeFile;
 
-  const current = await read(volume, AUTH_FILE, images);
+  const current = await read(volume, AUTH_FILE, images, labels);
   if (current === undefined) return false;
 
   return updateAuthStore(store, current);

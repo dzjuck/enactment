@@ -29,7 +29,8 @@ const docker = {
     name: 'docker',
     include: ['test/docker/**/*.test.ts'],
     exclude: IMAGE_BUILDERS,
-    // Shared images are built once here, never per file: see test/setup/stub-agent.ts.
+    // Shared build artifacts are produced once here, never per file: they are mutable
+    // global state and the suite is file-parallel. See test/setup/stub-agent.ts.
     globalSetup: ['test/setup/stub-agent.ts'],
     testTimeout: 120_000,
     hookTimeout: 300_000,

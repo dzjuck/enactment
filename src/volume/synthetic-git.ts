@@ -44,7 +44,11 @@ const INIT_SCRIPT = [
  * Give the agent a disposable single-commit repository (DESIGN.md §10). It exposes no
  * canonical history, refs, remotes or credentials, and is discarded with the attempt.
  */
-export async function initSyntheticGit(volumeName: string, images: RuntimeImages): Promise<void> {
+export async function initSyntheticGit(
+  volumeName: string,
+  images: RuntimeImages,
+  labels?: Record<string, string>,
+): Promise<void> {
   const result = await runContainer({
     image: images.agent.reference,
     argv: ['sh', '-c', INIT_SCRIPT],
@@ -52,6 +56,7 @@ export async function initSyntheticGit(volumeName: string, images: RuntimeImages
     workdir: WORKSPACE_PATH,
     env: GIT_ENV,
     mounts: [workspaceMount(volumeName)],
+    ...(labels === undefined ? {} : { labels }),
   });
 
   if (result.exitCode !== 0) {

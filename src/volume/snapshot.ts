@@ -48,12 +48,14 @@ export async function snapshotWorkspace(
   volume: string,
   store: ArtifactStore,
   images: RuntimeImages,
+  labels?: Record<string, string>,
 ): Promise<StoredArtifact> {
   const result = await runContainer({
     image: images.setup.reference,
     argv: SNAPSHOT_ARGV,
     network: 'none',
     mounts: [workspaceMount(volume)],
+    ...(labels === undefined ? {} : { labels }),
   });
 
   if (result.exitCode !== 0) {
@@ -67,6 +69,7 @@ export async function restoreWorkspace(
   volume: string,
   snapshot: StoredArtifact,
   images: RuntimeImages,
+  labels?: Record<string, string>,
 ): Promise<void> {
   const bytes = await readFile(snapshot.path);
 
@@ -80,6 +83,7 @@ export async function restoreWorkspace(
       argv: ['sh', '-c', RESTORE_SCRIPT],
       network: 'none',
       mounts: [workspaceMount(volume)],
+      ...(labels === undefined ? {} : { labels }),
     },
     { input: bytes },
   );

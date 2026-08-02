@@ -9,6 +9,7 @@ export interface SmokeOptions {
   env: Record<string, string>;
   timeoutSeconds: number;
   images: RuntimeImages;
+  labels?: Record<string, string>;
 }
 
 export interface SmokeResult {
@@ -44,6 +45,7 @@ export async function providerSmokeTest(options: SmokeOptions): Promise<SmokeRes
       ],
       network: options.network,
       env: options.env,
+      ...(options.labels === undefined ? {} : { labels: options.labels }),
     },
     { timeoutSeconds: options.timeoutSeconds + 5, graceSeconds: 2 },
   );

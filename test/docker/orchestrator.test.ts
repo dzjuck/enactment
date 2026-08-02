@@ -46,7 +46,6 @@ function injection(mode = 'write'): RunInjection {
 }
 
 beforeAll(async () => {
-  await execa('npm', ['run', 'build']);
   stub = await stubAgentImage();
 
   repo = await createTargetRepo();
