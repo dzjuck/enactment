@@ -7,6 +7,8 @@ import { PhaseFailure, type FailureCategory } from './failure.js';
 
 export interface Timeouts {
   connectivity_smoke_seconds: number;
+  /** The cold dependency install's budget; a warm cache never reaches it. */
+  setup_seconds: number;
   agent_seconds: number;
   termination_grace_seconds: number;
 }
@@ -20,6 +22,7 @@ export function resolveTimeouts(task: Partial<Timeouts> = {}): Timeouts {
 
   return {
     connectivity_smoke_seconds: lower('connectivity_smoke_seconds'),
+    setup_seconds: lower('setup_seconds'),
     agent_seconds: lower('agent_seconds'),
     termination_grace_seconds: lower('termination_grace_seconds'),
   };

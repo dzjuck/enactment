@@ -6,6 +6,7 @@ import { z } from 'zod';
 // DESIGN.md §5 / §36.
 export const DEFAULT_TIMEOUTS = {
   connectivity_smoke_seconds: 60,
+  setup_seconds: 600,
   agent_seconds: 1200,
   termination_grace_seconds: 10,
 };
@@ -75,6 +76,7 @@ export const taskSchema = z.strictObject({
         .int()
         .positive()
         .default(DEFAULT_TIMEOUTS.connectivity_smoke_seconds),
+      setup_seconds: z.number().int().positive().default(DEFAULT_TIMEOUTS.setup_seconds),
       agent_seconds: z.number().int().positive().default(DEFAULT_TIMEOUTS.agent_seconds),
       termination_grace_seconds: z
         .number()

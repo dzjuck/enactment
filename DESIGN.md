@@ -231,6 +231,7 @@ Every invocation declares:
 ```yaml
 timeouts:
   connectivity_smoke_seconds: 60
+  setup_seconds: 600
   agent_seconds: 1200
   termination_grace_seconds: 10
 ```
@@ -253,6 +254,13 @@ provider_connectivity_timeout
 
 The shorter connectivity smoke-test timeout exists so that an unreachable provider is reported in
 under a minute rather than after the full agent budget.
+
+`setup_seconds` bounds the cold dependency install, which is the other phase that reaches the
+network and can therefore hang rather than fail. It uses the same ladder and is classified
+`setup_timeout`, kept distinct from `setup_failed`: a budget overrun and a package manager
+reporting a real error call for different responses. A warm dependency cache never reaches it.
+
+A task may lower any of these; it may never raise them.
 
 ---
 
@@ -1083,6 +1091,7 @@ codex:
 
   timeouts:
     connectivity_smoke_seconds: 60
+    setup_seconds: 600
     agent_seconds: 1200
     termination_grace_seconds: 10
 ```
@@ -1644,6 +1653,7 @@ network:
 
 timeouts:
   connectivity_smoke_seconds: 60
+  setup_seconds: 600
   agent_seconds: 1200
   termination_grace_seconds: 10
 

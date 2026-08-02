@@ -163,6 +163,8 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
         installCommand: install,
         network: networks.registry ?? 'none',
         images,
+        setupSeconds: timeouts.setup_seconds,
+        graceSeconds: timeouts.termination_grace_seconds,
       }),
     );
     const dependencySnapshot = await cache.read(cacheKey);

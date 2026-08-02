@@ -4,6 +4,8 @@ import { join } from 'node:path';
 
 import type { RuntimeImages } from '../docker/images.js';
 import { runContainer } from '../docker/run.js';
+import { PhaseFailure } from '../run/failure.js';
+import { CONTRACT_TIMEOUTS } from '../run/timeout.js';
 import { newAttemptId } from '../volume/naming.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
 
@@ -60,6 +62,9 @@ export interface SetupOptions {
   installCommand: readonly string[];
   network: string;
   images: RuntimeImages;
+  /** The install's budget (§5). Defaults to the contract; a task may lower it. */
+  setupSeconds?: number;
+  graceSeconds?: number;
 }
 
 export interface DependencyResult {
@@ -105,12 +110,32 @@ export async function ensureDependencySnapshot(options: SetupOptions): Promise<D
   );
 
   try {
-    const install = await runContainer({
-      image: options.images.setup.reference,
-      argv: [...options.installCommand],
-      network: options.network,
-      mounts: [workspaceMount(volume)],
-    });
+    // The install reaches the network, so it can hang exactly the way the agent can. It
+    // consumes the §5 ladder rather than running unbounded until the whole run is abandoned.
+    const install = await runContainer(
+      {
+        image: options.images.setup.reference,
+        argv: [...options.installCommand],
+        network: options.network,
+        mounts: [workspaceMount(volume)],
+      },
+      {
+        timeoutSeconds: options.setupSeconds ?? CONTRACT_TIMEOUTS.setup_seconds,
+        graceSeconds: options.graceSeconds ?? CONTRACT_TIMEOUTS.termination_grace_seconds,
+      },
+    );
+
+    // Distinct from a completed non-zero install: one is a budget overrun, the other is a
+    // real answer from the package manager, and they call for different responses.
+    if (install.status === 'timeout') {
+      throw new PhaseFailure(
+        'setup',
+        'setup_timeout',
+        `dependency install exceeded ${String(
+          options.setupSeconds ?? CONTRACT_TIMEOUTS.setup_seconds,
+        )}s and was terminated`,
+      );
+    }
 
     if (install.exitCode !== 0) {
       throw new SetupError(

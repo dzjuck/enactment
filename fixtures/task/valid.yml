@@ -10,5 +10,6 @@ verification:
     - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]
 timeouts:
   connectivity_smoke_seconds: 30
+  setup_seconds: 300
   agent_seconds: 600
   termination_grace_seconds: 5

@@ -2,10 +2,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { execa } from 'execa';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { exportCommit } from '../../src/git/export.js';
 import { DependencyCache, ensureDependencySnapshot, SetupError } from '../../src/deps/setup.js';
+import { withPhaseNetworks } from '../../src/net/manage.js';
+import { PhaseFailure } from '../../src/run/failure.js';
 import { newAttemptId } from '../../src/volume/naming.js';
 import { runtimeImages } from '../helpers/images.js';
 import { createRepo, createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
@@ -149,5 +152,63 @@ describe('dependency setup', () => {
     ).rejects.toThrow(SetupError);
 
     await expect(cache.has(key)).resolves.toBe(false);
+  }, 120_000);
+});
+
+describe('setup phase budget', () => {
+  /** Every attempt-scoped resource carries this, so a leak is a count rather than a guess. */
+  const LABEL = 'ai-harness.attempt';
+
+  async function labelled(attempt: string, kind: 'container' | 'volume' | 'network'): Promise<string[]> {
+    const filter = `label=${LABEL}=${attempt}`;
+    const args =
+      kind === 'container' ? ['ps', '-aq', '--filter', filter] : [kind, 'ls', '-q', '--filter', filter];
+
+    const { stdout } = await execa('docker', args);
+    return stdout.split('\n').filter((line) => line !== '');
+  }
+
+  /** An install that never exits: the ladder, not the command, has to end the phase. */
+  function hangingInstall(attempt: string): Promise<unknown> {
+    return withPhaseNetworks(attempt, 'setup', (networks) =>
+      ensureDependencySnapshot({
+        cache,
+        key: 'sha256:hanging-install',
+        attempt,
+        workspaceTar: tar,
+        installCommand: ['sh', '-c', 'while true; do sleep 1; done'],
+        network: networks.registry ?? 'none',
+        images,
+        setupSeconds: 5,
+        graceSeconds: 2,
+      }),
+    );
+  }
+
+  it('stops a hanging install within its budget and classifies it setup_timeout', async () => {
+    const started = Date.now();
+
+    const failure = await hangingInstall(newAttemptId()).catch((cause: unknown) => cause);
+
+    expect(failure).toBeInstanceOf(PhaseFailure);
+    expect((failure as PhaseFailure).category).toBe('setup_timeout');
+    // The budget is 5s plus the grace; anything near the 600s default means it was ignored.
+    expect(Date.now() - started).toBeLessThan(60_000);
+  }, 120_000);
+
+  it('leaves no cache entry for the timed-out key', async () => {
+    await expect(hangingInstall(newAttemptId())).rejects.toThrow(PhaseFailure);
+
+    await expect(cache.has('sha256:hanging-install')).resolves.toBe(false);
+  }, 120_000);
+
+  it('leaves no setup container, workspace volume or registry network behind', async () => {
+    const attempt = newAttemptId();
+
+    await expect(hangingInstall(attempt)).rejects.toThrow(PhaseFailure);
+
+    await expect(labelled(attempt, 'container')).resolves.toEqual([]);
+    await expect(labelled(attempt, 'volume')).resolves.toEqual([]);
+    await expect(labelled(attempt, 'network')).resolves.toEqual([]);
   }, 120_000);
 });

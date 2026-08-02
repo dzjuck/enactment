@@ -7,6 +7,7 @@ export const FAILURE_CATEGORIES = [
   'provider_connectivity_timeout',
   'agent_timeout',
   'agent_failed',
+  'setup_timeout',
   'setup_failed',
   'verification_failed',
   'invalid_change',

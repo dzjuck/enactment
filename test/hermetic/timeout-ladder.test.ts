@@ -32,6 +32,7 @@ describe('timeout configuration', () => {
   it('matches the §27 contract', () => {
     expect(CONTRACT_TIMEOUTS).toEqual({
       connectivity_smoke_seconds: 60,
+      setup_seconds: 600,
       agent_seconds: 1200,
       termination_grace_seconds: 10,
     });
@@ -42,6 +43,12 @@ describe('timeout configuration', () => {
     expect(resolveTimeouts({ agent_seconds: 99_999 }).agent_seconds).toBe(1200);
     expect(resolveTimeouts({ connectivity_smoke_seconds: 600 }).connectivity_smoke_seconds).toBe(60);
     expect(resolveTimeouts().agent_seconds).toBe(CONTRACT_TIMEOUTS.agent_seconds);
+  });
+
+  it('defaults setup_seconds to 600 and lets a task lower but not raise it', () => {
+    expect(resolveTimeouts().setup_seconds).toBe(600);
+    expect(resolveTimeouts({ setup_seconds: 120 }).setup_seconds).toBe(120);
+    expect(resolveTimeouts({ setup_seconds: 99_999 }).setup_seconds).toBe(600);
   });
 });
 
@@ -121,6 +128,11 @@ describe('timeout classification', () => {
 
     expect(failure).toBeInstanceOf(PhaseFailure);
     expect((failure as PhaseFailure).category).toBe('provider_connectivity_timeout');
+  });
+
+  it('keeps a setup timeout distinct from a completed non-zero install', () => {
+    expect(FAILURE_CATEGORIES).toContain('setup_timeout');
+    expect(FAILURE_CATEGORIES).toContain('setup_failed');
   });
 
   it('keeps that category distinct from a generic agent failure and a non-zero exit', () => {

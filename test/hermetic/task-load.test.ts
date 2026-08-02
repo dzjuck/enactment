@@ -34,6 +34,7 @@ describe('loadTask', () => {
       },
       timeouts: {
         connectivity_smoke_seconds: 30,
+        setup_seconds: 300,
         agent_seconds: 600,
         termination_grace_seconds: 5,
       },
@@ -92,6 +93,7 @@ describe('loadTask', () => {
 
     expect(task.timeouts).toEqual({
       connectivity_smoke_seconds: 60,
+      setup_seconds: 600,
       agent_seconds: 1200,
       termination_grace_seconds: 10,
     });
