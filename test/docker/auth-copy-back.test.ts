@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -78,6 +78,7 @@ interface Outcome {
   report: RunReport;
   artifacts: string;
   stored: string;
+  storeFile: string;
   manifest: { result: { cleanup_errors?: string[] } };
 }
 
@@ -122,6 +123,7 @@ async function runRotating(
     report,
     artifacts,
     stored: await readFile(join(storeDirectory, AUTH_FILE), 'utf8'),
+    storeFile: join(storeDirectory, AUTH_FILE),
     manifest: JSON.parse(await readFile(join(artifacts, 'run-manifest.json'), 'utf8')) as {
       result: { cleanup_errors?: string[] };
     },
@@ -185,6 +187,50 @@ describe('a rotated credential survives every way the agent block can end', () =
 
   it('leaves no credential value in the artifact tree', async () => {
     const { report, artifacts } = await runRotating({ STUB_MODE: 'fail' });
+    expect(report.status).toBe('failed');
+
+    const { stdout } = await execa('grep', ['-rl', 'r-rotated', artifacts], { reject: false });
+    expect(stdout.trim()).toBe('');
+  }, 300_000);
+});
+
+/**
+ * A credential the harness cannot read or cannot parse is not a rotation, and treating it as
+ * "nothing to copy back" would silently keep a token the provider has already replaced. The
+ * run fails; the previously established store is what survives.
+ */
+describe('a run credential that cannot be trusted fails the run', () => {
+  it.each([
+    ['missing', { STUB_AUTH_FATE: 'remove' }],
+    ['unreadable', { STUB_AUTH_FATE: 'unreadable' }],
+    ['not valid JSON', { STUB_AUTH_CONTENT: '{"tokens": truncated' }],
+  ])('fails the run when the run credential is %s', async (_name, env) => {
+    const { report, stored, storeFile } = await runRotating({ STUB_MODE: 'write', ...env });
+
+    expect(report.status).toBe('failed');
+    expect(report.cleanupErrors?.join('; ')).toContain(AUTH_FILE);
+
+    // The host store is left exactly as it was, and still usable by the next run.
+    expect(stored).toBe(SEEDED);
+    expect((await stat(storeFile)).mode & 0o777).toBe(0o600);
+    await expect(volumeExists(authVolumeName(report.attempt))).resolves.toBe(false);
+  }, 300_000);
+
+  it('still reports the commit the run verified before copy-back failed', async () => {
+    const { report } = await runRotating({ STUB_MODE: 'write', STUB_AUTH_FATE: 'remove' });
+
+    // Both facts, on one report: the work was verified and committed, and the credential
+    // could not be saved. Hiding either one sends the operator looking in the wrong place.
+    expect(report.status).toBe('failed');
+    expect(report.commit).toMatch(/^[0-9a-f]{40}$/);
+  }, 300_000);
+
+  it('writes no credential value into the failure it reports', async () => {
+    const { report, artifacts } = await runRotating({
+      STUB_MODE: 'write',
+      STUB_AUTH_CONTENT: `{"tokens": {"refresh_token": "r-rotated"`,
+    });
+
     expect(report.status).toBe('failed');
 
     const { stdout } = await execa('grep', ['-rl', 'r-rotated', artifacts], { reject: false });

@@ -6,7 +6,7 @@ import { execa } from 'execa';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { CODEX_HOME_PATH, compileCodexPolicy } from '../../src/adapters/codex/policy.js';
-import { AUTH_FILE, seedAuthStore, type AuthStore } from '../../src/auth/store.js';
+import { AUTH_FILE, AuthError, seedAuthStore, type AuthStore } from '../../src/auth/store.js';
 import {
   authMount,
   copyBackAuth,
@@ -137,12 +137,14 @@ describe('per-run auth volume', () => {
     await expect(copyBackAuth(volume, store, images)).resolves.toBe(false);
   }, 120_000);
 
-  it('reads a missing credential as absent rather than failing', async () => {
+  it('fails on a missing credential rather than reading it as absent', async () => {
     const volume = await seeded();
 
     await inAgent(volume, ['rm', `${CODEX_HOME_PATH}/${AUTH_FILE}`]);
 
-    await expect(readAuthVolumeFile(volume, AUTH_FILE, images)).resolves.toBeUndefined();
+    // "Absent" and "unreadable" are the same observation from here, and neither is a reason
+    // to keep a token the provider may already have rotated away.
+    await expect(readAuthVolumeFile(volume, AUTH_FILE, images)).rejects.toThrow(AuthError);
   }, 120_000);
 
   it('is attempt-scoped and swept by the attempt label', async () => {

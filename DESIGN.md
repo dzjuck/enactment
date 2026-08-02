@@ -230,6 +230,12 @@ containers running as the agent user; the credential travels on stdin, never in 
 environment value where `docker inspect` would retain it. The volume is destroyed with the
 attempt, and the rotated credential is copied back to the host store before it goes.
 
+Copy-back is fail-safe: only a credential that reads back and parses as JSON may replace the
+host store, which is the persistent source of truth. A missing, unreadable, empty or malformed
+run credential fails the run and leaves the previous credential intact — it is never renamed
+over. Because copy-back happens in teardown, such a failure can follow a verified, committed
+run; the failed report carries both facts, the commit and the copy-back error.
+
 Verifier, reviewer and setup containers receive no provider authentication.
 
 ### Execution timeouts

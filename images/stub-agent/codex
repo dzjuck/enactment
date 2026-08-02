@@ -24,6 +24,13 @@ if [ -n "$STUB_AUTH_CONTENT" ]; then
   printf '%s' "$STUB_AUTH_CONTENT" > "${CODEX_HOME:-/run/agent-auth}/auth.json"
 fi
 
+# The ways a wedged provider CLI can leave a credential the harness cannot use. Copy-back has
+# to fail on each of them rather than quietly keep the old token and claim a clean run.
+case "${STUB_AUTH_FATE:-}" in
+  remove) rm -f "${CODEX_HOME:-/run/agent-auth}/auth.json" ;;
+  unreadable) chmod 0 "${CODEX_HOME:-/run/agent-auth}/auth.json" ;;
+esac
+
 case "${STUB_MODE:-events}" in
   events|malformed|write)
     printf '%s\n' "$STUB_EVENTS"

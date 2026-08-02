@@ -25,7 +25,7 @@ export interface AuthVolumeDependencies {
     name: string,
     images: RuntimeImages,
     labels?: Record<string, string>,
-  ) => Promise<string | undefined>;
+  ) => Promise<string>;
 }
 
 /**
@@ -86,13 +86,21 @@ async function seedAuthVolume(
   }
 }
 
-/** Read one file out of the auth volume through an offline helper. Absent reads as absent. */
+/**
+ * Read one file out of the auth volume through an offline helper.
+ *
+ * Any non-zero helper exit is an error, never an absent file. A missing credential and one
+ * the helper could not read are indistinguishable from here, and both mean the same thing:
+ * the harness does not know what the provider left behind. Reporting that as "nothing to copy
+ * back" would keep a token the provider may already have replaced, and the run that discovers
+ * it is some later one, with no attributable cause.
+ */
 export async function readAuthVolumeFile(
   volume: string,
   name: string,
   images: RuntimeImages,
   labels?: Record<string, string>,
-): Promise<string | undefined> {
+): Promise<string> {
   const result = await runContainer({
     image: images.agent.id,
     argv: ['cat', `${CODEX_HOME_PATH}/${name}`],
@@ -101,7 +109,14 @@ export async function readAuthVolumeFile(
     ...(labels === undefined ? {} : { labels }),
   });
 
-  return result.exitCode === 0 ? result.stdoutBytes.toString('utf8') : undefined;
+  if (result.exitCode !== 0) {
+    // Names the file and the volume, never their content.
+    throw new AuthError(
+      `reading ${name} from auth volume ${volume} failed (${String(result.exitCode)})`,
+    );
+  }
+
+  return result.stdoutBytes.toString('utf8');
 }
 
 /**
@@ -137,6 +152,11 @@ export async function createAuthVolume(
  *
  * Codex rotates `tokens.refresh_token` and rewrites the file; a discarded rotation fails on
  * some later run with no attributable cause. Returns whether the store actually changed.
+ *
+ * Only a credential that reads back and parses as JSON may replace the established store —
+ * the store is the persistent source of truth, and a truncated or wiped run credential must
+ * not be renamed over it. Anything else fails the run instead, loudly and with the previous
+ * credential intact.
  */
 export async function copyBackAuth(
   volume: string,
@@ -148,7 +168,19 @@ export async function copyBackAuth(
   const read = dependencies.read ?? readAuthVolumeFile;
 
   const current = await read(volume, AUTH_FILE, images, labels);
-  if (current === undefined) return false;
+
+  if (current.trim() === '') {
+    throw new AuthError(`${AUTH_FILE} from auth volume ${volume} is empty; store left unchanged`);
+  }
+
+  try {
+    JSON.parse(current);
+  } catch {
+    // The message names the file, never its content.
+    throw new AuthError(
+      `${AUTH_FILE} from auth volume ${volume} is not valid JSON; store left unchanged`,
+    );
+  }
 
   return updateAuthStore(store, current);
 }
