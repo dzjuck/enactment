@@ -18,6 +18,7 @@ import {
   type VerificationResult,
 } from '../../src/verify/run.js';
 import { newAttemptId } from '../../src/volume/naming.js';
+import { dependencyVolumeName, workspaceVolumeName } from '../../src/volume/naming.js';
 import { volumeExists } from '../../src/volume/workspace.js';
 import { runtimeImages } from '../helpers/images.js';
 import { commitAll, createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
@@ -222,5 +223,69 @@ describe('verification phase', () => {
 
     expect(stored.status).toBe('pass');
     expect(stored.commands[0]?.argv).toEqual(['true']);
+  }, 300_000);
+});
+
+describe('verifier acquisition is transactional', () => {
+  /** The two volumes a verification acquires, named the way `runVerification` names them. */
+  function volumesFor(attempt: string): { workspace: string; dependencies: string } {
+    return {
+      workspace: workspaceVolumeName(`${attempt}-verify`),
+      dependencies: dependencyVolumeName(`${attempt}-verify`, 'verifier'),
+    };
+  }
+
+  async function expectBothGone(attempt: string): Promise<void> {
+    const { workspace, dependencies } = volumesFor(attempt);
+    await expect(volumeExists(workspace)).resolves.toBe(false);
+    await expect(volumeExists(dependencies)).resolves.toBe(false);
+  }
+
+  it('removes the workspace volume when the dependency volume cannot be created', async () => {
+    const attempt = newAttemptId();
+
+    await expect(
+      verify(passing, [VITEST], {
+        attempt,
+        createDependencies: () => Promise.reject(new Error('injected dependency failure')),
+      }),
+    ).rejects.toThrow('injected dependency failure');
+
+    await expectBothGone(attempt);
+  }, 300_000);
+
+  it('removes both volumes when restore fails after acquiring them', async () => {
+    const attempt = newAttemptId();
+
+    await expect(
+      verify(passing, [VITEST], {
+        attempt,
+        restore: () => Promise.reject(new Error('injected restore failure')),
+      }),
+    ).rejects.toThrow('injected restore failure');
+
+    await expectBothGone(attempt);
+  }, 300_000);
+
+  it('removes both volumes when a verification command fails', async () => {
+    const attempt = newAttemptId();
+
+    const { result } = await verify(failing, [VITEST], { attempt });
+
+    expect(result.status).toBe('fail');
+    await expectBothGone(attempt);
+  }, 300_000);
+
+  it('removes both volumes when a verification command times out', async () => {
+    const attempt = newAttemptId();
+
+    const { result } = await verify(passing, [['sleep', '120']], {
+      attempt,
+      timeoutSeconds: 3,
+      graceSeconds: 1,
+    });
+
+    expect(result.status).toBe('timeout');
+    await expectBothGone(attempt);
   }, 300_000);
 });
