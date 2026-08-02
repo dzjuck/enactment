@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ArchiveError, readArchive } from '../../src/artifacts/archive.js';
 import { manifestFromTar, sourceDiff } from '../../src/diff/source-diff.js';
 import { DiffValidationError, validateChanges } from '../../src/diff/validate.js';
+import { acceptChanges } from '../../src/git/accept.js';
 import { exportCommit } from '../../src/git/export.js';
 
 /**
@@ -246,6 +247,42 @@ describe('archive path fidelity', () => {
       'deleted src/link.js',
       'modified src/a.js',
     ]);
+  });
+
+  it('commits a PAX long path and a trailing-space name under their real names', async () => {
+    // The manifest being right is not the end of it: `git add` has to receive the same bytes,
+    // or the commit records a path nobody declared.
+    const before = await repoWith({ 'src/keep.js': 'x\n' });
+    const after = await repoWith({
+      'src/keep.js': 'x\n',
+      [LONG_PATH]: 'deep\n',
+      [TRAILING_SPACE]: 'spaced\n',
+    });
+
+    const changes = await sourceDiff(
+      (await exportCommit(before.dir, before.commit)).tar,
+      (await exportCommit(after.dir, after.commit)).tar,
+    );
+    const validated = validateChanges(changes, ['src/**']);
+
+    const accepted = await acceptChanges({
+      repoPath: before.dir,
+      baseCommit: before.commit,
+      branch: 'ai-harness/archive-matrix',
+      taskId: 'archive-matrix',
+      attempt: 'attempt-1',
+      idempotencyKey: 'sha256:archive-matrix',
+      verificationStatus: 'pass',
+      changes: validated.changes,
+    });
+
+    const listed = await git(before.dir, ['ls-tree', '-r', '--name-only', accepted.commit]);
+    const committed = listed.split('\n');
+
+    expect(committed).toContain(LONG_PATH);
+    expect(committed).toContain(TRAILING_SPACE);
+    expect(committed).not.toContain(NO_TRAILING_SPACE);
+    expect(committed.some((path) => path.endsWith('.data'))).toBe(false);
   });
 
   it('fails closed on an unsupported entry type, naming the real path', async () => {
