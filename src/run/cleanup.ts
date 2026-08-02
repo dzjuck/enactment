@@ -141,17 +141,22 @@ async function sweep(
     network: dependencies.removeNetwork ?? removeNetwork,
   };
 
-  const errors: string[] = [];
+  const attempted: string[] = [];
 
   for (const kind of SWEEP_ORDER) {
     for (const id of await list(kind)) {
       try {
         await remove[kind](id);
       } catch (error) {
-        errors.push(`${kind} ${id}: ${describeError(error)}`);
+        attempted.push(`${kind} ${id}: ${describeError(error)}`);
       }
     }
   }
+
+  // The final state is what counts, not every step that got there. A removal that raced with
+  // one already in flight — "removal is already in progress" — leaves nothing behind and is
+  // not a leak. A resource that is still listed is, and then the removal error explains why.
+  const errors: string[] = [];
 
   for (const kind of SWEEP_ORDER) {
     const survivors = await list(kind);
@@ -160,7 +165,7 @@ async function sweep(
     }
   }
 
-  if (errors.length > 0) throw new CleanupError(errors);
+  if (errors.length > 0) throw new CleanupError([...attempted, ...errors]);
 }
 
 /**

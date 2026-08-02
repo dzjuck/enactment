@@ -22,7 +22,15 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 
-const report = await runProduction({ ...options, signal: controller.signal });
+let report;
+
+try {
+  report = await runProduction({ ...options, signal: controller.signal });
+} catch (error) {
+  // Startup cleanup runs before any run report exists, so its failure has nowhere else to go.
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exit(1);
+}
 
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 process.exit(report.status === 'succeeded' && !interrupted ? 0 : 1);

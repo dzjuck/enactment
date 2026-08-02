@@ -57,6 +57,8 @@ const dockerGlobal = {
     name: 'docker-global',
     include: ['test/docker-global/**/*.test.ts'],
     globalSetup: ['test/setup/stub-agent.ts'],
+    // Also passed on the command line: these files sweep every harness-labelled resource, so
+    // two of them in flight at once delete each other's containers mid-test.
     fileParallelism: false,
     testTimeout: 900_000,
     hookTimeout: 900_000,
