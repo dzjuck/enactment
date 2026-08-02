@@ -1,0 +1,138 @@
+import { CODEX_HOME_PATH } from '../adapters/codex/policy.js';
+import type { Mount } from '../docker/args.js';
+import type { RuntimeImages } from '../docker/images.js';
+import { runContainer } from '../docker/run.js';
+import { withOwnedResource } from '../run/ownership.js';
+import { attemptLabels, authVolumeName } from '../volume/naming.js';
+import { createVolume, removeVolume, volumeExists } from '../volume/workspace.js';
+import { AUTH_FILE, AuthError, type AuthStore, updateAuthStore } from './store.js';
+
+/** What a run's CODEX_HOME contains: the credential, plus the compiled policy files. */
+export interface AuthVolumeContents {
+  auth: string;
+  policy: Record<string, string>;
+}
+
+export interface AuthVolumeDependencies {
+  seed?: (volume: string, contents: AuthVolumeContents, images: RuntimeImages) => Promise<void>;
+  read?: (volume: string, name: string, images: RuntimeImages) => Promise<string | undefined>;
+}
+
+/**
+ * The credential mount is a volume, never a bind of the host store.
+ *
+ * A bind mount carries host ownership into the container. On a runtime that remaps it — Docker
+ * Desktop, OrbStack — that is invisible; on native Linux a mode-0600 file owned by the host
+ * user is simply unreadable to uid 1001, and the fix would be to chown the user's own
+ * credentials. A volume removes host uid mapping from the container contract entirely.
+ *
+ * Read-write, because the provider CLI rewrites `auth.json` in place when it rotates (§5).
+ */
+export function authMount(volume: string): Mount {
+  return { type: 'volume', source: volume, target: CODEX_HOME_PATH };
+}
+
+/**
+ * Write the run's CODEX_HOME through an offline helper running as the agent user.
+ *
+ * The credential arrives on stdin so it never appears in an argv or an environment variable,
+ * where `docker inspect` would preserve it. The policy files are harness-generated and not
+ * secret, so they travel as environment values; their names come from the compiled policy,
+ * never from a model.
+ */
+async function seedAuthVolume(
+  volume: string,
+  contents: AuthVolumeContents,
+  images: RuntimeImages,
+): Promise<void> {
+  const env: Record<string, string> = {};
+  const script = ['set -e', 'umask 077', `cat > ${CODEX_HOME_PATH}/${AUTH_FILE}`];
+
+  Object.entries(contents.policy).forEach(([name, content], index) => {
+    const variable = `HARNESS_POLICY_FILE_${String(index)}`;
+    env[variable] = content;
+    script.push(`printf '%s' "$${variable}" > ${CODEX_HOME_PATH}/${name}`);
+  });
+
+  script.push(`chmod 0600 ${CODEX_HOME_PATH}/*`);
+
+  const result = await runContainer(
+    {
+      image: images.agent.reference,
+      argv: ['sh', '-c', script.join('\n')],
+      // Offline: a helper holding credentials has no reason to reach anything.
+      network: 'none',
+      env,
+      mounts: [authMount(volume)],
+    },
+    { input: Buffer.from(contents.auth) },
+  );
+
+  if (result.exitCode !== 0) {
+    // Names the volume, never the credential.
+    throw new AuthError(`seeding auth volume ${volume} failed (${String(result.exitCode)})`);
+  }
+}
+
+/** Read one file out of the auth volume through an offline helper. Absent reads as absent. */
+export async function readAuthVolumeFile(
+  volume: string,
+  name: string,
+  images: RuntimeImages,
+): Promise<string | undefined> {
+  const result = await runContainer({
+    image: images.agent.reference,
+    argv: ['cat', `${CODEX_HOME_PATH}/${name}`],
+    network: 'none',
+    mounts: [authMount(volume)],
+  });
+
+  return result.exitCode === 0 ? result.stdoutBytes.toString('utf8') : undefined;
+}
+
+/**
+ * Create the attempt's credential volume and seed it.
+ *
+ * Owned from creation: a seeding failure removes the volume rather than leaving a partially
+ * written credential directory behind.
+ */
+export async function createAuthVolume(
+  attempt: string,
+  contents: AuthVolumeContents,
+  images: RuntimeImages,
+  dependencies: AuthVolumeDependencies = {},
+): Promise<string> {
+  const seed = dependencies.seed ?? seedAuthVolume;
+  const name = authVolumeName(attempt);
+
+  if (await volumeExists(name)) {
+    throw new AuthError(`auth volume ${name} already exists`);
+  }
+
+  await createVolume(name, attemptLabels(attempt, 'auth'));
+
+  return withOwnedResource(name, removeVolume, async () => {
+    await seed(name, contents, images);
+    return name;
+  });
+}
+
+/**
+ * Take back whatever the provider CLI left behind (§5).
+ *
+ * Codex rotates `tokens.refresh_token` and rewrites the file; a discarded rotation fails on
+ * some later run with no attributable cause. Returns whether the store actually changed.
+ */
+export async function copyBackAuth(
+  volume: string,
+  store: AuthStore,
+  images: RuntimeImages,
+  dependencies: AuthVolumeDependencies = {},
+): Promise<boolean> {
+  const read = dependencies.read ?? readAuthVolumeFile;
+
+  const current = await read(volume, AUTH_FILE, images);
+  if (current === undefined) return false;
+
+  return updateAuthStore(store, current);
+}

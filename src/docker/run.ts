@@ -69,6 +69,10 @@ export async function runContainer(
       reject: false,
       // Always capture bytes; text is derived. Decoding a tar stream would corrupt it.
       encoding: 'buffer',
+      // execa strips a final newline by default, which would make captured output a near-copy
+      // rather than a copy. The credential copy-back claims to be byte-identical, so it has to
+      // be: a file that legitimately ends in a newline must come back with it.
+      stripFinalNewline: false,
       ...(options.input === undefined ? {} : { input: options.input }),
     },
   );

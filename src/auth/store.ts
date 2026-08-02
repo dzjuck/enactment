@@ -1,9 +1,8 @@
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { CODEX_HOME_PATH } from '../adapters/codex/policy.js';
-import type { Mount } from '../docker/args.js';
 
 export class AuthError extends Error {
   constructor(message: string) {
@@ -76,39 +75,32 @@ export async function seedAuthStore(
   return store;
 }
 
-/** Copy the stored credentials into the per-run CODEX_HOME that will be mounted. */
-export async function prepareRunAuth(store: AuthStore, runHomeDirectory: string): Promise<void> {
-  await mkdir(runHomeDirectory, { recursive: true, mode: 0o700 });
-
+/** The stored credential, for seeding a run's credential volume. */
+export async function readAuthStore(store: AuthStore): Promise<string> {
   const stored = await readIfPresent(store.file);
   if (stored === undefined) {
     throw new AuthError(`auth store ${store.file} is missing; re-seed it before running`);
   }
 
-  await writePrivate(join(runHomeDirectory, AUTH_FILE), stored);
+  return stored;
 }
 
 /**
- * Take back whatever Codex left behind. A read-only mount would break refresh, and a
- * discarded rotation fails on some later run with no attributable cause.
+ * Record a rotated credential, replacing the stored one only when it actually changed.
+ *
+ * The write goes through a private temporary file and a rename, so a reader never observes a
+ * half-written credential and an interrupted update cannot truncate the refresh chain.
  */
-export async function copyBackAuth(
-  runHomeDirectory: string,
-  store: AuthStore,
-): Promise<boolean> {
-  const current = await readIfPresent(join(runHomeDirectory, AUTH_FILE));
-  if (current === undefined) return false;
-
+export async function updateAuthStore(store: AuthStore, content: string): Promise<boolean> {
   const stored = await readIfPresent(store.file);
-  if (stored === current) return false;
+  if (stored === content) return false;
 
-  await writePrivate(store.file, current);
+  const staging = `${store.file}.staging`;
+  await writePrivate(staging, content);
+  await rename(staging, store.file);
+  await chmod(store.file, 0o600);
+
   return true;
-}
-
-export function authMount(runHomeDirectory: string): Mount {
-  // Read-write: the provider CLI persists rotated credentials here (§5).
-  return { type: 'bind', source: runHomeDirectory, target: CODEX_HOME_PATH };
 }
 
 export function authEnv(): Record<string, string> {

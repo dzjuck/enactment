@@ -17,6 +17,11 @@ export function dependencyVolumeName(attempt: string, phase: string): string {
   return `${LABEL_PREFIX}-deps-${attempt}-${phase}`;
 }
 
+/** The per-run credential volume (§5). One per attempt, destroyed with it. */
+export function authVolumeName(attempt: string): string {
+  return `${LABEL_PREFIX}-auth-${attempt}`;
+}
+
 export function networkName(attempt: string, role: string): string {
   return `${LABEL_PREFIX}-net-${attempt}-${role}`;
 }

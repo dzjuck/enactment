@@ -213,10 +213,22 @@ Mounted:
 ```text
 /workspace        writable Docker volume
 /context          read-only context
-/run/agent-auth   provider authentication, read-write
+/run/agent-auth   writable Docker volume, provider authentication
 ```
 
 `/run/agent-auth` is read-write because the provider CLI persists rotated credentials there.
+
+It is an **attempt-scoped Docker volume, never a bind mount of the harness auth store.** A bind
+mount carries host ownership into the container: on OrbStack and Docker Desktop the runtime
+remaps it and the problem is invisible, but on native Linux a mode-`0600` file owned by the
+invoking user is unreadable to uid 1001, and the only fix would be to `chown` the user's own
+credentials. A volume removes host uid mapping from the container contract entirely.
+
+The volume inherits `1001:1001` and mode `0700` from `/run/agent-auth` in the agent image, which
+is why that directory exists at build time. Seeding and read-back go through offline helper
+containers running as the agent user; the credential travels on stdin, never in an argv or an
+environment value where `docker inspect` would retain it. The volume is destroyed with the
+attempt, and the rotated credential is copied back to the host store before it goes.
 
 Verifier, reviewer and setup containers receive no provider authentication.
 
@@ -1584,9 +1596,12 @@ Established while building against `codex-cli 0.146.0`; each changed a decision.
 * **Model names carry metadata.** `gpt-5.6-luna` resolves cleanly; `gpt-5.1-codex-max` logs
   "model metadata not found" and falls back, degrading performance silently.
 * **Bind-mount ownership mapping is runtime-specific.** On OrbStack and Docker Desktop a host
-  directory owned by the invoking user appears inside the container as the container's own uid,
-  which is what makes the read-write `/run/agent-auth` mount work. On native Linux the numeric
-  ownership must match, so the auth store and per-run `CODEX_HOME` need explicit `chown` there.
+  directory owned by the invoking user appears inside the container as the container's own uid;
+  on native Linux the numeric ownership must match. Rather than `chown` a user's own
+  credentials, `/run/agent-auth` is an attempt-scoped volume — see §5.
+* **Captured container output is not the container's output by default.** `execa` strips a final
+  newline unless told not to, so a file read back through a container came out one byte short of
+  the original. Anything claiming a byte-identical round trip has to disable that.
 * **Named volumes take their ownership from the image's mount point.** A fresh volume mounted at
   a path the image owns as `1001:1001` comes up writable; mounted at a path the image does not
   have, it comes up `root:root` and a non-root container cannot write it.

@@ -1,15 +1,16 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { execa } from 'execa';
 
-import { compileCodexPolicy, materializeCodexHome } from '../adapters/codex/policy.js';
+import { compileCodexPolicy } from '../adapters/codex/policy.js';
 import { runCodexAgent } from '../adapters/codex/run.js';
 import { providerSmokeTest } from '../adapters/codex/smoke.js';
 import { ArtifactStore } from '../artifacts/store.js';
 import { collectSecrets, createRedactor } from '../artifacts/redact.js';
-import { copyBackAuth, authMount, prepareRunAuth, seedAuthStore } from '../auth/store.js';
+import { readAuthStore, seedAuthStore } from '../auth/store.js';
+import { authMount, copyBackAuth, createAuthVolume } from '../auth/volume.js';
 import { PROVIDER_ALLOWLIST } from '../config/pins.js';
 import { dependencyCacheKey, installCommand, lockfileHash } from '../deps/cache-key.js';
 import { DependencyCache, ensureDependencySnapshot } from '../deps/setup.js';
@@ -194,16 +195,15 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       options.storeDirectory ?? join(stateDirectory(), 'auth'),
       options.sourceCodexHome,
     );
-    redact = createRedactor(collectSecrets(await readAuth(authStore.file)));
-
-    // Never inside the artifact directory: it holds auth.json, and §32 forbids storing raw
-    // authentication among the artifacts.
-    const runHome = await mkdtemp(join(tmpdir(), 'harness-codex-home-'));
-    teardown.push(() => rm(runHome, { recursive: true, force: true }));
-    await prepareRunAuth(authStore, runHome);
+    const stored = await readAuthStore(authStore);
+    redact = createRedactor(collectSecrets(stored));
 
     const policy = compileCodexPolicy({ prompt: task.prompt, workdir: '/workspace' });
-    await materializeCodexHome(policy, runHome);
+
+    // CODEX_HOME is a per-attempt volume, not a bind of the host store: no host directory is
+    // ever mounted into a container, so no host uid mapping is part of the contract.
+    const runAuth = await createAuthVolume(attempt, { auth: stored, policy: policy.files }, images);
+    teardown.push(() => removeVolume(runAuth));
 
     const preAgent = await snapshotWorkspace(workspace, snapshots, images);
 
@@ -241,12 +241,12 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
               mounts: [
                 workspaceMount(workspace),
                 dependencyMount(agentDependencies),
-                authMount(runHome),
+                authMount(runAuth),
               ],
               timeoutSeconds: timeouts.agent_seconds,
               graceSeconds: timeouts.termination_grace_seconds,
               artifactDir: options.artifactDir,
-              secrets: collectSecrets(await readAuth(authStore.file)),
+              secrets: collectSecrets(stored),
               images: agentImages,
               onTimeout: () => restoreWorkspace(workspace, preAgent, images),
             });
@@ -257,7 +257,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       ),
     );
 
-    await copyBackAuth(runHome, authStore);
+    await copyBackAuth(runAuth, authStore, images);
     manifest.usage = usageSection(agentRun.usage);
 
     // §32: container logs are artifacts, and they pass through redaction like everything else.
@@ -385,10 +385,6 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
   }
 
   return report;
-}
-
-function readAuth(path: string): Promise<string> {
-  return readFile(path, 'utf8');
 }
 
 async function writeLog(artifactDir: string, name: string, content: string): Promise<void> {

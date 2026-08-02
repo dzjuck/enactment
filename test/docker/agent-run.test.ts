@@ -6,7 +6,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { EventParseError } from '../../src/adapters/codex/events.js';
 import { buildAgentSpec, runCodexAgent, type AgentRunResult } from '../../src/adapters/codex/run.js';
-import { AUTH_FILE, authMount, prepareRunAuth, seedAuthStore } from '../../src/auth/store.js';
+import { AUTH_FILE, readAuthStore, seedAuthStore } from '../../src/auth/store.js';
+import { authMount, createAuthVolume } from '../../src/auth/volume.js';
+import { compileCodexPolicy } from '../../src/adapters/codex/policy.js';
 import { DependencyCache, ensureDependencySnapshot } from '../../src/deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../../src/deps/volume.js';
 import { exportCommit } from '../../src/git/export.js';
@@ -32,7 +34,7 @@ const CANARY = 'sk-live-canary-4b81f0c2d7e6a9';
 let repo: TargetRepo;
 let tar: Buffer;
 let deps: Buffer;
-let runHome: string;
+let authVolume: string;
 let root: string;
 let images: RuntimeImages;
 let stubImages: RuntimeImages;
@@ -64,8 +66,15 @@ beforeAll(async () => {
   const source = join(root, 'codex-source');
   await prepareSource(source);
   const store = await seedAuthStore(join(root, 'store'), source);
-  runHome = join(root, 'run-home');
-  await prepareRunAuth(store, runHome);
+
+  authVolume = await createAuthVolume(
+    newAttemptId(),
+    {
+      auth: await readAuthStore(store),
+      policy: compileCodexPolicy({ prompt: PROMPT, workdir: '/workspace' }).files,
+    },
+    images,
+  );
 }, 600_000);
 
 async function prepareSource(dir: string): Promise<void> {
@@ -77,6 +86,7 @@ async function prepareSource(dir: string): Promise<void> {
 }
 
 afterAll(async () => {
+  await removeVolume(authVolume);
   await removeRepo(repo.dir);
   await rm(root, { recursive: true, force: true });
 });
@@ -112,7 +122,7 @@ async function runStub(
     prompt: PROMPT,
     network: 'none',
     env: { STUB_MODE: mode, STUB_EVENTS: events },
-    mounts: [workspaceMount(workspace), dependencyMount(depsVolume), authMount(runHome)],
+    mounts: [workspaceMount(workspace), dependencyMount(depsVolume), authMount(authVolume)],
     timeoutSeconds: 60,
     graceSeconds: 2,
     artifactDir: artifacts,
@@ -156,7 +166,7 @@ describe('agent invocation', () => {
       prompt: PROMPT,
       network: 'none',
       env: { STUB_MODE: 'mounts', STUB_EVENTS: '' },
-      mounts: [workspaceMount(workspace), dependencyMount(depsVolume), authMount(runHome)],
+      mounts: [workspaceMount(workspace), dependencyMount(depsVolume), authMount(authVolume)],
       timeoutSeconds: 60,
       graceSeconds: 2,
       artifactDir: artifacts,
@@ -234,7 +244,7 @@ describe('agent invocation', () => {
       prompt: PROMPT,
       network: 'none',
       env: { STUB_MODE: 'hang', STUB_EVENTS: '' },
-      mounts: [workspaceMount(workspace), dependencyMount(depsVolume), authMount(runHome)],
+      mounts: [workspaceMount(workspace), dependencyMount(depsVolume), authMount(authVolume)],
       timeoutSeconds: 3,
       graceSeconds: 2,
       artifactDir: artifacts,

@@ -18,6 +18,15 @@ RUN npm install -g "@openai/codex@${CODEX_VERSION}" \
 RUN groupadd -g "${AGENT_GID}" agent \
  && useradd -u "${AGENT_UID}" -g agent -m -d /home/agent -s /bin/bash agent
 
+# CODEX_HOME. It exists in the image so that the per-run auth volume mounted here inherits
+# uid/gid 1001 and mode 0700 from this directory: a volume mounted over a path the image does
+# not define is created root:root 0755, which the agent cannot write, and rotation needs to
+# rewrite auth.json in place. Owning it here is also what lets the harness avoid binding any
+# host directory into the container, so no host uid mapping is part of the contract.
+RUN mkdir -p /run/agent-auth \
+ && chown "${AGENT_UID}:${AGENT_GID}" /run/agent-auth \
+ && chmod 0700 /run/agent-auth
+
 # DESIGN.md §27 gate 13: no auto-update, no telemetry. The generated config.toml
 # carries the rest of the policy.
 ENV CODEX_DISABLE_UPDATE_CHECK=1 \

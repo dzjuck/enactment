@@ -7,9 +7,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   AUTH_FILE,
   AuthError,
-  copyBackAuth,
-  prepareRunAuth,
+  readAuthStore,
   seedAuthStore,
+  updateAuthStore,
 } from '../../src/auth/store.js';
 import { collectSecrets, createRedactor } from '../../src/artifacts/redact.js';
 
@@ -74,39 +74,40 @@ describe('auth store', () => {
     expect(await readFile(store.file, 'utf8')).toBe(authJson('first'));
   });
 
-  it('takes rotated credentials back from the run home', async () => {
+  it('records a rotated credential, and reports when nothing rotated', async () => {
     const store = await seedAuthStore(await tempDir('store'), await sourceHome('before'));
-    const runHome = await tempDir('run-home');
-    await prepareRunAuth(store, runHome);
 
-    await writeFile(join(runHome, AUTH_FILE), authJson('rotated'));
-    const changed = await copyBackAuth(runHome, store);
-
-    expect(changed).toBe(true);
+    await expect(updateAuthStore(store, authJson('rotated'))).resolves.toBe(true);
     expect(await readFile(store.file, 'utf8')).toBe(authJson('rotated'));
+
+    await expect(updateAuthStore(store, authJson('rotated'))).resolves.toBe(false);
+  });
+
+  it('reads back exactly what it stored, for seeding a run credential volume', async () => {
+    const store = await seedAuthStore(await tempDir('store'), await sourceHome('exact'));
+
+    expect(await readAuthStore(store)).toBe(authJson('exact'));
   });
 
   it('never writes to the user real Codex home', async () => {
     const source = await sourceHome();
+    // Read-only and read-executable only: a run that needed to write here would fail.
     await chmod(source, 0o500);
 
     const store = await seedAuthStore(await tempDir('store'), source);
-    const runHome = await tempDir('run-home');
-    await prepareRunAuth(store, runHome);
-    await writeFile(join(runHome, AUTH_FILE), authJson('rotated'));
 
-    await expect(copyBackAuth(runHome, store)).resolves.toBe(true);
+    await expect(updateAuthStore(store, authJson('rotated'))).resolves.toBe(true);
     expect(await readFile(join(source, AUTH_FILE), 'utf8')).toBe(authJson(CANARY));
     expect(await readdir(source)).toEqual([AUTH_FILE]);
   });
 
-  it('keeps stored and run credentials at mode 0600', async () => {
+  it('keeps the host store at mode 0600, including after a rotation', async () => {
     const store = await seedAuthStore(await tempDir('store'), await sourceHome());
-    const runHome = await tempDir('run-home');
-    await prepareRunAuth(store, runHome);
-
     expect((await stat(store.file)).mode & 0o777).toBe(0o600);
-    expect((await stat(join(runHome, AUTH_FILE))).mode & 0o777).toBe(0o600);
+
+    // The rotation path writes through a staging file and a rename; the mode must survive it.
+    await updateAuthStore(store, authJson('rotated'));
+    expect((await stat(store.file)).mode & 0o777).toBe(0o600);
   });
 
   it('names codex login when the source has no auth.json', async () => {

@@ -54,7 +54,7 @@ export interface ImagePin {
  */
 export const BUILT_IMAGE_PINS: Record<string, Record<ImageRole, string>> = {
   'linux/arm64': {
-    agent: 'sha256:9fe344e1bd32870b1b9d5a9271a7827a9a909b7de79a7a4b186d1cd1bcffe6d5',
+    agent: 'sha256:b0d63dee96552ad7445aa64a9368de47b00cb10d93020de4b26195f4601e802c',
     verifier: 'sha256:33a2d53e43d9fe1c4e34317dea36f7428c051c2cbeaa60195d11db25bf6c119c',
     setup: 'sha256:038a161bf2739ccc58dae0b1b38a370c9a7ddaa561c1928806036e82ce380dee',
     proxy: 'sha256:a4741dc58bf67ff444d69a574b9c4eeb9de12ff9b0217a9ab7a11605e352cb98',

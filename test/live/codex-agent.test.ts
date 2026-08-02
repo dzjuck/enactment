@@ -4,9 +4,10 @@ import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { compileCodexPolicy, materializeCodexHome } from '../../src/adapters/codex/policy.js';
+import { compileCodexPolicy } from '../../src/adapters/codex/policy.js';
 import { runCodexAgent } from '../../src/adapters/codex/run.js';
-import { authMount, prepareRunAuth, seedAuthStore } from '../../src/auth/store.js';
+import { readAuthStore, seedAuthStore } from '../../src/auth/store.js';
+import { authMount, copyBackAuth, createAuthVolume } from '../../src/auth/volume.js';
 import { IMAGE_PINS, PROVIDER_ALLOWLIST } from '../../src/config/pins.js';
 import { DependencyCache, ensureDependencySnapshot } from '../../src/deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../../src/deps/volume.js';
@@ -30,7 +31,8 @@ let repo: TargetRepo;
 let tar: Buffer;
 let deps: Buffer;
 let root: string;
-let runHome: string;
+let authVolume: string;
+let authStore: Awaited<ReturnType<typeof seedAuthStore>>;
 let images: RuntimeImages;
 
 beforeAll(async () => {
@@ -51,9 +53,7 @@ beforeAll(async () => {
   });
   deps = await cache.read('sha256:live-agent');
 
-  const store = await seedAuthStore(join(root, 'store'));
-  runHome = join(root, 'run-home');
-  await prepareRunAuth(store, runHome);
+  authStore = await seedAuthStore(join(root, 'store'));
 }, 900_000);
 
 afterAll(async () => {
@@ -74,7 +74,12 @@ describe('real Codex agent run', () => {
 
     await initSyntheticGit(workspace, images);
     const policy = compileCodexPolicy({ prompt: PROMPT, workdir: '/workspace' });
-    await materializeCodexHome(policy, runHome);
+
+    authVolume = await createAuthVolume(
+      attempt,
+      { auth: await readAuthStore(authStore), policy: policy.files },
+      images,
+    );
 
     try {
       const before = await runContainer({
@@ -103,7 +108,7 @@ describe('real Codex agent run', () => {
               mounts: [
                 workspaceMount(workspace),
                 dependencyMount(depsVolume),
-                authMount(runHome),
+                authMount(authVolume),
               ],
               timeoutSeconds: 1200,
               graceSeconds: 10,
@@ -136,6 +141,9 @@ describe('real Codex agent run', () => {
       expect(after.stdout).not.toBe(before.stdout);
       expect(after.stdout).not.toContain('not implemented');
     } finally {
+      // Rotation is taken back before the volume goes, exactly as a run would.
+      await copyBackAuth(authVolume, authStore, images).catch(() => undefined);
+      await removeVolume(authVolume);
       await removeVolume(workspace);
       await removeVolume(depsVolume);
     }
