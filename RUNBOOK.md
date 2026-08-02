@@ -15,7 +15,9 @@ crash. Nothing here uses the test suites.
 * Docker or OrbStack running (`docker version` must report a server).
 * Node.js ≥ 22.
 * `codex login` run once on the host. The harness reads `~/.codex/auth.json` exactly once to
-  seed its own store, then never writes to your Codex home again.
+  seed its own store, then never writes to your Codex home again. Once that store exists it is
+  the source of truth for the refresh chain and a later `codex login` does **not** replace it —
+  see "Re-authenticating".
 * A Git repository to work on, committed clean. The harness works from a commit, never from
   your working tree, and never touches your checked-out branch.
 
@@ -96,7 +98,22 @@ token. The manifest's `*_image_id` fields are the images that actually ran.
 Persistent state lives outside the artifact directory, under `HARNESS_STATE_DIR`: `auth/` (the
 credential store, mode `0600`) and `dependency-cache/`.
 
-## 5. Recovery
+## 5. Re-authenticating
+
+The harness store, once seeded, is deliberately never re-seeded: Codex rotates the refresh token
+in place, so overwriting the store from a stale `~/.codex/auth.json` would hand back a spent
+token. The consequence is that `codex login` alone does not give the harness a new credential —
+the store has to be removed first, so the next run seeds it again:
+
+```sh
+codex login
+rm -f "${HARNESS_STORE_DIR:-${HARNESS_STATE_DIR:-$HOME/.local/state/ai-harness}/auth}/auth.json"
+```
+
+The next run re-seeds the store from `~/.codex/auth.json`. Do this after any failure that says
+the credential could not be read, parsed, or saved.
+
+## 6. Recovery
 
 A run that ends normally — success or failure — releases everything it created. A process killed
 outright (SIGKILL, a crash) cannot, and leaves labelled resources behind:
@@ -111,7 +128,7 @@ The next production run removes all of them at startup, before creating its atte
 cleanup step is required; just start the next run. If startup cannot reach an empty state it
 refuses to run and names what survived.
 
-## 6. When something fails
+## 7. When something fails
 
 | Symptom | Meaning |
 | --- | --- |
@@ -121,4 +138,4 @@ refuses to run and names what survived.
 | `agent_timeout` / `agent_failed` | The agent was killed at its deadline or exited non-zero. The attempt workspace is discarded; no commit. |
 | `invalid_change` | The agent wrote outside `implementation_paths`, touched a dependency manifest, added an unsafe symlink, or changed nothing. |
 | `verification_failed` | The declared commands failed. The output is in `verification.json`. |
-| Report `failed` with a `commit` and a copy-back cleanup error | The work was verified and committed, but the rotated credential could not be saved. Re-run `codex login` before the next run. |
+| Report `failed` with a `commit` and a copy-back cleanup error | The work was verified and committed, but the rotated credential could not be saved. Re-authenticate (§5) before the next run. |
