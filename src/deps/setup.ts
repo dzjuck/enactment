@@ -6,7 +6,7 @@ import type { RuntimeImages } from '../docker/images.js';
 import { runContainer } from '../docker/run.js';
 import { PhaseFailure } from '../run/failure.js';
 import { CONTRACT_TIMEOUTS } from '../run/timeout.js';
-import { newAttemptId } from '../volume/naming.js';
+import { attemptLabels, newAttemptId } from '../volume/naming.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
 
 export class SetupError extends Error {
@@ -107,6 +107,7 @@ export async function ensureDependencySnapshot(options: SetupOptions): Promise<D
     `${options.attempt}-setup-${newAttemptId()}`,
     options.workspaceTar,
     options.images,
+    options.attempt,
   );
 
   try {
@@ -118,6 +119,7 @@ export async function ensureDependencySnapshot(options: SetupOptions): Promise<D
         argv: [...options.installCommand],
         network: options.network,
         mounts: [workspaceMount(volume)],
+        labels: attemptLabels(options.attempt, 'setup'),
       },
       {
         timeoutSeconds: options.setupSeconds ?? CONTRACT_TIMEOUTS.setup_seconds,

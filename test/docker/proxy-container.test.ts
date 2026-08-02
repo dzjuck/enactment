@@ -9,6 +9,7 @@ import { IMAGE_PINS } from '../../src/config/pins.js';
 import type { RuntimeImages } from '../../src/docker/images.js';
 import { runContainer, type RunResult } from '../../src/docker/run.js';
 import { withPhaseNetworks } from '../../src/net/manage.js';
+import { CleanupError } from '../../src/run/cleanup.js';
 import { OwnershipError } from '../../src/run/ownership.js';
 import {
   proxyEnvironment,
@@ -183,15 +184,18 @@ describe('proxy startup is atomic', () => {
   /** Start the proxy inside a real agent topology, with one startup step made to fail. */
   async function startWith(
     overrides: Partial<Parameters<typeof startProxyContainer>[0]>,
-  ): Promise<{ failure: unknown; name: string; networks: string[] }> {
+  ): Promise<{ failure: unknown; name: string; networks: string[]; teardown: unknown }> {
     const attempt = newAttemptId();
     const name = `ai-harness-proxy-${attempt}`;
     const created: string[] = [];
+    let failure: unknown;
 
-    const failure = await withPhaseNetworks(attempt, 'agent', (networks) => {
+    // Phase teardown now reports a network it could not remove, so its rejection is captured
+    // separately from the startup failure this helper is actually probing.
+    const teardown = await withPhaseNetworks(attempt, 'agent', async (networks) => {
       created.push(...Object.values(networks));
 
-      return startProxyContainer({
+      failure = await startProxyContainer({
         attempt,
         egressNetwork: networks.egress ?? '',
         outwardNetwork: networks['proxy-egress'] ?? '',
@@ -200,18 +204,23 @@ describe('proxy startup is atomic', () => {
         images,
         ...overrides,
       }).catch((cause: unknown) => cause);
-    });
+    }).then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
 
-    return { failure, name, networks: created };
+    return { failure, name, networks: created, teardown };
   }
 
   it('removes the container when the outward network connect fails', async () => {
-    const { failure, name } = await startWith({
+    const { failure, name, teardown } = await startWith({
       connect: () => Promise.reject(new Error('outward leg refused')),
     });
 
     expect((failure as Error).message).toContain('outward leg refused');
     await expect(containerExists(name)).resolves.toBe(false);
+    // Nothing was left holding an endpoint, so phase teardown had nothing to report.
+    expect(teardown).toBeUndefined();
   }, 120_000);
 
   it('removes the container when readiness fails after both attachments', async () => {
@@ -230,7 +239,7 @@ describe('proxy startup is atomic', () => {
   }, 120_000);
 
   it('reports both causes when the container also cannot be removed', async () => {
-    const { failure, name, networks } = await startWith({
+    const { failure, name, networks, teardown } = await startWith({
       connect: () => Promise.reject(new Error('outward leg refused')),
       stop: () => Promise.reject(new Error('daemon refused removal')),
     });
@@ -243,6 +252,11 @@ describe('proxy startup is atomic', () => {
       // The container is still there: that is the point — the harness reported the leak
       // instead of swallowing it. Removing it is this test's job, not the harness's.
       await expect(containerExists(name)).resolves.toBe(true);
+
+      // And the leak propagates: the network it still holds an endpoint on cannot be removed,
+      // and phase teardown says so rather than reporting a clean phase.
+      expect(teardown).toBeInstanceOf(CleanupError);
+      expect((teardown as Error).message).toContain('active endpoints');
     } finally {
       // A network the leaked container is still attached to cannot be removed, and the
       // daemon releases the endpoint asynchronously — so the container goes first and the

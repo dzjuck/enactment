@@ -31,6 +31,8 @@ export async function createDependencyVolume(
   phase: string,
   snapshot: Buffer,
   images: RuntimeImages,
+  /** The attempt whose label the volume carries; see `createWorkspaceVolume`. */
+  owner: string = attempt,
 ): Promise<string> {
   const name = dependencyVolumeName(attempt, phase);
 
@@ -38,7 +40,7 @@ export async function createDependencyVolume(
     throw new DependencyVolumeError(`dependency volume ${name} already exists`);
   }
 
-  await createVolume(name, attemptLabels(attempt, `deps-${phase}`));
+  await createVolume(name, attemptLabels(owner, `deps-${phase}`));
 
   try {
     const result = await runContainer(
@@ -56,7 +58,7 @@ export async function createDependencyVolume(
         ],
         network: 'none',
         mounts: [{ type: 'volume', source: name, target: WORKSPACE_PATH }],
-        labels: attemptLabels(attempt, `deps-${phase}-seed`),
+        labels: attemptLabels(owner, `deps-${phase}-seed`),
       },
       { input: snapshot },
     );

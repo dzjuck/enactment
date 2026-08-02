@@ -44,6 +44,12 @@ export async function createWorkspaceVolume(
   attempt: string,
   tar: Buffer,
   images: RuntimeImages,
+  /**
+   * The attempt whose label the volume carries. Defaults to `attempt`; a caller that scopes
+   * the *name* to a sub-phase passes the root attempt here, so the attempt-label sweep can
+   * still find the volume. A label nobody sweeps for is not a label.
+   */
+  owner: string = attempt,
 ): Promise<string> {
   const name = workspaceVolumeName(attempt);
 
@@ -51,7 +57,7 @@ export async function createWorkspaceVolume(
     throw new WorkspaceVolumeError(`workspace volume ${name} already exists`);
   }
 
-  await createVolume(name, attemptLabels(attempt, 'workspace'));
+  await createVolume(name, attemptLabels(owner, 'workspace'));
 
   try {
     const result = await runContainer(
@@ -68,7 +74,7 @@ export async function createWorkspaceVolume(
         ],
         network: 'none',
         mounts: [workspaceMount(name)],
-        labels: attemptLabels(attempt, 'seed'),
+        labels: attemptLabels(owner, 'seed'),
       },
       { input: tar },
     );

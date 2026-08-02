@@ -63,6 +63,7 @@ export async function runVerification(
     'verifier',
     options.dependencySnapshot,
     options.images,
+    options.attempt,
   );
 
   const commands: CommandResult[] = [];

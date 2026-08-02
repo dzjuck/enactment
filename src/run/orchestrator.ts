@@ -28,8 +28,10 @@ import { newAttemptId } from '../volume/naming.js';
 import { snapshotWorkspace, restoreWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
+import { CleanupError, describeError, releaseAll, sweepAttempt, withCleanupOutcome } from './cleanup.js';
 import { PhaseFailure, type FailureCategory } from './failure.js';
 import type { RunInjection } from './inject.js';
+import { OwnershipError } from './ownership.js';
 import { networkPolicySection, runtimeSection, usageSection } from './manifest.js';
 import { resolveTimeouts } from './timeout.js';
 
@@ -70,6 +72,8 @@ export interface RunReport {
   message?: string;
   commit?: string;
   branch?: string;
+  /** Resources the run could not release. Never empty on a report that claims success. */
+  cleanupErrors?: string[];
 }
 
 const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
@@ -89,8 +93,12 @@ export function stateDirectory(): string {
 }
 
 function classify(phase: RunPhase, error: unknown): FailureCategory {
-  if (error instanceof PhaseFailure) return error.category;
-  if (error instanceof DiffValidationError) return 'invalid_change';
+  // A cleanup failure wraps the phase failure it happened alongside; the phase failure is
+  // still what the run is about, so classification looks through the wrapper.
+  const primary = error instanceof OwnershipError ? error.cause : error;
+
+  if (primary instanceof PhaseFailure) return primary.category;
+  if (primary instanceof DiffValidationError) return 'invalid_change';
   return PHASE_CATEGORY[phase];
 }
 
@@ -345,9 +353,19 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       message: redact(error instanceof Error ? error.message : String(error)),
     };
   } finally {
-    for (const remove of teardown.reverse()) {
-      await remove().catch(() => undefined);
+    // Modules own their resources; this releases what the run registered, then sweeps the
+    // attempt label for anything ownership could not reach. Neither may fail quietly.
+    const cleanupErrors = await releaseAll(teardown);
+
+    try {
+      await sweepAttempt(attempt);
+    } catch (error) {
+      cleanupErrors.push(
+        ...(error instanceof CleanupError ? error.errors : [describeError(error)]),
+      );
     }
+
+    report = withCleanupOutcome(report, cleanupErrors.map((error) => redact(error)));
 
     manifest.result = {
       status: report.status,
@@ -356,6 +374,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       message: report.message,
       commit: report.commit,
       branch: report.branch,
+      cleanup_errors: report.cleanupErrors,
     };
 
     await mkdir(options.artifactDir, { recursive: true });
