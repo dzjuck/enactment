@@ -4,15 +4,18 @@ import { defineConfig } from 'vitest/config';
 //   hermetic      - Node + git only                 (npm test)
 //   docker        - needs a Docker daemon           (npm run test:docker)
 //   docker-images - builds the runtime images       (npm run test:docker, first, opt-in)
+//   docker-global - sweeps every harness resource   (npm run test:docker, last, opt-in)
 //   live          - real Codex auth, spends tokens  (npm run test:live, opt-in)
 //
-// Vitest runs projects concurrently, so the two opt-in suites are absent from the default set
+// Vitest runs projects concurrently, so the opt-in suites are absent from the default set
 // rather than merely filtered out of it:
 //
 //   `live` makes real model calls, and a bare `vitest run` must not be able to spend tokens.
 //   `docker-images` rebuilds the runtime image tags. A rebuild produces a new image ID and
 //   strips the old one, which invalidates the digest references every other file resolved at
 //   startup — so it can never share a run with a suite that starts containers.
+//   `docker-global` exercises the startup cleanup, which removes every harness-labelled
+//   resource on the daemon — including the ones a parallel suite is using.
 const IMAGE_BUILDERS = ['test/docker/images.test.ts'];
 
 const hermetic = {
@@ -49,6 +52,17 @@ const dockerImages = {
   },
 };
 
+const dockerGlobal = {
+  test: {
+    name: 'docker-global',
+    include: ['test/docker-global/**/*.test.ts'],
+    globalSetup: ['test/setup/stub-agent.ts'],
+    fileParallelism: false,
+    testTimeout: 900_000,
+    hookTimeout: 900_000,
+  },
+};
+
 const live = {
   test: {
     name: 'live',
@@ -61,6 +75,7 @@ const live = {
 const projects = [hermetic, docker];
 
 if (process.env.HARNESS_IMAGES !== undefined) projects.push(dockerImages);
+if (process.env.HARNESS_GLOBAL !== undefined) projects.push(dockerGlobal);
 if (process.env.HARNESS_LIVE !== undefined) projects.push(live);
 
 export default defineConfig({ test: { projects } });

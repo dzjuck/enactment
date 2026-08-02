@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "vitest run --project hermetic",
-    "test:docker": "HARNESS_IMAGES=1 vitest run --project docker-images --no-file-parallelism && vitest run --project docker",
+    "test:docker": "HARNESS_IMAGES=1 vitest run --project docker-images --no-file-parallelism && vitest run --project docker && HARNESS_GLOBAL=1 vitest run --project docker-global",
     "test:live": "HARNESS_LIVE=1 vitest run --project live",
     "build": "tsc --project tsconfig.build.json && echo '{\"type\":\"module\"}' > dist/package.json",
     "images:build": "npm run build && node dist/images-build.js",

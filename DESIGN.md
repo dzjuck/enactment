@@ -54,6 +54,7 @@ Not supported:
 * Docker-in-Docker;
 * agent Docker access;
 * parallel agents;
+* concurrent harness runs (see §5, startup cleanup);
 * remote workers;
 * production deployment;
 * external writes;
@@ -276,6 +277,18 @@ agent was handed, so a run can be reproduced — not a rollback point.
 
 Verifier failure changes nothing here either. Verification runs against a disposable copy of the
 implementation snapshot, so the agent workspace was never touched; the copy is simply removed.
+
+### Startup cleanup
+
+Every attempt-scoped container, volume and network carries the harness label. Ordinary teardown
+is owned by the module that created the resource and is scoped to one attempt; the label exists
+for what teardown cannot reach — a process killed outright, whose attempt id dies with it.
+
+The production CLI therefore sweeps **every** harness-labelled resource at startup, before it
+creates a new attempt, in the order containers → volumes → networks, and refuses to run if it
+cannot reach an empty state. That sweep owns all of them, which is why V1 does not support two
+production runs at once. Running a task programmatically stays attempt-scoped and never sweeps
+globally, which is what lets the test suites run in parallel.
 
 Failure category:
 

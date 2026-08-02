@@ -56,8 +56,16 @@ export interface SweepDependencies {
   removeNetwork?: (id: string) => Promise<void>;
 }
 
-async function listLabelled(kind: ResourceKind, attempt: string): Promise<string[]> {
-  const filter = `label=${ATTEMPT_LABEL}=${attempt}`;
+/** The same sweep, with no attempt to scope it: everything the harness labelled. */
+export interface HarnessSweepDependencies {
+  list?: (kind: ResourceKind) => Promise<string[]>;
+  removeContainer?: (id: string) => Promise<void>;
+  removeVolume?: (id: string) => Promise<void>;
+  removeNetwork?: (id: string) => Promise<void>;
+}
+
+/** A label filter with no value matches every value: every attempt, including unknown ones. */
+async function listByFilter(kind: ResourceKind, filter: string): Promise<string[]> {
   const args =
     kind === 'container'
       ? ['ps', '-aq', '--filter', filter]
@@ -65,6 +73,14 @@ async function listLabelled(kind: ResourceKind, attempt: string): Promise<string
 
   const { stdout } = await execa('docker', args);
   return stdout.split('\n').filter((line) => line !== '');
+}
+
+function listLabelled(kind: ResourceKind, attempt: string): Promise<string[]> {
+  return listByFilter(kind, `label=${ATTEMPT_LABEL}=${attempt}`);
+}
+
+function listHarnessLabelled(kind: ResourceKind): Promise<string[]> {
+  return listByFilter(kind, `label=${ATTEMPT_LABEL}`);
 }
 
 async function removeContainerById(id: string): Promise<void> {
@@ -90,6 +106,35 @@ export async function sweepAttempt(
   dependencies: SweepDependencies = {},
 ): Promise<void> {
   const list = dependencies.list ?? listLabelled;
+
+  await sweep((kind) => list(kind, attempt), dependencies);
+}
+
+/**
+ * Remove every resource carrying the harness label, whatever attempt it belonged to.
+ *
+ * This is the restart path: a process killed outright leaves labelled resources whose attempt
+ * id nobody remembers, so the only handle on them is the label itself. Because its blast
+ * radius is every harness resource on the daemon, it belongs at production CLI startup and
+ * nowhere else — `runTask` stays attempt-scoped, which is what lets suites run in parallel.
+ * The consequence, and the V1 trade: two production CLI runs at once are unsupported.
+ */
+export async function sweepHarness(dependencies: HarnessSweepDependencies = {}): Promise<void> {
+  const list = dependencies.list ?? listHarnessLabelled;
+
+  await sweep(list, dependencies);
+}
+
+interface RemovalDependencies {
+  removeContainer?: (id: string) => Promise<void>;
+  removeVolume?: (id: string) => Promise<void>;
+  removeNetwork?: (id: string) => Promise<void>;
+}
+
+async function sweep(
+  list: (kind: ResourceKind) => Promise<string[]>,
+  dependencies: RemovalDependencies,
+): Promise<void> {
   const remove: Record<ResourceKind, (id: string) => Promise<void>> = {
     container: dependencies.removeContainer ?? removeContainerById,
     volume: dependencies.removeVolume ?? removeVolumeById,
@@ -99,7 +144,7 @@ export async function sweepAttempt(
   const errors: string[] = [];
 
   for (const kind of SWEEP_ORDER) {
-    for (const id of await list(kind, attempt)) {
+    for (const id of await list(kind)) {
       try {
         await remove[kind](id);
       } catch (error) {
@@ -109,7 +154,7 @@ export async function sweepAttempt(
   }
 
   for (const kind of SWEEP_ORDER) {
-    const survivors = await list(kind, attempt);
+    const survivors = await list(kind);
     if (survivors.length > 0) {
       errors.push(`${kind}s still present after cleanup: ${survivors.join(', ')}`);
     }

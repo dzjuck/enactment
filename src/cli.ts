@@ -1,5 +1,5 @@
 import { CliUsageError, parseRunOptions } from './run/options.js';
-import { runTask } from './run/orchestrator.js';
+import { runProduction } from './run/production.js';
 
 let options;
 
@@ -22,7 +22,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 
-const report = await runTask({ ...options, signal: controller.signal });
+const report = await runProduction({ ...options, signal: controller.signal });
 
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 process.exit(report.status === 'succeeded' && !interrupted ? 0 : 1);
