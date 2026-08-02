@@ -16,8 +16,6 @@ import type { RuntimeImages } from '../../src/docker/images.js';
 import { runContainer } from '../../src/docker/run.js';
 import { usageSection } from '../../src/run/manifest.js';
 import { newAttemptId } from '../../src/volume/naming.js';
-import { restoreWorkspace, snapshotWorkspace } from '../../src/volume/snapshot.js';
-import { ArtifactStore } from '../../src/artifacts/store.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../../src/volume/workspace.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { runtimeImages } from '../helpers/images.js';
@@ -221,39 +219,6 @@ describe('agent invocation', () => {
     });
     expect(survivors.exitCode).toBe(0);
   }, 120_000);
-
-  it('restores the pre-invocation workspace after that timeout', async () => {
-    const { workspace, depsVolume, artifacts } = await attemptResources();
-    const store = new ArtifactStore(join(root, 'snapshots'));
-
-    const listing = (): Promise<string> =>
-      runContainer({
-        image: STUB_AGENT_IMAGE,
-        argv: ['sh', '-c', 'find /workspace -mindepth 1 -maxdepth 2 | sort'],
-        network: 'none',
-        mounts: [workspaceMount(workspace)],
-      }).then((run) => run.stdout);
-
-    const before = await listing();
-    const snapshot = await snapshotWorkspace(workspace, store, images);
-
-    const result = await runCodexAgent({
-      images: stubImages,
-      prompt: PROMPT,
-      network: 'none',
-      env: { STUB_MODE: 'hang', STUB_EVENTS: '' },
-      mounts: [workspaceMount(workspace), dependencyMount(depsVolume), authMount(authVolume)],
-      timeoutSeconds: 3,
-      graceSeconds: 2,
-      artifactDir: artifacts,
-      onTimeout: async () => {
-        await restoreWorkspace(workspace, snapshot, images);
-      },
-    });
-
-    expect(result.status).toBe('timeout');
-    expect(await listing()).toBe(before);
-  }, 180_000);
 
   it('reports malformed JSONL as a parse error rather than truncating', async () => {
     let failure: unknown;

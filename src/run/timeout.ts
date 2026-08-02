@@ -3,7 +3,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { execa } from 'execa';
 
 import { DEFAULT_TIMEOUTS } from '../task/schema.js';
-import { PhaseFailure, type FailureCategory } from './failure.js';
 
 export interface Timeouts {
   connectivity_smoke_seconds: number;
@@ -113,29 +112,4 @@ export async function withTimeoutLadder<T>(
 
   await killer.kill(options.name);
   return { timedOut: true };
-}
-
-export interface PhaseTimeoutOptions<T> extends TimeoutLadderOptions<T> {
-  phase: string;
-  category: FailureCategory;
-  /** Restore the pre-invocation workspace snapshot before the failure is reported (§5). */
-  onTimeout?: () => Promise<void>;
-}
-
-export async function withPhaseTimeout<T>(
-  work: Promise<T>,
-  options: Omit<PhaseTimeoutOptions<T>, 'work'>,
-): Promise<T> {
-  const result = await withTimeoutLadder({ ...options, work });
-
-  if (result.timedOut) {
-    await options.onTimeout?.();
-    throw new PhaseFailure(
-      options.phase,
-      options.category,
-      `${options.phase} exceeded ${String(options.timeoutSeconds)}s and was terminated`,
-    );
-  }
-
-  return result.value as T;
 }

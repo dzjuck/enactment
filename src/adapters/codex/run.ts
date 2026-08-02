@@ -25,8 +25,6 @@ export interface AgentRunOptions {
   workdir?: string;
   policy?: CompiledAgentPolicy;
   secrets?: readonly string[];
-  /** Restore the pre-invocation workspace snapshot; §5 runs this before the failure lands. */
-  onTimeout?: () => Promise<void>;
 }
 
 export interface AgentRunResult {
@@ -86,9 +84,9 @@ export async function runCodexAgent(options: AgentRunOptions): Promise<AgentRunR
     graceSeconds: options.graceSeconds,
   });
 
+  // A timed-out agent leaves a dirty workspace behind; the attempt disposes of it (§5), so
+  // there is nothing to put back here and no event stream worth parsing.
   if (result.status === 'timeout') {
-    await options.onTimeout?.();
-
     return {
       status: 'timeout',
       exitCode: result.exitCode,

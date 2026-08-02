@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
-import { posix } from 'node:path';
 
 import { execa, ExecaError } from 'execa';
+
+import { escapesTree } from '../util/paths.js';
 
 export class GitExportError extends Error {
   constructor(message: string) {
@@ -32,12 +33,6 @@ const SYMLINK_MODE = '120000';
 async function git(repoPath: string, args: string[]): Promise<string> {
   const { stdout } = await execa('git', ['-C', repoPath, ...args]);
   return stdout;
-}
-
-function escapesTree(linkPath: string, target: string): boolean {
-  if (target.startsWith('/')) return true;
-  const resolved = posix.normalize(posix.join(posix.dirname(linkPath), target));
-  return resolved === '..' || resolved.startsWith('../');
 }
 
 /**

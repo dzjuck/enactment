@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { execa } from 'execa';
 
 import { compileCodexPolicy } from '../adapters/codex/policy.js';
-import { runCodexAgent } from '../adapters/codex/run.js';
+import { runCodexAgent, type AgentRunResult } from '../adapters/codex/run.js';
 import { providerSmokeTest } from '../adapters/codex/smoke.js';
 import { ArtifactStore } from '../artifacts/store.js';
 import { collectSecrets, createRedactor } from '../artifacts/redact.js';
@@ -81,7 +81,10 @@ const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
   export: 'internal_error',
   setup: 'setup_failed',
   workspace: 'internal_error',
-  connectivity: 'provider_connectivity_timeout',
+  // Only the smoke test itself can conclude the provider is unreachable, and it raises that
+  // category directly. Everything else this phase does — creating the networks, starting the
+  // proxy — failing is a harness fault, not a verdict about the provider.
+  connectivity: 'internal_error',
   agent: 'agent_failed',
   diff: 'invalid_change',
   verify: 'verification_failed',
@@ -176,7 +179,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     const cache = new DependencyCache(
       options.dependencyCacheDirectory ?? join(stateDirectory(), 'dependency-cache'),
     );
-    await withPhaseNetworks(attempt, 'setup', (networks) =>
+    const dependencies = await withPhaseNetworks(attempt, 'setup', (networks) =>
       ensureDependencySnapshot({
         cache,
         key: cacheKey,
@@ -191,6 +194,11 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     );
     const dependencySnapshot = await cache.read(cacheKey);
     inputs.dependency_cache_key = cacheKey;
+
+    // §32: container logs are artifacts. A warm cache ran no container and has none.
+    if (!dependencies.cached) {
+      await writeLog(options.artifactDir, 'setup.log', dependencies.output);
+    }
 
     await phase('workspace');
     const workspace = await createWorkspaceVolume(attempt, tar, images);
@@ -248,6 +256,10 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
 
     // The agent invocation and the validation of what it produced.
     const runAgentAndValidate = async () => {
+      // Outside the topology, so that a network or proxy that fails to come up is attributed
+      // to this phase rather than to the workspace phase that happened to precede it.
+      await phase('connectivity');
+
       const agentRun = await withPhaseNetworks(attempt, 'agent', (networks) =>
         withProxy(
           {
@@ -260,9 +272,9 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
           },
           async (handle) => {
             const proxied = proxyEnvironment(handle);
+            let outcome: { value: AgentRunResult } | { error: unknown };
 
             try {
-              await phase('connectivity');
               await providerSmokeTest({
                 url: `https://${PROVIDER_ALLOWLIST[0] ?? 'chatgpt.com'}/`,
                 network: networks.egress ?? '',
@@ -273,28 +285,42 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
               });
 
               await phase('agent');
-              return await runCodexAgent({
-                prompt: task.prompt,
-                policy,
-                network: networks.egress ?? '',
-                // The harness's own proxy configuration is last: an injected environment
-                // may add to the container, never redirect its egress.
-                env: { ...options.injection?.agentEnv, ...proxied },
-                mounts: [
-                  workspaceMount(workspace),
-                  dependencyMount(agentDependencies),
-                  authMount(runAuth),
-                ],
-                timeoutSeconds: timeouts.agent_seconds,
-                graceSeconds: timeouts.termination_grace_seconds,
-                artifactDir: options.artifactDir,
-                secrets: collectSecrets(stored),
-                images: agentImages,
-                labels: attemptLabels(attempt, 'agent'),
-              });
-            } finally {
-              await writeProxyRecords(handle, options.artifactDir);
+              outcome = {
+                value: await runCodexAgent({
+                  prompt: task.prompt,
+                  policy,
+                  network: networks.egress ?? '',
+                  // The harness's own proxy configuration is last: an injected environment
+                  // may add to the container, never redirect its egress.
+                  env: { ...options.injection?.agentEnv, ...proxied },
+                  mounts: [
+                    workspaceMount(workspace),
+                    dependencyMount(agentDependencies),
+                    authMount(runAuth),
+                  ],
+                  timeoutSeconds: timeouts.agent_seconds,
+                  graceSeconds: timeouts.termination_grace_seconds,
+                  artifactDir: options.artifactDir,
+                  secrets: collectSecrets(stored),
+                  images: agentImages,
+                  labels: attemptLabels(attempt, 'agent'),
+                }),
+              };
+            } catch (error) {
+              outcome = { error };
             }
+
+            // Not in a `finally`: the records are the only evidence of what the agent
+            // contacted, so failing to write them fails a run that otherwise succeeded — but
+            // it must never displace a failure that was already in flight.
+            try {
+              await writeProxyRecords(handle, options.artifactDir);
+            } catch (error) {
+              if (!('error' in outcome)) throw error;
+            }
+
+            if ('error' in outcome) throw outcome.error;
+            return outcome.value;
           },
         ),
       );
@@ -347,6 +373,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       artifactDir: options.artifactDir,
       graceSeconds: timeouts.termination_grace_seconds,
       images,
+      redact,
     });
 
     await writeLog(

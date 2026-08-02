@@ -40,6 +40,12 @@ export interface VerificationOptions {
   images: RuntimeImages;
   timeoutSeconds?: number;
   graceSeconds?: number;
+  /**
+   * Applied to the stored result. The verifier holds no credentials of its own, but it runs
+   * the agent's source: anything the agent wrote into a file can reach this artifact through
+   * a command's output, so it passes the same boundary as every other artifact (§32).
+   */
+  redact?: (text: string) => string;
   /** Injectable acquisition steps, so each stage of the rollback window is testable. */
   createDependencies?: (
     scope: string,
@@ -154,10 +160,12 @@ export async function runVerification(
 
   if ('error' in outcome) throw outcome.error;
 
+  const redact = options.redact ?? ((text: string) => text);
+
   await mkdir(options.artifactDir, { recursive: true });
   await writeFile(
     join(options.artifactDir, VERIFICATION_ARTIFACT),
-    `${JSON.stringify(outcome.value, null, 2)}\n`,
+    redact(`${JSON.stringify(outcome.value, null, 2)}\n`),
   );
 
   return outcome.value;

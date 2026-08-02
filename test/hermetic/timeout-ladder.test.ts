@@ -1,10 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { FAILURE_CATEGORIES, PhaseFailure } from '../../src/run/failure.js';
+import { FAILURE_CATEGORIES } from '../../src/run/failure.js';
 import {
   CONTRACT_TIMEOUTS,
   resolveTimeouts,
-  withPhaseTimeout,
   withTimeoutLadder,
   type Killer,
 } from '../../src/run/timeout.js';
@@ -113,23 +112,6 @@ describe('termination ladder', () => {
 });
 
 describe('timeout classification', () => {
-  it('reports a smoke-test timeout as provider_connectivity_timeout', async () => {
-    const { killer } = recordingKiller();
-
-    const failure = await withPhaseTimeout(never(), {
-      name: 'harness-smoke',
-      phase: 'connectivity',
-      category: 'provider_connectivity_timeout',
-      timeoutSeconds: 0.01,
-      graceSeconds: 0,
-      killer,
-      sleep: async () => {},
-    }).catch((cause: unknown) => cause);
-
-    expect(failure).toBeInstanceOf(PhaseFailure);
-    expect((failure as PhaseFailure).category).toBe('provider_connectivity_timeout');
-  });
-
   it('keeps a setup timeout distinct from a completed non-zero install', () => {
     expect(FAILURE_CATEGORIES).toContain('setup_timeout');
     expect(FAILURE_CATEGORIES).toContain('setup_failed');
@@ -140,25 +122,5 @@ describe('timeout classification', () => {
     expect(FAILURE_CATEGORIES).toContain('agent_timeout');
     expect(FAILURE_CATEGORIES).toContain('agent_failed');
     expect(new Set(FAILURE_CATEGORIES).size).toBe(FAILURE_CATEGORIES.length);
-  });
-
-  it('restores the pre-invocation workspace before reporting the timeout', async () => {
-    const { killer } = recordingKiller();
-    const order: string[] = [];
-
-    await withPhaseTimeout(never(), {
-      name: 'harness-restore',
-      phase: 'agent',
-      category: 'agent_timeout',
-      timeoutSeconds: 0.01,
-      graceSeconds: 0,
-      killer,
-      sleep: async () => {},
-      onTimeout: async () => {
-        order.push('restored');
-      },
-    }).catch(() => order.push('reported'));
-
-    expect(order).toEqual(['restored', 'reported']);
   });
 });

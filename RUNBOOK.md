@@ -55,6 +55,9 @@ Rules the loader enforces: no unknown fields; verification commands are argv arr
 strings; `implementation_paths` are relative, free of `..`, and may not name `package.json` or a
 lockfile. `timeouts` may lower the defaults above, never raise them.
 
+`timeouts` does not cover verification: a verification command that hangs is killed after a fixed
+600 s in V1. If your suite legitimately runs longer than that, split it across commands.
+
 ## 3. Run
 
 ```sh
