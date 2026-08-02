@@ -1,9 +1,0 @@
-{
-  "attempt": "b68c0e13a5d34e53",
-  "result": {
-    "status": "failed",
-    "phase": "export",
-    "category": "internal_error",
-    "message": "Command failed with exit code 128: git -C /var/folders/qb/_cbw2brx2dz27bscmf0zchqr0000gn/T/harness-restart-pkg3xl/no-such-repo rev-parse HEAD\n\nfatal: cannot change to '/var/folders/qb/_cbw2brx2dz27bscmf0zchqr0000gn/T/harness-restart-pkg3xl/no-such-repo': No such file or directory"
-  }
-}

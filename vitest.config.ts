@@ -69,6 +69,9 @@ const live = {
   test: {
     name: 'live',
     include: ['test/live/**/*.test.ts'],
+    // The production-path test performs the global startup sweep, so live files cannot share
+    // a daemon concurrently.
+    fileParallelism: false,
     testTimeout: 1_800_000,
     hookTimeout: 300_000,
   },

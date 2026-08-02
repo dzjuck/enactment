@@ -162,7 +162,15 @@ describe('a SIGKILLed run is cleaned up by the next production CLI start', () =>
       // container — so the check costs no provider tokens.
       const restarted = await execa(
         'node',
-        ['dist/cli.js', 'run', taskFile, '--repo', join(root, 'no-such-repo')],
+        [
+          'dist/cli.js',
+          'run',
+          taskFile,
+          '--repo',
+          join(root, 'no-such-repo'),
+          '--artifacts',
+          artifacts,
+        ],
         { reject: false, env: { HARNESS_STATE_DIR: join(root, 'state') } },
       );
 
