@@ -104,7 +104,7 @@ export async function runVerification(
     for (const argv of options.commands) {
       const run = await runContainer(
         {
-          image: options.images.verifier.reference,
+          image: options.images.verifier.id,
           argv: [...argv],
           // DESIGN.md §6: no network at all, so verification cannot reach a model.
           network: 'none',

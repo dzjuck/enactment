@@ -1,24 +1,17 @@
-import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { execa } from 'execa';
 
-import {
-  BUILT_IMAGE_PINS,
-  IMAGE_PINS,
-  IMAGE_ROLES,
-  SUPPORTED_PLATFORMS,
-  type ImageRole,
-} from '../config/pins.js';
+import { IMAGE_PINS, IMAGE_ROLES, type ImageRole } from '../config/pins.js';
 
-export class ImagePinError extends Error {
+export class RuntimeImageError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'ImagePinError';
+    this.name = 'RuntimeImageError';
   }
 }
 
-/** Injectable so pin verification is testable without a daemon. Returns stdout. */
+/** Injectable so runtime resolution is testable without a daemon. Returns stdout. */
 export type DockerExec = (args: string[]) => Promise<string>;
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -41,113 +34,78 @@ export async function buildImage(role: ImageRole, exec: DockerExec = dockerExec)
   return pin.tag;
 }
 
-/** The image ID. Recorded for traceability; it is not the pin — see `resolveContentDigest`. */
-export async function resolveDigest(ref: string, exec: DockerExec = dockerExec): Promise<string> {
-  const digest = await exec(['image', 'inspect', '--format', '{{.Id}}', ref]);
-  return digest.trim();
+/** Build every runtime image. The operator entry point behind `npm run images:build`. */
+export async function buildAllImages(exec: DockerExec = dockerExec): Promise<string[]> {
+  const tags: string[] = [];
+  for (const role of IMAGE_ROLES) tags.push(await buildImage(role, exec));
+  return tags;
 }
 
 /**
- * Content identity: a hash over the image's filesystem layers **and** its config.
+ * The immutable Docker image ID a tag currently points at.
  *
- * The image ID cannot serve as a pin. BuildKit stamps a fresh creation timestamp into the
- * image config on every `docker build`, so the ID changes even when a fully cached rebuild
- * produced byte-identical layers — measured, not assumed.
- *
- * Layers alone are not enough either: `ENV`, `USER`, `WORKDIR` and `ENTRYPOINT` create no
- * filesystem layer, so the verifier and setup images have identical layer sets and would
- * collide. Config is where `USER 1001` and the cleared entrypoint live, so it is pinned too.
- * `.Created` sits outside `.Config` and is deliberately excluded.
+ * Tags are build aliases and can be reassigned at any moment; the ID cannot. Resolving once
+ * and then running the ID is what makes "what ran" and "what was recorded" the same value,
+ * even if something rebuilds the tag mid-run.
  */
-export async function resolveContentDigest(
-  ref: string,
-  exec: DockerExec = dockerExec,
-): Promise<string> {
-  const identity = await exec([
-    'image',
-    'inspect',
-    '--format',
-    '{{json .RootFS.Layers}}{{json .Config}}',
-    ref,
-  ]);
-
-  return `sha256:${createHash('sha256').update(identity.trim()).digest('hex')}`;
+export async function resolveImageId(ref: string, exec: DockerExec = dockerExec): Promise<string> {
+  const id = await exec(['image', 'inspect', '--format', '{{.Id}}', ref]);
+  return id.trim();
 }
 
-/** `linux/arm64`, `linux/amd64` — the identity that selects a built-image pin set. */
-export async function resolveDockerPlatform(exec: DockerExec = dockerExec): Promise<string> {
-  const platform = await exec(['version', '--format', '{{.Server.Os}}/{{.Server.Arch}}']);
-  return platform.trim();
-}
-
-/**
- * One role's verified runtime identity.
- *
- * `reference` is what containers are started from — the immutable image ID, not the mutable
- * tag, which is a build alias only. `digest` is the content identity the pin table declares
- * and the run manifest records. Keeping both means "what ran" and "what was recorded" are the
- * same value rather than two independently resolved ones.
- */
+/** One role's runtime identity: the image ID every container of that role is started from. */
 export interface RuntimeImage {
   role: ImageRole;
-  reference: string;
-  digest: string;
+  id: string;
 }
 
 export type RuntimeImages = Record<ImageRole, RuntimeImage>;
 
 export interface ResolveRuntimeImagesOptions {
-  /** The digest table for the platform; defaults to the committed pins. */
-  pins?: Record<ImageRole, string>;
-  platform?: string;
   exec?: DockerExec;
 }
 
 /**
- * Resolve every runtime image and refuse anything that is not exactly its pin.
+ * Resolve the four runtime tags to image IDs, once, before anything is started.
  *
- * The pin table is validated first, so a missing or unsupported entry is a configuration
- * error reported before a single image is inspected — an unpinned image never becomes a
- * runnable reference.
+ * V1 trusts the local Docker daemon: the Dockerfiles, the base-image digest and the tool
+ * versions are pinned in source, and an explicit build produces the local images. What must
+ * not happen is a run drifting between images mid-flight, which resolving up front prevents.
+ *
+ * A tag that does not resolve means the images were never built here, so the error says how
+ * to build them rather than reporting a raw `docker image inspect` failure.
  */
 export async function resolveRuntimeImages({
-  pins,
-  platform,
   exec = dockerExec,
 }: ResolveRuntimeImagesOptions = {}): Promise<RuntimeImages> {
-  const target = platform ?? (await resolveDockerPlatform(exec));
-
-  const table = pins ?? BUILT_IMAGE_PINS[target];
-  if (table === undefined) {
-    throw new ImagePinError(
-      `unsupported Docker server platform "${target}": no built-image pins are committed for it ` +
-        `(supported: ${SUPPORTED_PLATFORMS.join(', ')})`,
-    );
-  }
-
-  for (const role of IMAGE_ROLES) {
-    const pinned = table[role];
-    if (pinned === undefined || pinned === '') {
-      throw new ImagePinError(`no built-image digest pinned for ${role} on ${target}`);
-    }
-  }
-
   const images = {} as RuntimeImages;
 
   for (const role of IMAGE_ROLES) {
-    const pin = IMAGE_PINS[role];
-    const pinned = table[role] ?? '';
-    const digest = await resolveContentDigest(pin.tag, exec);
+    const { tag } = IMAGE_PINS[role];
 
-    if (pinned !== digest) {
-      throw new ImagePinError(
-        `image ${role} (${pin.tag}) has content digest ${digest}, but is pinned to ${pinned}`,
+    let id: string;
+    try {
+      id = await resolveImageId(tag, exec);
+    } catch (error) {
+      throw new RuntimeImageError(
+        `runtime image ${role} (${tag}) is not available locally: ` +
+          `run \`npm run images:build\` to build it (${describe(error)})`,
       );
     }
 
-    // Resolved only after the pin holds: an unverified tag never yields a runnable reference.
-    images[role] = { role, reference: await resolveDigest(pin.tag, exec), digest };
+    if (id === '') {
+      throw new RuntimeImageError(
+        `runtime image ${role} (${tag}) resolved to no image ID: ` +
+          'run `npm run images:build` to build it',
+      );
+    }
+
+    images[role] = { role, id };
   }
 
   return images;
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -1,7 +1,7 @@
 import { execa } from 'execa';
 
 import { AGENT_GID, AGENT_UID, NODE_BASE_IMAGE } from '../../src/config/pins.js';
-import { resolveContentDigest, resolveDigest, type RuntimeImage } from '../../src/docker/images.js';
+import { resolveImageId, type RuntimeImage } from '../../src/docker/images.js';
 
 export const STUB_AGENT_IMAGE = 'ai-harness/stub-agent:test';
 
@@ -10,11 +10,7 @@ export const STUB_AGENT_IMAGE = 'ai-harness/stub-agent:test';
  * rule that what ran is what the manifest records.
  */
 export async function stubAgentImage(): Promise<RuntimeImage> {
-  return {
-    role: 'agent',
-    reference: await resolveDigest(STUB_AGENT_IMAGE),
-    digest: await resolveContentDigest(STUB_AGENT_IMAGE),
-  };
+  return { role: 'agent', id: await resolveImageId(STUB_AGENT_IMAGE) };
 }
 
 export async function buildStubAgent(): Promise<string> {

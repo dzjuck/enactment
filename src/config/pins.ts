@@ -34,6 +34,11 @@ export type ImageRole = 'agent' | 'verifier' | 'setup' | 'proxy';
 
 export const IMAGE_ROLES: readonly ImageRole[] = ['agent', 'verifier', 'setup', 'proxy'];
 
+/**
+ * How one runtime image is built. The tag is a build alias only: what a run executes is the
+ * image ID the tag resolves to at startup (see `resolveRuntimeImages`). What is pinned here
+ * is the *inputs* — base image, tool versions, agent identity — not the built artifact.
+ */
 export interface ImagePin {
   role: ImageRole;
   tag: string;
@@ -43,25 +48,6 @@ export interface ImagePin {
   dockerfile?: string;
   buildArgs: Record<string, string>;
 }
-
-/**
- * Locally built images have no registry digest, and their image ID changes on every build.
- * The pin is therefore a content digest over layers plus config (see `resolveContentDigest`),
- * which is platform-specific. Pins are **required**: an unpinned image is a configuration
- * error, not a permissive default.
- *
- * Refreshing a pin is an explicit source change. Nothing updates this table at runtime.
- */
-export const BUILT_IMAGE_PINS: Record<string, Record<ImageRole, string>> = {
-  'linux/arm64': {
-    agent: 'sha256:b0d63dee96552ad7445aa64a9368de47b00cb10d93020de4b26195f4601e802c',
-    verifier: 'sha256:33a2d53e43d9fe1c4e34317dea36f7428c051c2cbeaa60195d11db25bf6c119c',
-    setup: 'sha256:038a161bf2739ccc58dae0b1b38a370c9a7ddaa561c1928806036e82ce380dee',
-    proxy: 'sha256:a4741dc58bf67ff444d69a574b9c4eeb9de12ff9b0217a9ab7a11605e352cb98',
-  },
-};
-
-export const SUPPORTED_PLATFORMS: readonly string[] = Object.keys(BUILT_IMAGE_PINS);
 
 const COMMON_BUILD_ARGS = {
   BASE_IMAGE: NODE_BASE_IMAGE,

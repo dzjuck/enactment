@@ -538,7 +538,7 @@ Any milestone that runs multi-step plans needs one before it ships.
 Cache key:
 
 ```text
-runtime image digest
+setup runtime image ID
 + lockfile hash
 + install command
 + lifecycle-script policy
@@ -842,10 +842,10 @@ execution_manifest:
 
   runtime:
     harness_version: 0.1.0
-    agent_image_digest: sha256:...
-    verifier_image_digest: sha256:...
-    setup_image_digest: sha256:...
-    proxy_image_digest: sha256:...
+    agent_image_id: sha256:...
+    verifier_image_id: sha256:...
+    setup_image_id: sha256:...
+    proxy_image_id: sha256:...
 ```
 
 Approval required for:
@@ -1364,7 +1364,7 @@ Store:
 * source diffs;
 * manifests;
 * snapshots;
-* image digests;
+* runtime image IDs;
 * dependency cache keys;
 * plan revisions;
 * usage metadata.

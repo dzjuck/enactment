@@ -30,7 +30,7 @@ export async function providerSmokeTest(options: SmokeOptions): Promise<SmokeRes
 
   const result = await runContainer(
     {
-      image: options.images.agent.reference,
+      image: options.images.agent.id,
       argv: [
         'curl',
         '-sS',

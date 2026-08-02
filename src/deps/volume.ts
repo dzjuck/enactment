@@ -45,7 +45,7 @@ export async function createDependencyVolume(
   try {
     const result = await runContainer(
       {
-        image: images.setup.reference,
+        image: images.setup.id,
         argv: [
           'tar',
           '--extract',

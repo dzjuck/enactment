@@ -13,7 +13,7 @@ export type LifecycleScriptPolicy = 'denied' | 'allowed';
 
 /** DESIGN.md §12: the four inputs, and nothing else. */
 export interface DependencyCacheInputs {
-  setupImageDigest: string;
+  setupImageId: string;
   lockfileHash: string;
   installCommand: readonly string[];
   lifecycleScripts: LifecycleScriptPolicy;
@@ -28,7 +28,7 @@ export const LOCKFILES = [
 
 export function dependencyCacheKey(inputs: DependencyCacheInputs): string {
   const canonical = JSON.stringify({
-    setupImageDigest: inputs.setupImageDigest,
+    setupImageId: inputs.setupImageId,
     lockfileHash: inputs.lockfileHash,
     installCommand: inputs.installCommand,
     lifecycleScripts: inputs.lifecycleScripts,

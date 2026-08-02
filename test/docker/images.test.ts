@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { CODEX_VERSION, IMAGE_PINS, IMAGE_ROLES } from '../../src/config/pins.js';
-import { buildImage, resolveDigest } from '../../src/docker/images.js';
+import { buildImage, resolveImageId } from '../../src/docker/images.js';
 import { runInImage } from '../helpers/docker.js';
 
 beforeAll(async () => {
@@ -52,7 +52,7 @@ describe('runtime images', () => {
     expect(gid.stdout.trim()).toBe('1001');
   });
 
-  it.each(IMAGE_ROLES)('resolves a sha256 digest for %s', async (role) => {
-    await expect(resolveDigest(IMAGE_PINS[role].tag)).resolves.toMatch(/^sha256:[0-9a-f]{64}$/);
+  it.each(IMAGE_ROLES)('resolves an image ID for %s', async (role) => {
+    await expect(resolveImageId(IMAGE_PINS[role].tag)).resolves.toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 });

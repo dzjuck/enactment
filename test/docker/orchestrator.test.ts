@@ -289,13 +289,13 @@ describe('orchestrator', () => {
     expect(manifest.inputs.export_hash).toMatch(/^sha256:/);
     expect(manifest.inputs.network_policy_hash).toMatch(/^sha256:/);
     expect(manifest.inputs.dependency_cache_key).toMatch(/^sha256:/);
-    expect(manifest.runtime.agent_image_digest).toMatch(/^sha256:/);
-    expect(manifest.runtime.verifier_image_digest).toMatch(/^sha256:/);
-    expect(manifest.runtime.setup_image_digest).toMatch(/^sha256:/);
-    expect(manifest.runtime.proxy_image_digest).toMatch(/^sha256:/);
+    expect(manifest.runtime.agent_image_id).toMatch(/^sha256:/);
+    expect(manifest.runtime.verifier_image_id).toMatch(/^sha256:/);
+    expect(manifest.runtime.setup_image_id).toMatch(/^sha256:/);
+    expect(manifest.runtime.proxy_image_id).toMatch(/^sha256:/);
   }, 900_000);
 
-  it('records the digest of the image it actually ran, not the production agent pin', async () => {
+  it('records the ID of the image it actually ran, not the production agent image', async () => {
     const { artifacts } = await run();
     const production = await resolveRuntimeImages();
 
@@ -303,13 +303,13 @@ describe('orchestrator', () => {
       runtime: Record<string, string>;
     };
 
-    expect(manifest.runtime.agent_image_digest).toBe(stub.digest);
-    expect(manifest.runtime.agent_image_digest).not.toBe(production.agent.digest);
+    expect(manifest.runtime.agent_image_id).toBe(stub.id);
+    expect(manifest.runtime.agent_image_id).not.toBe(production.agent.id);
 
     // Every role the injection did not replace is still the production identity.
-    expect(manifest.runtime.verifier_image_digest).toBe(production.verifier.digest);
-    expect(manifest.runtime.setup_image_digest).toBe(production.setup.digest);
-    expect(manifest.runtime.proxy_image_digest).toBe(production.proxy.digest);
+    expect(manifest.runtime.verifier_image_id).toBe(production.verifier.id);
+    expect(manifest.runtime.setup_image_id).toBe(production.setup.id);
+    expect(manifest.runtime.proxy_image_id).toBe(production.proxy.id);
   }, 900_000);
 
   it('writes no raw authentication material into the artifact tree', async () => {

@@ -12,7 +12,7 @@ import {
 import { commitAll, createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
 const inputs: DependencyCacheInputs = {
-  setupImageDigest: `sha256:${'a'.repeat(64)}`,
+  setupImageId: `sha256:${'a'.repeat(64)}`,
   lockfileHash: `sha256:${'b'.repeat(64)}`,
   installCommand: ['npm', 'ci', '--ignore-scripts'],
   lifecycleScripts: 'denied',
@@ -25,7 +25,7 @@ describe('dependencyCacheKey', () => {
   });
 
   it.each([
-    ['setupImageDigest', { setupImageDigest: `sha256:${'c'.repeat(64)}` }],
+    ['setupImageId', { setupImageId: `sha256:${'c'.repeat(64)}` }],
     ['lockfileHash', { lockfileHash: `sha256:${'d'.repeat(64)}` }],
     ['installCommand', { installCommand: ['npm', 'ci'] }],
     ['lifecycleScripts', { lifecycleScripts: 'allowed' as const }],

@@ -89,7 +89,7 @@ export async function startProxyContainer(options: ProxyContainerOptions): Promi
   const stop = options.stop ?? stopContainer;
 
   await startContainer({
-    image: options.images.proxy.reference,
+    image: options.images.proxy.id,
     argv: ['node', '/app/main.js'],
     network: options.egressNetwork,
     name,

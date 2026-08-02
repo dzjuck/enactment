@@ -115,7 +115,7 @@ export async function ensureDependencySnapshot(options: SetupOptions): Promise<D
     // consumes the §5 ladder rather than running unbounded until the whole run is abandoned.
     const install = await runContainer(
       {
-        image: options.images.setup.reference,
+        image: options.images.setup.id,
         argv: [...options.installCommand],
         network: options.network,
         mounts: [workspaceMount(volume)],
@@ -146,7 +146,7 @@ export async function ensureDependencySnapshot(options: SetupOptions): Promise<D
     }
 
     const capture = await runContainer({
-      image: options.images.setup.reference,
+      image: options.images.setup.id,
       // An install that produced no packages still yields a valid, empty snapshot.
       argv: ['sh', '-c', `mkdir -p /workspace/${NODE_MODULES} && exec ${CAPTURE_ARGV.join(' ')}`],
       network: 'none',

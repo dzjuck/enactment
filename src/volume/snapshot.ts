@@ -51,7 +51,7 @@ export async function snapshotWorkspace(
   labels?: Record<string, string>,
 ): Promise<StoredArtifact> {
   const result = await runContainer({
-    image: images.setup.reference,
+    image: images.setup.id,
     argv: SNAPSHOT_ARGV,
     network: 'none',
     mounts: [workspaceMount(volume)],
@@ -79,7 +79,7 @@ export async function restoreWorkspace(
 
   const result = await runContainer(
     {
-      image: images.setup.reference,
+      image: images.setup.id,
       argv: ['sh', '-c', RESTORE_SCRIPT],
       network: 'none',
       mounts: [workspaceMount(volume)],

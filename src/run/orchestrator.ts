@@ -143,7 +143,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     // and the manifest records this same value rather than a separately resolved one.
     const images: RuntimeImages = await resolveRuntimeImages();
 
-    // Harness-owned helpers keep the verified set even where they use the agent role; only
+    // Harness-owned helpers keep the resolved set even where they use the agent role; only
     // the agent invocation itself is substitutable, and only by a test.
     const agentImages: RuntimeImages = {
       ...images,
@@ -168,7 +168,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     await phase('setup');
     const install = installCommand('denied');
     const cacheKey = dependencyCacheKey({
-      setupImageDigest: images.setup.digest,
+      setupImageId: images.setup.id,
       lockfileHash: await lockfileHash(options.repoPath, baseCommit),
       installCommand: install,
       lifecycleScripts: 'denied',

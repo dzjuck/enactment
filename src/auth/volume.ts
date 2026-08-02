@@ -69,7 +69,7 @@ async function seedAuthVolume(
 
   const result = await runContainer(
     {
-      image: images.agent.reference,
+      image: images.agent.id,
       argv: ['sh', '-c', script.join('\n')],
       // Offline: a helper holding credentials has no reason to reach anything.
       network: 'none',
@@ -94,7 +94,7 @@ export async function readAuthVolumeFile(
   labels?: Record<string, string>,
 ): Promise<string | undefined> {
   const result = await runContainer({
-    image: images.agent.reference,
+    image: images.agent.id,
     argv: ['cat', `${CODEX_HOME_PATH}/${name}`],
     network: 'none',
     mounts: [authMount(volume)],

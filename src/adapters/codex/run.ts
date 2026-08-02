@@ -58,7 +58,7 @@ export function buildAgentSpec(options: AgentRunOptions): ContainerSpec {
   const policy = policyFor(options);
 
   return {
-    image: options.images.agent.reference,
+    image: options.images.agent.id,
     argv: policy.args,
     network: options.network,
     ...(options.labels === undefined ? {} : { labels: options.labels }),

@@ -6,10 +6,10 @@ import type { RuntimeImages } from '../docker/images.js';
 /** The `runtime` block of the DESIGN.md §20 execution manifest. */
 export interface RuntimeSection {
   harness_version: string;
-  agent_image_digest: string;
-  verifier_image_digest: string;
-  setup_image_digest: string;
-  proxy_image_digest: string;
+  agent_image_id: string;
+  verifier_image_id: string;
+  setup_image_id: string;
+  proxy_image_id: string;
 }
 
 /** DESIGN.md §33: usage is recorded per run so cost and routing can be reasoned about. */
@@ -57,9 +57,9 @@ export function networkPolicySection(
 export function runtimeSection(images: RuntimeImages): RuntimeSection {
   return {
     harness_version: HARNESS_VERSION,
-    agent_image_digest: images.agent.digest,
-    verifier_image_digest: images.verifier.digest,
-    setup_image_digest: images.setup.digest,
-    proxy_image_digest: images.proxy.digest,
+    agent_image_id: images.agent.id,
+    verifier_image_id: images.verifier.id,
+    setup_image_id: images.setup.id,
+    proxy_image_id: images.proxy.id,
   };
 }

@@ -13,7 +13,7 @@ import { defineConfig } from 'vitest/config';
 //   `docker-images` rebuilds the runtime image tags. A rebuild produces a new image ID and
 //   strips the old one, which invalidates the digest references every other file resolved at
 //   startup — so it can never share a run with a suite that starts containers.
-const IMAGE_BUILDERS = ['test/docker/images.test.ts', 'test/docker/built-image-pins.test.ts'];
+const IMAGE_BUILDERS = ['test/docker/images.test.ts'];
 
 const hermetic = {
   test: {
@@ -41,8 +41,8 @@ const dockerImages = {
   test: {
     name: 'docker-images',
     include: IMAGE_BUILDERS,
-    // Also passed on the command line: these files rebuild the shared image tags, and two of
-    // them in flight at once makes `docker image inspect` fail while a tag is reassigned.
+    // Also passed on the command line: this file rebuilds the shared image tags, and a
+    // reassigned tag invalidates the image IDs every other file resolved at startup.
     fileParallelism: false,
     testTimeout: 300_000,
     hookTimeout: 300_000,

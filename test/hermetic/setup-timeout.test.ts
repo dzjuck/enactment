@@ -62,8 +62,7 @@ const IMAGES = Object.fromEntries(
     role,
     {
       role,
-      reference: `sha256:${String(index + 1).repeat(64)}`,
-      digest: `sha256:${String(index + 5).repeat(64)}`,
+      id: `sha256:${String(index + 1).repeat(64)}`,
     },
   ]),
 ) as RuntimeImages;

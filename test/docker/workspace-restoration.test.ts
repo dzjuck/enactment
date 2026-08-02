@@ -207,7 +207,7 @@ describe('dirty-workspace restoration', () => {
 
     // A failure manifest that lost the run's identity would make the evidence unusable.
     expect(manifest.repository?.base_commit).toBe(repo.commit);
-    expect(manifest.runtime?.agent_image_digest).toBe(stub.digest);
+    expect(manifest.runtime?.agent_image_id).toBe(stub.id);
     expect(manifest.inputs?.task_hash).toMatch(/^sha256:/);
     expect(manifest.snapshots?.pre_agent).toBe(manifest.restoration?.pre_agent);
   }, 300_000);

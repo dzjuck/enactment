@@ -45,7 +45,7 @@ const probe = ['sh', '-c', `cat ${CODEX_HOME_PATH}/${AUTH_FILE} 2>&1; env | grep
 
 function run(role: ImageRole, withAuth: boolean): Promise<RunResult> {
   return runContainer({
-    image: images[role].reference,
+    image: images[role].id,
     argv: probe,
     network: 'none',
     ...(withAuth ? { env: authEnv(), mounts: [authMount(authVolume)] } : {}),
@@ -72,7 +72,7 @@ describe('provider auth mount', () => {
 
   it('mounts the credentials read-write, as rotation requires', async () => {
     const result = await runContainer({
-      image: images.agent.reference,
+      image: images.agent.id,
       argv: ['sh', '-c', `touch ${CODEX_HOME_PATH}/rotation-probe`],
       network: 'none',
       env: authEnv(),

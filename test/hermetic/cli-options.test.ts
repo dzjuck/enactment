@@ -14,10 +14,10 @@ const SRC = fileURLToPath(new URL('../../src', import.meta.url));
 const digits = (value: number): string => `sha256:${String(value).repeat(64)}`;
 
 const IMAGES: RuntimeImages = {
-  agent: { role: 'agent', reference: digits(1), digest: digits(5) },
-  verifier: { role: 'verifier', reference: digits(2), digest: digits(6) },
-  setup: { role: 'setup', reference: digits(3), digest: digits(7) },
-  proxy: { role: 'proxy', reference: digits(4), digest: digits(8) },
+  agent: { role: 'agent', id: digits(1) },
+  verifier: { role: 'verifier', id: digits(2) },
+  setup: { role: 'setup', id: digits(3) },
+  proxy: { role: 'proxy', id: digits(4) },
 };
 
 const BASE = ['run', 'task.yml', '--repo', '/repo'];
@@ -110,7 +110,7 @@ describe('HARNESS_AGENT_ENV has no production effect', () => {
     });
     const argv = buildRunArgs(spec);
 
-    expect(spec.image).toBe(IMAGES.agent.reference);
+    expect(spec.image).toBe(IMAGES.agent.id);
     expect(argv).toContain('CODEX_HOME=/run/agent-auth');
     expect(argv).toContain(`HOME=${AGENT_HOME}`);
     expect(argv).not.toContain('CODEX_HOME=/evil');

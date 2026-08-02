@@ -60,7 +60,7 @@ async function leakAttempt(): Promise<string> {
     `${LABEL}=${attempt}`,
     '--network',
     network,
-    images.verifier.reference,
+    images.verifier.id,
     'sleep',
     '300',
   ]);
