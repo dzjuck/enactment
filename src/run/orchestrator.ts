@@ -220,6 +220,21 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     const runAuth = await createAuthVolume(attempt, { auth: stored, policy: policy.files }, images);
     teardown.push(() => removeVolume(runAuth));
 
+    // Pushed *after* the removal so that teardown's reverse order runs it *first*: the volume
+    // is deleted only once a rotated credential is safely in the store, or the failure to save
+    // it has been recorded. Registered only now, because there is nothing to copy back until
+    // seeding has succeeded.
+    //
+    // In teardown rather than inline because the agent block has several exits — a timeout, a
+    // non-zero exit, an unparseable event stream, a failure writing the proxy artifacts — and
+    // an inline call covers only the ones that return normally. Codex rotates the refresh
+    // token in place, so a rotation dropped here fails some later run with no attributable
+    // cause. `releaseAll` collects the error rather than throwing, and a run that could not
+    // save a rotated credential does not get to report success.
+    teardown.push(async () => {
+      await copyBackAuth(runAuth, authStore, images, {}, attemptLabels(attempt, 'auth-read'));
+    });
+
     const preAgent = await snapshotWorkspace(
       workspace,
       snapshots,
@@ -322,7 +337,6 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
         ),
       );
 
-      await copyBackAuth(runAuth, authStore, images, {}, attemptLabels(attempt, 'auth-read'));
       manifest.usage = usageSection(agentRun.usage);
 
       // §32: container logs are artifacts, and they pass through redaction like everything else.
