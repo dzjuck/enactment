@@ -260,21 +260,22 @@ On timeout:
 SIGTERM
 → wait termination_grace_seconds
 → SIGKILL container
-→ restore pre-invocation workspace snapshot
+→ dispose of the attempt workspace
 → classify failure
 ```
 
-Restoration is not specific to the timeout path. Once the pre-agent snapshot exists, **every**
-failure that can leave the agent workspace half-written restores it before the error propagates:
-a killed agent, one that exited non-zero, an unparseable event stream, and a change that fails
-scope, dependency-manifest or symlink validation. The restored workspace is snapshotted again and
-both hashes are recorded, so "it was restored" is checkable rather than asserted — equal hashes
-are the evidence. A restoration that fails is reported alongside the phase failure, never in
-place of it.
+**A failed attempt's workspace is disposable.** Every failure that can leave it half-written — a
+killed agent, one that exited non-zero, an unparseable event stream, a change that fails scope,
+dependency-manifest or symlink validation — deletes the workspace volume with the rest of the
+attempt. Nothing downstream ever reads it again, so nothing restores it first: restoring a volume
+in order to delete it produces a claim, not a safety property, and a manifest that reports a
+restoration nobody needed is worse than one that reports none.
 
-Verifier failure is deliberately excluded. Verification runs against a disposable copy of the
-implementation snapshot, so there is nothing in the agent workspace to undo; the copy is simply
-removed. Restoring there would be a no-op dressed up as a safety property.
+The pre-agent snapshot is still taken and recorded. It is evidence — the exact workspace the
+agent was handed, so a run can be reproduced — not a rollback point.
+
+Verifier failure changes nothing here either. Verification runs against a disposable copy of the
+implementation snapshot, so the agent workspace was never touched; the copy is simply removed.
 
 Failure category:
 
@@ -515,16 +516,13 @@ workspace volume
 → immutable artifact
 ```
 
-On:
+A snapshot is an immutable record and, where a later phase needs the same tree, the thing it is
+seeded from — the verifier's disposable copy is a restore of the implementation snapshot into a
+fresh volume.
 
-* timeout;
-* crash;
-* invalid change;
-* failed retry;
-
-restore the snapshot.
-
-No phase inherits a half-written workspace.
+It is not a rollback point for a failed attempt. On timeout, crash or invalid change the attempt
+workspace is deleted rather than restored (§5), so no phase inherits a half-written workspace
+because no phase inherits that workspace at all.
 
 Restore validates the archive before deleting anything, so a corrupt or truncated snapshot
 leaves the workspace untouched rather than half-written.
@@ -1601,7 +1599,7 @@ Regression suite:
 * provider outage terminates by timeout;
 * invalid configuration rejected by `--strict-config`;
 * valid configuration accepted;
-* workspace restored after timeout.
+* attempt workspace disposed after timeout.
 
 ### Findings from the Milestone 1 implementation
 

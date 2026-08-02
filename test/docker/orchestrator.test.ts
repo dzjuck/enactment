@@ -211,18 +211,13 @@ describe('orchestrator', () => {
   }, 900_000);
 
   /**
-   * Only a phase that runs after the agent has actually written can owe a restoration.
-   *
-   * `onPhase` fires at the phase boundary, so a failure injected at `agent` lands before the
-   * agent container starts and leaves the workspace clean — restoring there would be a no-op
-   * dressed up as a safety property. Restoration after a real agent failure is covered in
-   * `workspace-restoration.test.ts`; what this matrix pins is that every other phase reports
-   * correctly and claims nothing it did not do.
+   * A failed attempt workspace is disposable, so what a phase failure owes is a truthful
+   * report and a clean teardown — not a restored workspace. The failure modes that actually
+   * dirty the workspace live in `workspace-disposal.test.ts`; what this matrix pins is that
+   * every phase reports its own failure, commits nothing, and leaks nothing.
    */
-  const DIRTYING_PHASES = new Set<RunPhase>(['diff']);
-
   it.each(RUN_PHASES.filter((phase) => phase !== 'commit'))(
-    'reports a failure injected in the %s phase, restores if it could have dirtied the workspace, and commits nothing',
+    'reports a failure injected in the %s phase, commits nothing, and leaves no resources',
     async (phase) => {
       const before = await git(repo.dir, ['rev-list', '--all', '--count']);
 
@@ -239,21 +234,17 @@ describe('orchestrator', () => {
 
       const manifest = JSON.parse(
         await readFile(join(artifacts, 'run-manifest.json'), 'utf8'),
-      ) as { restoration?: { pre_agent: string; restored: string } };
+      ) as { restoration?: unknown };
 
-      if (DIRTYING_PHASES.has(phase)) {
-        expect(manifest.restoration?.restored).toBe(manifest.restoration?.pre_agent);
-        expect(manifest.restoration?.pre_agent).toMatch(/^sha256:/);
-      } else {
-        expect(manifest.restoration).toBeUndefined();
-      }
+      // Nothing claims a restoration, because nothing performs one.
+      expect(manifest.restoration).toBeUndefined();
 
       await expectNoResources(report.attempt);
     },
     900_000,
   );
 
-  it('classifies an agent timeout and restores the pre-invocation workspace', async () => {
+  it('classifies an agent timeout and commits nothing', async () => {
     const { report, artifacts } = await run({ injection: injection('hang') });
 
     expect(report.status).toBe('failed');

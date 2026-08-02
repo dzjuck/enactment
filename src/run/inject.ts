@@ -1,4 +1,3 @@
-import type { StoredArtifact } from '../artifacts/store.js';
 import type { RuntimeImage } from '../docker/images.js';
 
 /**
@@ -20,8 +19,6 @@ export interface RunInjection {
   agent?: RuntimeImage;
   /** Merged under the harness's own agent environment, which always wins. */
   agentEnv?: Record<string, string>;
-  /** Substitutes workspace restoration, so its failure path is reachable from a test. */
-  restoreWorkspace?: (volume: string, snapshot: StoredArtifact) => Promise<void>;
   /**
    * Fixes the attempt id. A test that has to inspect a run's Docker resources from outside —
    * after killing it, say — needs to know which label to look for without scanning globally

@@ -26,7 +26,7 @@ import { proxyEnvironment, withProxy, writeProxyRecords } from '../proxy/contain
 import { loadTask } from '../task/load.js';
 import { runVerification } from '../verify/run.js';
 import { attemptLabels, newAttemptId } from '../volume/naming.js';
-import { snapshotWorkspace, restoreWorkspace } from '../volume/snapshot.js';
+import { snapshotWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
 import { CleanupError, describeError, releaseAll, sweepAttempt, withCleanupOutcome } from './cleanup.js';
@@ -235,6 +235,9 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       await copyBackAuth(runAuth, authStore, images, {}, attemptLabels(attempt, 'auth-read'));
     });
 
+    // Evidence, not a rollback point: the exact workspace the agent was handed, so a run can
+    // be reproduced later. A failed attempt's workspace is disposable — it is deleted with
+    // the attempt and never handed to anything downstream, so nothing puts it back first.
     const preAgent = await snapshotWorkspace(
       workspace,
       snapshots,
@@ -243,47 +246,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     );
     snapshotHashes.pre_agent = preAgent.hash;
 
-    const restore = options.injection?.restoreWorkspace
-      ?? ((volume, snapshot) =>
-        restoreWorkspace(volume, snapshot, images, attemptLabels(attempt, 'restore')));
-
-    /**
-     * Put the workspace back the way the agent found it, and record proof that it worked.
-     *
-     * Every failure from here to the end of validation can leave the workspace half-written:
-     * a killed agent, one that exited non-zero, an unparseable event stream, a change that
-     * fails scope validation. None of them may hand a dirty workspace to anything downstream.
-     * The restored snapshot's hash is stored beside the pre-agent hash so the claim is
-     * checkable rather than asserted — equal hashes are the evidence.
-     */
-    const restorePreAgent = async (error: unknown): Promise<never> => {
-      try {
-        await restore(workspace, preAgent);
-        const restored = await snapshotWorkspace(
-          workspace,
-          snapshots,
-          images,
-          attemptLabels(attempt, 'snapshot'),
-        );
-
-        manifest.restoration = {
-          trigger: classify(current, error),
-          pre_agent: preAgent.hash,
-          restored: restored.hash,
-        };
-      } catch (restoreError) {
-        // Both survive: the phase failure is what the run is about, and a workspace that
-        // could not be restored is a separate fact nobody may discover later.
-        throw new OwnershipError(`workspace ${workspace}`, error, restoreError);
-      }
-
-      throw error;
-    };
-
-    let agentStarted = false;
-
-    // One boundary for everything that can dirty the workspace: the agent invocation and the
-    // validation of what it produced. A failure anywhere inside restores before it escapes.
+    // The agent invocation and the validation of what it produced.
     const runAgentAndValidate = async () => {
       const agentRun = await withPhaseNetworks(attempt, 'agent', (networks) =>
         withProxy(
@@ -310,7 +273,6 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
               });
 
               await phase('agent');
-              agentStarted = true;
               return await runCodexAgent({
                 prompt: task.prompt,
                 policy,
@@ -374,9 +336,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       return { implementation, validated };
     };
 
-    const { implementation, validated } = await runAgentAndValidate().catch(
-      (error: unknown) => (agentStarted ? restorePreAgent(error) : Promise.reject(error)),
-    );
+    const { implementation, validated } = await runAgentAndValidate();
 
     await phase('verify');
     const verification = await runVerification({
