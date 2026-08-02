@@ -7,6 +7,7 @@ import { execa } from 'execa';
 import { PROVIDER_ALLOWLIST } from '../config/pins.js';
 import type { RuntimeImages } from '../docker/images.js';
 import { containerLogs, startContainer, stopContainer } from '../docker/run.js';
+import { withOwnedResource } from '../run/ownership.js';
 import { attemptLabels } from '../volume/naming.js';
 import { DEFAULT_PORTS } from './allowlist.js';
 import type { ProxyRecord } from './record.js';
@@ -36,6 +37,10 @@ export interface ProxyContainerOptions {
   images: RuntimeImages;
   allowlist?: readonly string[];
   ports?: readonly number[];
+  /** Injectable startup steps, so each half of the ownership window is testable. */
+  connect?: (network: string, container: string) => Promise<void>;
+  waitReady?: (container: string) => Promise<void>;
+  stop?: (container: string) => Promise<void>;
 }
 
 export function proxyEnvironment(handle: ProxyHandle): Record<string, string> {
@@ -61,12 +66,27 @@ async function waitUntilListening(name: string): Promise<void> {
   throw new ProxyContainerError(`proxy container ${name} did not start listening`);
 }
 
-export async function startProxyContainer(
-  options: ProxyContainerOptions,
-): Promise<ProxyHandle> {
+async function connectNetwork(network: string, container: string): Promise<void> {
+  await execa('docker', ['network', 'connect', network, container]);
+}
+
+/**
+ * Start the proxy and hand back a handle only once it is fully usable.
+ *
+ * Between `startContainer()` and the returned handle the container exists but nobody else
+ * knows about it: `withProxy()`'s teardown has not been entered, and an attempt-label sweep
+ * would be the only thing left to notice it. That window is owned here, so a failure to
+ * attach the outward leg or to reach readiness removes the container before the error
+ * escapes.
+ */
+export async function startProxyContainer(options: ProxyContainerOptions): Promise<ProxyHandle> {
   const name = `ai-harness-proxy-${options.attempt}`;
   const hosts = options.allowlist ?? PROVIDER_ALLOWLIST;
   const ports = options.ports ?? DEFAULT_PORTS;
+
+  const connect = options.connect ?? connectNetwork;
+  const waitReady = options.waitReady ?? waitUntilListening;
+  const stop = options.stop ?? stopContainer;
 
   await startContainer({
     image: options.images.proxy.reference,
@@ -82,22 +102,25 @@ export async function startProxyContainer(
     },
   });
 
-  // The outward leg is the proxy's alone: this is what the agent cannot reach directly.
-  await execa('docker', ['network', 'connect', options.outwardNetwork, name]);
-  await waitUntilListening(name);
+  // Owned from here until the handle is returned.
+  return withOwnedResource(name, stop, async () => {
+    // The outward leg is the proxy's alone: this is what the agent cannot reach directly.
+    await connect(options.outwardNetwork, name);
+    await waitReady(name);
 
-  return {
-    name,
-    host: name,
-    port: DEFAULT_PROXY_PORT,
-    records: async () => {
-      const logs = await containerLogs(name);
-      return logs.stdout
-        .split('\n')
-        .filter((line) => line.trim() !== '')
-        .map((line) => JSON.parse(line) as ProxyRecord);
-    },
-  };
+    return {
+      name,
+      host: name,
+      port: DEFAULT_PROXY_PORT,
+      records: async () => {
+        const logs = await containerLogs(name);
+        return logs.stdout
+          .split('\n')
+          .filter((line) => line.trim() !== '')
+          .map((line) => JSON.parse(line) as ProxyRecord);
+      },
+    };
+  });
 }
 
 /** Run a phase with the proxy up, tearing the container down on every path. */

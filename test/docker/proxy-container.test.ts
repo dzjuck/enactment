@@ -9,8 +9,10 @@ import { IMAGE_PINS } from '../../src/config/pins.js';
 import type { RuntimeImages } from '../../src/docker/images.js';
 import { runContainer, type RunResult } from '../../src/docker/run.js';
 import { withPhaseNetworks } from '../../src/net/manage.js';
+import { OwnershipError } from '../../src/run/ownership.js';
 import {
   proxyEnvironment,
+  startProxyContainer,
   withProxy,
   writeProxyRecords,
   type ProxyHandle,
@@ -164,5 +166,125 @@ describe('proxy container', () => {
 
     const { stdout } = await execa('docker', ['ps', '-aq', '--filter', `name=${name}`]);
     expect(stdout.trim()).toBe('');
+  }, 120_000);
+});
+
+describe('proxy startup is atomic', () => {
+  async function containerExists(name: string): Promise<boolean> {
+    const { stdout } = await execa('docker', ['ps', '-aq', '--filter', `name=^${name}$`]);
+    return stdout.trim() !== '';
+  }
+
+  /** Start the proxy inside a real agent topology, with one startup step made to fail. */
+  async function startWith(
+    overrides: Partial<Parameters<typeof startProxyContainer>[0]>,
+  ): Promise<{ failure: unknown; name: string; networks: string[] }> {
+    const attempt = newAttemptId();
+    const name = `ai-harness-proxy-${attempt}`;
+    const created: string[] = [];
+
+    const failure = await withPhaseNetworks(attempt, 'agent', (networks) => {
+      created.push(...Object.values(networks));
+
+      return startProxyContainer({
+        attempt,
+        egressNetwork: networks.egress ?? '',
+        outwardNetwork: networks['proxy-egress'] ?? '',
+        allowlist: [ALLOWED_ORIGIN],
+        ports: [ORIGIN_PORT],
+        images,
+        ...overrides,
+      }).catch((cause: unknown) => cause);
+    });
+
+    return { failure, name, networks: created };
+  }
+
+  it('removes the container when the outward network connect fails', async () => {
+    const { failure, name } = await startWith({
+      connect: () => Promise.reject(new Error('outward leg refused')),
+    });
+
+    expect((failure as Error).message).toContain('outward leg refused');
+    await expect(containerExists(name)).resolves.toBe(false);
+  }, 120_000);
+
+  it('removes the container when readiness fails after both attachments', async () => {
+    const attached: string[] = [];
+
+    const { failure, name } = await startWith({
+      connect: async (network) => void attached.push(network),
+      waitReady: () => Promise.reject(new Error('never started listening')),
+    });
+
+    // The failure must come after the outward leg was attached: this is the window in which
+    // a container exists on two networks and nothing else would clean it up.
+    expect(attached).toHaveLength(1);
+    expect((failure as Error).message).toContain('never started listening');
+    await expect(containerExists(name)).resolves.toBe(false);
+  }, 120_000);
+
+  it('reports both causes when the container also cannot be removed', async () => {
+    const { failure, name, networks } = await startWith({
+      connect: () => Promise.reject(new Error('outward leg refused')),
+      stop: () => Promise.reject(new Error('daemon refused removal')),
+    });
+
+    try {
+      expect(failure).toBeInstanceOf(OwnershipError);
+      expect((failure as Error).message).toContain('outward leg refused');
+      expect((failure as Error).message).toContain('daemon refused removal');
+
+      // The container is still there: that is the point — the harness reported the leak
+      // instead of swallowing it. Removing it is this test's job, not the harness's.
+      await expect(containerExists(name)).resolves.toBe(true);
+    } finally {
+      // A network the leaked container is still attached to cannot be removed, so the
+      // container goes first and the networks follow.
+      await execa('docker', ['rm', '--force', name], { reject: false });
+      for (const network of networks) {
+        await execa('docker', ['network', 'rm', '--force', network], { reject: false });
+      }
+    }
+  }, 120_000);
+
+  it('leaves successful startup and normal teardown unchanged', async () => {
+    const attempt = newAttemptId();
+    const name = `ai-harness-proxy-${attempt}`;
+
+    const reached = await withPhaseNetworks(attempt, 'agent', async (networks) => {
+      const outward = networks['proxy-egress'] ?? '';
+      const origin = await startOriginContainer(ALLOWED_ORIGIN, outward);
+      origins.push(origin);
+
+      try {
+        return await withProxy(
+          {
+            attempt,
+            egressNetwork: networks.egress ?? '',
+            outwardNetwork: outward,
+            allowlist: [ALLOWED_ORIGIN],
+            ports: [ORIGIN_PORT],
+            images,
+          },
+          async (handle) => {
+            expect(handle.name).toBe(name);
+            expect(await containerExists(name)).toBe(true);
+
+            const result = await curlThrough(
+              networks.egress ?? '',
+              proxyEnvironment(handle),
+              `http://${ALLOWED_ORIGIN}:${ORIGIN_PORT}/`,
+            );
+            return result.stdout;
+          },
+        );
+      } finally {
+        await origin.stop();
+      }
+    });
+
+    expect(reached).toContain('ORIGIN_OK');
+    await expect(containerExists(name)).resolves.toBe(false);
   }, 120_000);
 });
