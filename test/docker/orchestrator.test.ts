@@ -73,7 +73,7 @@ beforeAll(async () => {
       '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
       'timeouts:',
       '  connectivity_smoke_seconds: 20',
-      '  agent_seconds: 120',
+      '  agent_seconds: 15',
       '  termination_grace_seconds: 2',
       '',
     ].join('\n'),
@@ -85,6 +85,7 @@ beforeAll(async () => {
   await writeFile(
     runnerScript,
     [
+      "import { appendFile, writeFile } from 'node:fs/promises';",
       `import { runTask } from ${JSON.stringify(join(process.cwd(), 'dist/run/orchestrator.js'))};`,
       'const controller = new AbortController();',
       "for (const signal of ['SIGINT', 'SIGTERM']) {",
@@ -92,8 +93,10 @@ beforeAll(async () => {
       '}',
       'const report = await runTask({',
       '  ...JSON.parse(process.env.HARNESS_TEST_RUN),',
+      '  onPhase: (phase) => appendFile(process.env.HARNESS_TEST_PHASES, `${phase}\\n`),',
       '  signal: controller.signal,',
       '});',
+      'await writeFile(process.env.HARNESS_TEST_REPORT, JSON.stringify(report));',
       "process.exit(report.status === 'succeeded' ? 0 : 1);",
       '',
     ].join('\n'),
@@ -109,14 +112,29 @@ afterEach(async () => {
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-async function labelled(kind: 'container' | 'volume' | 'network'): Promise<string[]> {
+/**
+ * Scoped to one attempt on purpose: a sweep for every harness label would report resources
+ * another test file is legitimately using, which is both a false failure and a false pass
+ * depending on the timing.
+ */
+async function labelled(
+  kind: 'container' | 'volume' | 'network',
+  attempt: string,
+): Promise<string[]> {
+  const filter = `label=${LABEL}=${attempt}`;
   const args =
     kind === 'container'
-      ? ['ps', '-aq', '--filter', `label=${LABEL}`]
-      : [kind, 'ls', '-q', '--filter', `label=${LABEL}`];
+      ? ['ps', '-aq', '--filter', filter]
+      : [kind, 'ls', '-q', '--filter', filter];
 
   const { stdout } = await execa('docker', args);
   return stdout.split('\n').filter((line) => line !== '');
+}
+
+async function expectNoResources(attempt: string): Promise<void> {
+  await expect(labelled('container', attempt)).resolves.toEqual([]);
+  await expect(labelled('volume', attempt)).resolves.toEqual([]);
+  await expect(labelled('network', attempt)).resolves.toEqual([]);
 }
 
 async function artifactDir(): Promise<string> {
@@ -142,6 +160,16 @@ async function run(
   });
 
   return { report, artifacts };
+}
+
+/** Poll the child's phase log until it enters `phase`, so the interrupt is not a race. */
+async function reachedPhase(phasesFile: string, phase: RunPhase): Promise<void> {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    if ((await readFile(phasesFile, 'utf8')).split('\n').includes(phase)) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`run never reached the ${phase} phase`);
 }
 
 async function walk(dir: string): Promise<string[]> {
@@ -200,9 +228,7 @@ describe('orchestrator', () => {
       expect(report.commit).toBeUndefined();
       expect(await git(repo.dir, ['rev-list', '--all', '--count'])).toBe(before);
 
-      await expect(labelled('container')).resolves.toEqual([]);
-      await expect(labelled('volume')).resolves.toEqual([]);
-      await expect(labelled('network')).resolves.toEqual([]);
+      await expectNoResources(report.attempt);
     },
     900_000,
   );
@@ -222,11 +248,10 @@ describe('orchestrator', () => {
   }, 900_000);
 
   it('leaves no attempt-labelled containers, volumes or networks behind', async () => {
-    await run();
+    const { report } = await run();
 
-    await expect(labelled('container')).resolves.toEqual([]);
-    await expect(labelled('volume')).resolves.toEqual([]);
-    await expect(labelled('network')).resolves.toEqual([]);
+    expect(report.status).toBe('succeeded');
+    await expectNoResources(report.attempt);
   }, 900_000);
 
   it('records the §20 manifest fields', async () => {
@@ -278,9 +303,17 @@ describe('orchestrator', () => {
   it('tears down every attempt resource when the run is interrupted', async () => {
     const artifacts = await artifactDir();
 
+    const scratch = await mkdtemp(join(tmpdir(), 'harness-report-'));
+    dirs.push(scratch);
+    const reportFile = join(scratch, 'report.json');
+    const phasesFile = join(scratch, 'phases');
+    await writeFile(phasesFile, '');
+
     const child = execa('node', [runnerScript], {
       reject: false,
       env: {
+        HARNESS_TEST_REPORT: reportFile,
+        HARNESS_TEST_PHASES: phasesFile,
         HARNESS_TEST_RUN: JSON.stringify({
           taskFile,
           repoPath: repo.dir,
@@ -293,12 +326,16 @@ describe('orchestrator', () => {
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 6_000));
+    // Interrupt at a known point rather than after a fixed wait: by the agent phase the
+    // workspace volume, dependency volume, networks and proxy container all exist, which is
+    // the state whose teardown this test is about.
+    await reachedPhase(phasesFile, 'agent');
     child.kill('SIGINT');
     await child;
 
-    await expect(labelled('container')).resolves.toEqual([]);
-    await expect(labelled('volume')).resolves.toEqual([]);
-    await expect(labelled('network')).resolves.toEqual([]);
+    const report = JSON.parse(await readFile(reportFile, 'utf8')) as RunReport;
+    expect(report.status).toBe('failed');
+
+    await expectNoResources(report.attempt);
   }, 900_000);
 });

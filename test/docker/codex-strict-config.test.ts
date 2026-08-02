@@ -14,6 +14,13 @@ import { runContainer, type RunResult } from '../../src/docker/run.js';
 
 const BOGUS_KEY = 'bogus_probe_key';
 
+/**
+ * Codex never exits on its own when it cannot reach the provider — it retries and reconnects —
+ * so both controls run until this budget expires. It only has to be long enough for the
+ * connection failure to reach the log, which measurement puts under three seconds.
+ */
+const CONNECT_FAILURE_SECONDS = 6;
+
 let validHome: string;
 let invalidHome: string;
 
@@ -61,7 +68,7 @@ describe('--strict-config', () => {
   }, 120_000);
 
   it('positive control: the same invocation accepts a valid configuration', async () => {
-    const result = await runCodex(validHome, policy.args, 20);
+    const result = await runCodex(validHome, policy.args, CONNECT_FAILURE_SECONDS);
     const output = result.stdout + result.stderr;
 
     // It cannot succeed offline, but it must get past config validation to fail on the
@@ -75,7 +82,7 @@ describe('--strict-config', () => {
   it('control: without --strict-config the same key is silently tolerated', async () => {
     const loose = policy.args.filter((arg) => arg !== '--strict-config');
 
-    const result = await runCodex(invalidHome, loose, 20);
+    const result = await runCodex(invalidHome, loose, CONNECT_FAILURE_SECONDS);
     const output = result.stdout + result.stderr;
 
     expect(output).not.toContain('unknown configuration field');

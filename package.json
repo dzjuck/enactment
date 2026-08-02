@@ -8,11 +8,12 @@
   },
   "scripts": {
     "test": "vitest run --project hermetic",
-    "test:docker": "vitest run --project docker --no-file-parallelism",
-    "test:live": "vitest run --project live",
+    "test:docker": "HARNESS_IMAGES=1 vitest run --project docker-images && vitest run --project docker",
+    "test:live": "HARNESS_LIVE=1 vitest run --project live",
     "build": "tsc --project tsconfig.build.json && echo '{\"type\":\"module\"}' > dist/package.json",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:all": "npm test && npm run test:docker"
   },
   "dependencies": {
     "execa": "^9.6.0",

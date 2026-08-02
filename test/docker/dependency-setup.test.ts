@@ -179,8 +179,8 @@ describe('setup phase budget', () => {
         installCommand: ['sh', '-c', 'while true; do sleep 1; done'],
         network: networks.registry ?? 'none',
         images,
-        setupSeconds: 5,
-        graceSeconds: 2,
+        setupSeconds: 2,
+        graceSeconds: 1,
       }),
     );
   }
@@ -192,7 +192,7 @@ describe('setup phase budget', () => {
 
     expect(failure).toBeInstanceOf(PhaseFailure);
     expect((failure as PhaseFailure).category).toBe('setup_timeout');
-    // The budget is 5s plus the grace; anything near the 600s default means it was ignored.
+    // The budget is 2s plus the grace; anything near the 600s default means it was ignored.
     expect(Date.now() - started).toBeLessThan(60_000);
   }, 120_000);
 

@@ -175,6 +175,11 @@ describe('proxy startup is atomic', () => {
     return stdout.trim() !== '';
   }
 
+  async function networkExists(name: string): Promise<boolean> {
+    const { exitCode } = await execa('docker', ['network', 'inspect', name], { reject: false });
+    return exitCode === 0;
+  }
+
   /** Start the proxy inside a real agent topology, with one startup step made to fail. */
   async function startWith(
     overrides: Partial<Parameters<typeof startProxyContainer>[0]>,
@@ -239,11 +244,20 @@ describe('proxy startup is atomic', () => {
       // instead of swallowing it. Removing it is this test's job, not the harness's.
       await expect(containerExists(name)).resolves.toBe(true);
     } finally {
-      // A network the leaked container is still attached to cannot be removed, so the
-      // container goes first and the networks follow.
+      // A network the leaked container is still attached to cannot be removed, and the
+      // daemon releases the endpoint asynchronously — so the container goes first and the
+      // network removal retries rather than failing silently and leaving a dangling network.
       await execa('docker', ['rm', '--force', name], { reject: false });
+
       for (const network of networks) {
-        await execa('docker', ['network', 'rm', '--force', network], { reject: false });
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          const { exitCode } = await execa('docker', ['network', 'rm', network], { reject: false });
+          if (exitCode === 0) break;
+          if (!(await networkExists(network))) break;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        await expect(networkExists(network)).resolves.toBe(false);
       }
     }
   }, 120_000);
