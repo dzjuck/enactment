@@ -175,7 +175,8 @@ describe('verification phase', () => {
     expect((await store.read(passing.hash)).equals(before)).toBe(true);
 
     const { tar: original } = await exportCommit(repo.dir, repo.commit);
-    const paths = sourceDiff(original, await store.read(passing.hash)).map(
+    const changes = await sourceDiff(original, await store.read(passing.hash));
+    const paths = changes.map(
       (change) => change.path,
     );
     expect(paths).not.toContain('VERIFIER_WROTE');

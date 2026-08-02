@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { readTar } from '../artifacts/tar.js';
+import { readArchive } from '../artifacts/archive.js';
 
 export interface FileEntry {
   path: string;
@@ -38,10 +38,10 @@ function normalize(path: string): string {
   return path.replace(/^\.\//, '');
 }
 
-export function manifestFromTar(tar: Buffer): FileManifest {
+export async function manifestFromTar(tar: Buffer): Promise<FileManifest> {
   const manifest: FileManifest = new Map();
 
-  for (const entry of readTar(tar)) {
+  for (const entry of await readArchive(tar)) {
     if (entry.type === 'directory') continue;
 
     const path = normalize(entry.path);
@@ -89,6 +89,6 @@ export function diffManifests(before: FileManifest, after: FileManifest): Change
 }
 
 /** Compare the canonical export against the immutable implementation snapshot. */
-export function sourceDiff(exportTar: Buffer, snapshotTar: Buffer): Change[] {
-  return diffManifests(manifestFromTar(exportTar), manifestFromTar(snapshotTar));
+export async function sourceDiff(exportTar: Buffer, snapshotTar: Buffer): Promise<Change[]> {
+  return diffManifests(await manifestFromTar(exportTar), await manifestFromTar(snapshotTar));
 }

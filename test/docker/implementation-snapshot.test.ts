@@ -65,7 +65,7 @@ describe('implementation snapshot', () => {
       const stillCaptured = await store.read(snapshot.hash);
       expect(stillCaptured.equals(captured)).toBe(true);
 
-      const changes = sourceDiff(tar, captured);
+      const changes = await sourceDiff(tar, captured);
       const paths = changes.map((change) => change.path);
 
       expect(paths).toContain('src/slugify.js');

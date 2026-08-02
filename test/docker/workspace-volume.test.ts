@@ -16,7 +16,7 @@ import {
 } from '../../src/volume/workspace.js';
 import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { readTar } from '../../src/artifacts/tar.js';
+import { readArchive } from '../../src/artifacts/archive.js';
 
 let repo: TargetRepo;
 let tar: Buffer;
@@ -77,7 +77,7 @@ describe('workspace volume', () => {
     const name = await seed();
 
     const result = await inWorkspace(name, ['sha256sum', '/workspace/src/slugify.js']);
-    const exported = readTar(tar).find((entry) => entry.path === 'src/slugify.js');
+    const exported = (await readArchive(tar)).find((entry) => entry.path === 'src/slugify.js');
 
     expect(result.stdout.split(' ')[0]).toBe(
       createHash('sha256').update(exported?.content ?? Buffer.alloc(0)).digest('hex'),

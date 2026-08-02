@@ -21,7 +21,7 @@ import {
 } from '../../src/volume/workspace.js';
 import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { readTar } from '../../src/artifacts/tar.js';
+import { readArchive } from '../../src/artifacts/archive.js';
 
 const KEY = 'sha256:dependency-volume-tests';
 
@@ -155,7 +155,7 @@ describe('per-phase dependency volume', () => {
 
     const store = new ArtifactStore(join(root, 'snapshots'));
     const snapshot = await snapshotWorkspace(workspace, store, images);
-    const entries = readTar(await store.read(snapshot.hash)).map((entry) => entry.path);
+    const entries = (await readArchive(await store.read(snapshot.hash))).map((entry) => entry.path);
 
     expect(entries.filter((path) => path.includes('node_modules'))).toEqual([]);
   });

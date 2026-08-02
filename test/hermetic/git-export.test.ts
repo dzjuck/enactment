@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { GitExportError, exportCommit } from '../../src/git/export.js';
 import { commitAll, createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { readTar, type TarEntry } from '../../src/artifacts/tar.js';
+import { readArchive, type ArchiveEntry } from '../../src/artifacts/archive.js';
 
 const FIXTURE = fileURLToPath(new URL('../../fixtures/target-repo', import.meta.url));
 
@@ -20,12 +20,12 @@ afterEach(async () => {
   await removeRepo(repo.dir);
 });
 
-async function exportEntries(): Promise<TarEntry[]> {
+async function exportEntries(): Promise<ArchiveEntry[]> {
   const { tar } = await exportCommit(repo.dir, repo.commit);
-  return readTar(tar);
+  return readArchive(tar);
 }
 
-function paths(entries: TarEntry[]): string[] {
+function paths(entries: ArchiveEntry[]): string[] {
   return entries.filter((entry) => entry.type !== 'directory').map((entry) => entry.path);
 }
 
@@ -69,7 +69,7 @@ describe('exportCommit', () => {
 
   it('includes AGENTS.md, and its content contributes to the export hash', async () => {
     const before = await exportCommit(repo.dir, repo.commit);
-    expect(paths(readTar(before.tar))).toContain('AGENTS.md');
+    expect(paths(await readArchive(before.tar))).toContain('AGENTS.md');
 
     await writeFile(join(repo.dir, 'AGENTS.md'), '# Agent instructions\n\nChanged.\n');
     const changed = await commitAll(repo.dir, 'Edit AGENTS.md');

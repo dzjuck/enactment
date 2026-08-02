@@ -64,7 +64,7 @@ describe('source diff', () => {
       await rm(join(repo.dir, 'AGENTS.md'));
     });
 
-    const changes = sourceDiff(before, tar);
+    const changes = await sourceDiff(before, tar);
     const byPath = new Map(changes.map((entry) => [entry.path, entry.kind]));
 
     expect(byPath.get('src/slugify.js')).toBe('modified');
@@ -91,7 +91,7 @@ describe('source diff', () => {
       await chmod(join(repo.dir, 'src/slugify.js'), 0o755);
     });
 
-    const changes = sourceDiff(before, tar);
+    const changes = await sourceDiff(before, tar);
 
     expect(changes).toHaveLength(1);
     expect(changes[0]?.kind).toBe('modified');
@@ -103,7 +103,7 @@ describe('source diff', () => {
     const accepted = await after(async () => {
       await writeFile(join(repo.dir, 'src/slugify.js'), 'export const slugify = () => "accepted";\n');
     });
-    const validated = validateChanges(sourceDiff(before, accepted), PATHS);
+    const validated = validateChanges(await sourceDiff(before, accepted), PATHS);
 
     // The workspace keeps moving after the snapshot; what was accepted must not.
     await after(async () => {
@@ -115,8 +115,8 @@ describe('source diff', () => {
     expect(carried?.entry?.content.toString()).not.toContain('later');
   });
 
-  it('reads a tar into a manifest with content, mode and symlink targets', () => {
-    const parsed = manifestFromTar(before);
+  it('reads a tar into a manifest with content, mode and symlink targets', async () => {
+    const parsed = await manifestFromTar(before);
 
     expect(parsed.get('src/slugify.js')?.content.toString()).toContain('slugify');
     expect(parsed.get('docs/readme.md')?.type).toBe('symlink');

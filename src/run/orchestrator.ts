@@ -273,7 +273,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
 
     await phase('diff');
     const implementation = await snapshotWorkspace(workspace, snapshots, images);
-    const changes = sourceDiff(tar, await snapshots.read(implementation.hash));
+    const changes = await sourceDiff(tar, await snapshots.read(implementation.hash));
     const validated = validateChanges(changes, task.implementation_paths);
     await writeFile(
       join(options.artifactDir, 'source-diff.json'),

@@ -19,7 +19,7 @@ import {
 } from '../../src/volume/workspace.js';
 import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { readTar } from '../../src/artifacts/tar.js';
+import { readArchive } from '../../src/artifacts/archive.js';
 
 let repo: TargetRepo;
 let tar: Buffer;
@@ -133,7 +133,7 @@ describe('workspace snapshots', () => {
     ]);
 
     const snapshot = await snapshotWorkspace(volume, store, images);
-    const entries = readTar(await store.read(snapshot.hash)).map((entry) => entry.path);
+    const entries = (await readArchive(await store.read(snapshot.hash))).map((entry) => entry.path);
 
     expect(entries.filter((path) => path.includes('node_modules'))).toEqual([]);
     expect(entries.some((path) => path.endsWith('package.json'))).toBe(true);

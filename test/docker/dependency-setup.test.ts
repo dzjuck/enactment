@@ -12,7 +12,7 @@ import { PhaseFailure } from '../../src/run/failure.js';
 import { newAttemptId } from '../../src/volume/naming.js';
 import { runtimeImages } from '../helpers/images.js';
 import { createRepo, createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { readTar } from '../../src/artifacts/tar.js';
+import { readArchive } from '../../src/artifacts/archive.js';
 import type { RuntimeImages } from '../../src/docker/images.js';
 
 const REGISTRY_NETWORK = 'bridge';
@@ -59,7 +59,7 @@ describe('dependency setup', () => {
 
     expect(result.cached).toBe(false);
 
-    const entries = readTar(await cache.read(coldKey)).map((entry) => entry.path);
+    const entries = (await readArchive(await cache.read(coldKey))).map((entry) => entry.path);
     expect(entries.some((path) => path.startsWith('node_modules/vitest'))).toBe(true);
   }, 600_000);
 
