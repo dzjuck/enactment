@@ -1,0 +1,15 @@
+type: code_behavior
+id: add-slugify
+prompt: |
+  Add slugify behavior that lowercases titles, drops punctuation, and joins words with
+  single hyphens with no leading or trailing hyphen.
+implementation_paths:
+  - src/slugify.js
+test_paths:
+  - test/slugify.test.js
+expected_test_ids:
+  - slugify lowercases and hyphenates words
+verification:
+  test_command: ["npx", "--no-install", "vitest", "run", "--globals"]
+  commands:
+    - ["npx", "--no-install", "vitest", "run", "--globals"]

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,10 +8,6 @@ import { PROXY_RECORDS_FILE } from '../../src/proxy/container.js';
 import { runProduction } from '../../src/run/production.js';
 import { runtimeImages } from '../helpers/images.js';
 import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
-
-const PROMPT =
-  'Add slugify behavior that lowercases titles, drops punctuation, and joins words with ' +
-  'single hyphens with no leading or trailing hyphen.';
 
 interface Manifest {
   runtime: Record<string, string>;
@@ -38,27 +34,7 @@ beforeAll(async () => {
   repo = await createM2Repo();
   root = await mkdtemp(join(tmpdir(), 'harness-live-'));
   artifacts = join(root, 'artifacts');
-
-  taskFile = join(root, 'task.yml');
-  await writeFile(
-    taskFile,
-    [
-      'type: code_behavior',
-      'id: live-slugify',
-      `prompt: ${JSON.stringify(PROMPT)}`,
-      'implementation_paths:',
-      '  - src/slugify.js',
-      'test_paths:',
-      '  - test/slugify.test.js',
-      'expected_test_ids:',
-      '  - slugify lowercases and hyphenates words',
-      'verification:',
-      '  test_command: ["npx", "--no-install", "vitest", "run", "--globals"]',
-      '  commands:',
-      '    - ["npx", "--no-install", "vitest", "run", "--globals"]',
-      '',
-    ].join('\n'),
-  );
+  taskFile = join(repo.dir, 'task.yml');
 }, 900_000);
 
 afterAll(async () => {
