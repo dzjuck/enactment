@@ -272,6 +272,59 @@ describe('code_behavior pipeline', () => {
     }
   }, 900_000);
 
+  it('records valid missing_implementation RED before implementation', async () => {
+    const seen: RunPhase[] = [];
+    const { report, artifacts } = await run(phaseEnv(), {
+      onPhase: (phase) => void seen.push(phase),
+    });
+
+    expect(report.status).toBe('succeeded');
+    expect(seen.indexOf('red')).toBeLessThan(seen.indexOf('implementation'));
+    const verdict = JSON.parse(
+      await readFile(join(artifacts, 'red/verdict.json'), 'utf8'),
+    ) as { valid: boolean; category: string };
+    const results = JSON.parse(
+      await readFile(join(artifacts, 'red/results.json'), 'utf8'),
+    ) as { suiteFailures: { cause: string; specifier?: string }[] };
+    expect(verdict).toMatchObject({ valid: true, category: 'missing_implementation' });
+    expect(results.suiteFailures).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          cause: 'missing_module',
+          specifier: '../src/slugify.js',
+        }),
+      ]),
+    );
+  }, 900_000);
+
+  it('blocks invalid RED before implementation and commits nothing', async () => {
+    const before = await git(repo.dir, ['rev-list', '--all', '--count']);
+    const { report, artifacts } = await run(
+      phaseEnv({
+        STUB_WRITE_CONTENT_TESTS:
+          "import 'missing-red-package';\ndescribe('slugify', () => { it('unreachable', () => {}); });\n",
+      }),
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.failedPhase).toBe('red');
+    expect(report.category).toBe('red_invalid');
+    expect(report.message).toContain('unrelated_missing_dependency');
+    expect(report.commit).toBeUndefined();
+    expect(await git(repo.dir, ['rev-list', '--all', '--count'])).toBe(before);
+    await expect(access(join(artifacts, 'implementation/prompt.txt'))).rejects.toThrow();
+
+    const verdict = JSON.parse(
+      await readFile(join(artifacts, 'red/verdict.json'), 'utf8'),
+    ) as { valid: boolean; reasons: { category: string }[] };
+    expect(verdict.valid).toBe(false);
+    expect(verdict.reasons).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ category: 'unrelated_missing_dependency' }),
+      ]),
+    );
+  }, 900_000);
+
   it('rejects implementation written during the tests phase', async () => {
     const before = await git(repo.dir, ['rev-list', '--all', '--count']);
     const { report } = await run(

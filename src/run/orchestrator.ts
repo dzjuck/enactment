@@ -27,6 +27,9 @@ import { proxyEnvironment, withProxy, writeProxyRecords } from '../proxy/contain
 import { loadTask } from '../task/load.js';
 import { runVerification } from '../verify/run.js';
 import { baselineArtifact, captureBaseline } from '../verify/baseline.js';
+import { classifyRed, redResultsArtifact } from '../verify/red.js';
+import type { TestRunResults } from '../verify/results.js';
+import { TestRunError } from '../verify/test-run.js';
 import { attemptLabels, newAttemptId } from '../volume/naming.js';
 import { snapshotWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
@@ -52,6 +55,7 @@ export const RUN_PHASES = [
 
 export type RunPhase =
   | 'baseline'
+  | 'red'
   | (typeof RUN_PHASES)[number]
   | 'tests'
   | 'tests_diff'
@@ -87,6 +91,7 @@ export interface RunReport {
 
 const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
   baseline: 'baseline_failed',
+  red: 'red_invalid',
   export: 'internal_error',
   setup: 'setup_failed',
   workspace: 'internal_error',
@@ -266,6 +271,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       attemptLabels(attempt, 'snapshot'),
     );
     snapshotHashes.pre_agent = preAgent.hash;
+    let baselineResults: TestRunResults | undefined;
 
     if (task.type === 'code_behavior') {
       await phase('baseline');
@@ -299,6 +305,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
         },
       });
       const artifact = baselineArtifact(baseline);
+      baselineResults = baseline.results;
       manifest.baseline = artifact;
       await mkdir(baselineDir, { recursive: true });
       await writeFile(
@@ -451,6 +458,54 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
         task.test_paths,
         tar,
       );
+      await phase('red');
+      const redDir = join(options.artifactDir, 'red');
+      let redResults: TestRunResults | undefined;
+      try {
+        const redVerification = await runVerification({
+          attempt,
+          snapshot: testsRun.snapshot,
+          dependencySnapshot,
+          commands: [],
+          testCommand: task.verification.test_command,
+          artifactDir: redDir,
+          graceSeconds: timeouts.termination_grace_seconds,
+          images,
+          redact,
+        });
+        redResults = redVerification.testResults;
+      } catch (error) {
+        if (!(error instanceof TestRunError)) throw error;
+      }
+      if (baselineResults === undefined) {
+        throw new Error('code behavior baseline results are missing');
+      }
+      const redVerdict = classifyRed({
+        baseline: baselineResults,
+        results: redResults,
+        expectedTestIds: task.expected_test_ids,
+        allowedRedCategories: task.allowed_red_categories,
+        implementationPaths: task.implementation_paths,
+      });
+      manifest.red = redVerdict;
+      await mkdir(redDir, { recursive: true });
+      if (redResults !== undefined) {
+        await writeFile(
+          join(redDir, 'results.json'),
+          redact(`${JSON.stringify(redResultsArtifact(redResults), null, 2)}\n`),
+        );
+      }
+      await writeFile(
+        join(redDir, 'verdict.json'),
+        redact(`${JSON.stringify(redVerdict, null, 2)}\n`),
+      );
+      if (!redVerdict.valid) {
+        throw new PhaseFailure(
+          'red',
+          'red_invalid',
+          `invalid RED: ${redVerdict.reasons.map((reason) => reason.category).join(', ')}`,
+        );
+      }
       const implementationRun = await runAgentAndValidate(
         'implementation',
         implementationPrompt(task),
