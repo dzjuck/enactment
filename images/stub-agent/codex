@@ -37,6 +37,14 @@ if [ -n "$STUB_SYMLINK_PATH" ]; then
   ln -sf "${STUB_SYMLINK_TARGET}" "/workspace/${STUB_SYMLINK_PATH}"
 fi
 
+# Appending, unlike writing, makes the result depend on what the workspace already held. It is
+# how a multi-step test proves a later step was seeded from the earlier step's accepted commit
+# rather than from the base: the same fixed environment produces a different file each time.
+if [ -n "${STUB_APPEND_PATH:-}" ]; then
+  mkdir -p "$(dirname "/workspace/${STUB_APPEND_PATH}")"
+  printf '%s' "${STUB_APPEND_CONTENT:-}" >> "/workspace/${STUB_APPEND_PATH}"
+fi
+
 # Rotate the credential the way the provider CLI does: rewrite auth.json in place, before
 # whatever outcome follows. A token rotated by a run that then failed must still be kept.
 if [ -n "$STUB_AUTH_CONTENT" ]; then

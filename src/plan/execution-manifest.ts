@@ -231,6 +231,8 @@ export async function loadManifest(path: string): Promise<LoadedManifest> {
 
 export interface ApprovedInputs {
   plan: Plan;
+  /** Identity of the approved manifest; the state store keys the plan on it. */
+  manifestHash: string;
   planHash: string;
   planFile: string;
   repoPath: string;
@@ -296,6 +298,7 @@ export async function validateManifest(
 
   return {
     plan: loaded.plan,
+    manifestHash: loaded.manifestHash,
     planHash: loaded.hash,
     planFile: loaded.planFile,
     repoPath: options.repoPath,

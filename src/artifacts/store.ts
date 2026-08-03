@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export interface StoredArtifact {
@@ -40,5 +40,30 @@ export class ArtifactStore {
 
   async read(hash: string, extension = ''): Promise<Buffer> {
     return readFile(this.pathFor(hash, extension));
+  }
+
+  /**
+   * Everything the store holds. Empty when it has never been written to.
+   *
+   * Paths are returned rather than hashes alone because callers store with different
+   * extensions — workspace snapshots bare, exported trees as `.tar` — so a hash is not enough
+   * to name the file it lives in.
+   */
+  async list(): Promise<StoredArtifact[]> {
+    try {
+      return (await readdir(this.root))
+        .filter((name) => !name.endsWith('.staging'))
+        .map((name) => ({
+          hash: `sha256:${name.replace(/\.[^.]*$/, '')}`,
+          path: join(this.root, name),
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Retention is a termination rule (§11); this is how a terminated attempt gives up space. */
+  async remove(artifact: StoredArtifact): Promise<void> {
+    await rm(artifact.path, { force: true });
   }
 }

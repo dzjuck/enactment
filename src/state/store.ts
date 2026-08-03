@@ -338,6 +338,14 @@ export class StateStore {
     return rows[0] === undefined ? undefined : planRecord(rows[0]);
   }
 
+  /** The plan a manifest created, whatever state it has since reached. */
+  planForManifest(repoPath: string, manifestHash: string): PlanRecord | undefined {
+    const rows = this.db
+      .prepare('SELECT * FROM plans WHERE repo_path = ? AND manifest_hash = ?')
+      .all(canonical(repoPath), manifestHash) as Row[];
+    return rows[0] === undefined ? undefined : planRecord(rows[0]);
+  }
+
   activePlanForRepo(repoPath: string): PlanRecord | undefined {
     const rows = this.db
       .prepare(
