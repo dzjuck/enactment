@@ -10,6 +10,8 @@ import { OwnershipError } from '../run/ownership.js';
 import { attemptLabels, workspaceVolumeName } from '../volume/naming.js';
 import { restoreWorkspace } from '../volume/snapshot.js';
 import { createVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
+import type { TestRunResults } from './results.js';
+import { runStructuredTests, type TestCommandResult } from './test-run.js';
 
 export const VERIFICATION_ARTIFACT = 'verification.json';
 
@@ -25,6 +27,8 @@ export interface CommandResult {
 export interface VerificationResult {
   status: 'pass' | 'fail' | 'timeout';
   commands: CommandResult[];
+  testCommand?: TestCommandResult;
+  testResults?: TestRunResults;
   /** Named so a caller can assert it is gone; it is removed before this returns. */
   workspaceVolume: string;
 }
@@ -36,6 +40,8 @@ export interface VerificationOptions {
   dependencySnapshot: Buffer;
   /** Fixed argument arrays from `task.yml`; never shell strings (§16). */
   commands: readonly (readonly string[])[];
+  /** Vitest argv from `task.yml`; reporter arguments are appended by the harness. */
+  testCommand?: readonly string[];
   artifactDir: string;
   images: RuntimeImages;
   timeoutSeconds?: number;
@@ -106,8 +112,28 @@ export async function runVerification(
 
     const commands: CommandResult[] = [];
     let status: VerificationResult['status'] = 'pass';
+    let testCommand: TestCommandResult | undefined;
+    let testResults: TestRunResults | undefined;
 
-    for (const argv of options.commands) {
+    if (options.testCommand !== undefined) {
+      const testRun = await runStructuredTests({
+        testCommand: options.testCommand,
+        mounts: [workspaceMount(workspaceVolume), dependencyMount(dependencyVolume)],
+        artifactDir: options.artifactDir,
+        images: options.images,
+        timeoutSeconds,
+        graceSeconds,
+        labels: attemptLabels(options.attempt, 'verify-tests'),
+        ...(options.redact === undefined ? {} : { redact: options.redact }),
+      });
+      testCommand = testRun.command;
+      testResults = testRun.results;
+
+      if (testRun.command.status === 'timeout') status = 'timeout';
+      else if (testRun.command.exitCode !== 0) status = 'fail';
+    }
+
+    for (const argv of status === 'pass' ? options.commands : []) {
       const run = await runContainer(
         {
           image: options.images.verifier.id,
@@ -140,7 +166,15 @@ export async function runVerification(
       }
     }
 
-    outcome = { value: { status, commands, workspaceVolume } };
+    outcome = {
+      value: {
+        status,
+        commands,
+        workspaceVolume,
+        ...(testCommand === undefined ? {} : { testCommand }),
+        ...(testResults === undefined ? {} : { testResults }),
+      },
+    };
   } catch (error) {
     outcome = { error };
   }

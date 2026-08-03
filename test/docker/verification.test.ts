@@ -17,6 +17,7 @@ import {
   VERIFICATION_ARTIFACT,
   type VerificationResult,
 } from '../../src/verify/run.js';
+import { TEST_RESULTS_ARTIFACT } from '../../src/verify/test-run.js';
 import { newAttemptId } from '../../src/volume/naming.js';
 import { dependencyVolumeName, workspaceVolumeName } from '../../src/volume/naming.js';
 import { volumeExists } from '../../src/volume/workspace.js';
@@ -32,6 +33,54 @@ const SLUGIFY = `export function slugify(title) {
 `;
 
 const VITEST = ['npx', '--no-install', 'vitest', 'run', '--config', 'vitest.config.js'];
+
+const REPORTER_SCRIPT = `
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+const args = process.argv.slice(1);
+const output = args.find((arg) => arg.startsWith('--outputFile='))?.slice('--outputFile='.length);
+if (!output) process.exit(2);
+const taskArgs = args.slice(0, -2);
+const fullName = taskArgs.join('|');
+const report = {
+  success: true,
+  testResults: [{
+    name: '/workspace/test/argv.test.js',
+    status: 'passed',
+    message: '',
+    assertionResults: [{ fullName, status: 'passed', failureMessages: [] }],
+  }],
+};
+mkdirSync(dirname(output), { recursive: true });
+writeFileSync(output, JSON.stringify(report));
+`;
+
+const SECURITY_PROBE_SCRIPT = `
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+const args = process.argv.slice(1);
+const output = args.find((arg) => arg.startsWith('--outputFile='))?.slice('--outputFile='.length);
+if (!output) process.exit(2);
+const interfaces = readdirSync('/sys/class/net').sort().join(',');
+const hasAuth = existsSync('/run/agent-auth') || Object.keys(process.env).some((key) => /codex|openai|api_key/i.test(key));
+const passed = interfaces === 'lo' && !hasAuth;
+const report = {
+  success: passed,
+  testResults: [{
+    name: '/workspace/test/security.test.js',
+    status: passed ? 'passed' : 'failed',
+    message: '',
+    assertionResults: [{
+      fullName: 'verifier is offline and has no auth',
+      status: passed ? 'passed' : 'failed',
+      failureMessages: passed ? [] : [JSON.stringify({ interfaces, hasAuth })],
+    }],
+  }],
+};
+mkdirSync(dirname(output), { recursive: true });
+writeFileSync(output, JSON.stringify(report));
+process.exit(passed ? 0 : 1);
+`;
 
 let repo: TargetRepo;
 let store: ArtifactStore;
@@ -96,6 +145,84 @@ async function verify(
 }
 
 describe('verification phase', () => {
+  it('runs the declared test command and returns real test IDs', async () => {
+    const { result } = await verify(passing, [], { testCommand: VITEST });
+
+    expect(result.status).toBe('pass');
+    expect(result.testResults?.tests.get('slugify lowercases and hyphenates words')?.status).toBe(
+      'passed',
+    );
+  }, 300_000);
+
+  it('appends reporter flags without interpreting the task argv as shell', async () => {
+    const taskArgs = ['a;whoami', '$(id -u)', '&& rm -rf /', '`echo hi`'];
+    const testCommand = ['node', '--input-type=module', '-e', REPORTER_SCRIPT, ...taskArgs];
+    const { result } = await verify(passing, [], { testCommand });
+
+    expect(result.testCommand?.argv).toEqual([
+      ...testCommand,
+      '--reporter=json',
+      '--outputFile=.harness/results.json',
+    ]);
+    expect(result.testResults?.tests.get(taskArgs.join('|'))?.status).toBe('passed');
+  }, 300_000);
+
+  it('reads results before destroying the verifier workspace', async () => {
+    const { result } = await verify(passing, [], { testCommand: VITEST });
+
+    expect(result.testResults?.tests.size).toBe(3);
+    await expect(volumeExists(result.workspaceVolume)).resolves.toBe(false);
+  }, 300_000);
+
+  it('returns parsed evidence from a failing suite', async () => {
+    const { result } = await verify(failing, [], { testCommand: VITEST });
+
+    expect(result.status).toBe('fail');
+    expect(result.testCommand?.exitCode).not.toBe(0);
+    expect(
+      [...(result.testResults?.tests.values() ?? [])].some((test) => test.status === 'failed'),
+    ).toBe(true);
+  }, 300_000);
+
+  it('distinguishes a missing results document from an empty passing run', async () => {
+    await expect(verify(passing, [], { testCommand: ['true'] })).rejects.toThrow(
+      /runner produced no results/i,
+    );
+  }, 300_000);
+
+  it('kills a hanging structured test command at its timeout', async () => {
+    const { result } = await verify(passing, [], {
+      testCommand: ['sh', '-c', 'trap "" TERM; sleep 300'],
+      timeoutSeconds: 3,
+      graceSeconds: 2,
+    });
+
+    expect(result.status).toBe('timeout');
+    expect(result.testCommand?.status).toBe('timeout');
+    expect(result.testResults).toBeUndefined();
+  }, 300_000);
+
+  it('stores the raw Vitest result document as an artifact', async () => {
+    const { artifactDir } = await verify(passing, [], { testCommand: VITEST });
+    const raw = JSON.parse(
+      await readFile(join(artifactDir, TEST_RESULTS_ARTIFACT), 'utf8'),
+    ) as { success: boolean; testResults: unknown[] };
+
+    expect(raw.success).toBe(true);
+    expect(raw.testResults).toHaveLength(1);
+  }, 300_000);
+
+  it('runs structured tests offline without provider authentication', async () => {
+    const { result } = await verify(passing, [], {
+      testCommand: ['node', '--input-type=module', '-e', SECURITY_PROBE_SCRIPT, 'probe'],
+    });
+
+    expect(result.status).toBe('pass');
+    expect(result.testResults?.tests.get('verifier is offline and has no auth')?.status).toBe(
+      'passed',
+    );
+  }, 300_000);
+
   it('passes the fixture suite when the implementation is complete', async () => {
     const { result } = await verify(passing, [VITEST]);
 
