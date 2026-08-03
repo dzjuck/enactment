@@ -58,7 +58,13 @@ beforeAll(async () => {
   taskFile = await writeTask(join(root, 'task.yml'));
 }, 900_000);
 
-async function writeTask(path: string, knownFlakyTests: string[] = []): Promise<string> {
+async function writeTask(
+  path: string,
+  knownFlakyTests: string[] = [],
+  verificationCommands: string[][] = [
+    ['npx', '--no-install', 'vitest', 'run', '--globals'],
+  ],
+): Promise<string> {
   await writeFile(
     path,
     [
@@ -74,7 +80,7 @@ async function writeTask(path: string, knownFlakyTests: string[] = []): Promise<
       'verification:',
       '  test_command: ["npx", "--no-install", "vitest", "run", "--globals"]',
       '  commands:',
-      '    - ["npx", "--no-install", "vitest", "run", "--globals"]',
+      ...verificationCommands.map((command) => `    - ${JSON.stringify(command)}`),
       ...(knownFlakyTests.length === 0
         ? []
         : [
@@ -237,7 +243,7 @@ describe('code_behavior pipeline', () => {
       });
 
       expect(report.status).toBe('failed');
-      expect(report.failedPhase).toBe('verify');
+      expect(report.failedPhase).toBe('green');
       const manifest = JSON.parse(
         await readFile(join(artifacts, 'run-manifest.json'), 'utf8'),
       ) as { baseline: { quarantined: string[] } };
@@ -322,6 +328,81 @@ describe('code_behavior pipeline', () => {
       expect.arrayContaining([
         expect.objectContaining({ category: 'unrelated_missing_dependency' }),
       ]),
+    );
+  }, 900_000);
+
+  it('reaches GREEN and commits a correct implementation', async () => {
+    const seen: RunPhase[] = [];
+    const { report, artifacts } = await run(phaseEnv(), {
+      onPhase: (phase) => void seen.push(phase),
+    });
+
+    expect(report.status).toBe('succeeded');
+    expect(report.commit).toBeDefined();
+    expect(seen.indexOf('green')).toBeLessThan(seen.indexOf('verify'));
+    const verdict = JSON.parse(
+      await readFile(join(artifacts, 'green/verdict.json'), 'utf8'),
+    ) as { valid: boolean };
+    expect(verdict.valid).toBe(true);
+  }, 900_000);
+
+  it('fails GREEN and names the failing expected test in its artifact', async () => {
+    const { report, artifacts } = await run(
+      phaseEnv({
+        STUB_WRITE_CONTENT_IMPLEMENTATION:
+          'export function slugify(title) { return String(title); }\n',
+      }),
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.failedPhase).toBe('green');
+    expect(report.category).toBe('verification_failed');
+    expect(report.commit).toBeUndefined();
+    const results = JSON.parse(
+      await readFile(join(artifacts, 'green/results.json'), 'utf8'),
+    ) as { tests: { id: string; status: string }[] };
+    expect(results.tests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'slugify lowercases and hyphenates words',
+          status: 'failed',
+        }),
+      ]),
+    );
+  }, 900_000);
+
+  it('still runs opaque verification commands after GREEN', async () => {
+    const opaqueFailureTask = await writeTask(
+      join(root, 'task-opaque-failure.yml'),
+      [],
+      [['node', '-e', 'process.exit(7)']],
+    );
+    const { report, artifacts } = await run(phaseEnv(), { taskFile: opaqueFailureTask });
+
+    expect(report.status).toBe('failed');
+    expect(report.failedPhase).toBe('verify');
+    expect(report.category).toBe('verification_failed');
+    const verdict = JSON.parse(
+      await readFile(join(artifacts, 'green/verdict.json'), 'utf8'),
+    ) as { valid: boolean };
+    expect(verdict.valid).toBe(true);
+  }, 900_000);
+
+  it('accepts the implementation snapshot, not verifier mutations', async () => {
+    const mutateVerifierTask = await writeTask(
+      join(root, 'task-verifier-mutation.yml'),
+      [],
+      [[
+        'node',
+        '-e',
+        "require('node:fs').writeFileSync('src/slugify.js', 'export const tampered = true;\\n')",
+      ]],
+    );
+    const { report } = await run(phaseEnv(), { taskFile: mutateVerifierTask });
+
+    expect(report.status).toBe('succeeded');
+    expect(await git(repo.dir, ['show', `${report.commit ?? ''}:src/slugify.js`])).toBe(
+      IMPLEMENTATION_SOURCE.trimEnd(),
     );
   }, 900_000);
 

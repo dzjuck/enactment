@@ -31,6 +31,7 @@ import { classifyRed, redResultsArtifact } from '../verify/red.js';
 import type { TestRunResults } from '../verify/results.js';
 import { TestRunError } from '../verify/test-run.js';
 import { frozenPathsForPhase, frozenSetEvidence } from '../verify/frozen.js';
+import { classifyGreen, greenResultsArtifact } from '../verify/green.js';
 import { attemptLabels, newAttemptId } from '../volume/naming.js';
 import { snapshotWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
@@ -57,6 +58,7 @@ export const RUN_PHASES = [
 export type RunPhase =
   | 'baseline'
   | 'red'
+  | 'green'
   | (typeof RUN_PHASES)[number]
   | 'tests'
   | 'tests_diff'
@@ -93,6 +95,7 @@ export interface RunReport {
 const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
   baseline: 'baseline_failed',
   red: 'red_invalid',
+  green: 'verification_failed',
   export: 'internal_error',
   setup: 'setup_failed',
   workspace: 'internal_error',
@@ -548,6 +551,55 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       );
       implementation = run.snapshot;
       validated = run.validated;
+    }
+
+    if (task.type === 'code_behavior') {
+      await phase('green');
+      const greenDir = join(options.artifactDir, 'green');
+      let greenResults: TestRunResults | undefined;
+      try {
+        const greenVerification = await runVerification({
+          attempt,
+          snapshot: implementation,
+          dependencySnapshot,
+          commands: [],
+          testCommand: task.verification.test_command,
+          artifactDir: greenDir,
+          graceSeconds: timeouts.termination_grace_seconds,
+          images,
+          redact,
+        });
+        greenResults = greenVerification.testResults;
+      } catch (error) {
+        if (!(error instanceof TestRunError)) throw error;
+      }
+      if (baselineResults === undefined) {
+        throw new Error('code behavior baseline results are missing');
+      }
+      const greenVerdict = classifyGreen({
+        baseline: baselineResults,
+        results: greenResults,
+        expectedTestIds: task.expected_test_ids,
+      });
+      manifest.green = greenVerdict;
+      await mkdir(greenDir, { recursive: true });
+      if (greenResults !== undefined) {
+        await writeFile(
+          join(greenDir, 'results.json'),
+          redact(`${JSON.stringify(greenResultsArtifact(greenResults), null, 2)}\n`),
+        );
+      }
+      await writeFile(
+        join(greenDir, 'verdict.json'),
+        redact(`${JSON.stringify(greenVerdict, null, 2)}\n`),
+      );
+      if (!greenVerdict.valid) {
+        throw new PhaseFailure(
+          'green',
+          'verification_failed',
+          `invalid GREEN: ${greenVerdict.reasons.map((reason) => reason.message).join('; ')}`,
+        );
+      }
     }
 
     await phase('verify');
