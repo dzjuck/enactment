@@ -9,12 +9,13 @@ import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
 import {
-  runTask,
+  runStep,
   RUN_PHASES,
   type RunPhase,
   type RunReport,
 } from '../../src/run/orchestrator.js';
 import { commitAll, createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 const TEST_SOURCE = `import { slugify } from '../src/slugify.js';
@@ -37,7 +38,7 @@ const ATTEMPT_LABEL = 'ai-harness.attempt';
 
 let repo: TargetRepo;
 let root: string;
-let taskFile: string;
+let planFile: string;
 let stub: RuntimeImage;
 const dirs: string[] = [];
 
@@ -64,20 +65,20 @@ beforeAll(async () => {
   await mkdir(source, { recursive: true });
   await writeFile(join(source, AUTH_FILE), JSON.stringify({ tokens: { access_token: CANARY } }));
 
-  taskFile = await writeTask(join(root, 'task.yml'));
+  planFile = await writePlan(join(root, 'plan.yml'));
 }, 900_000);
 
-async function writeTask(
+async function writePlan(
   path: string,
   knownFlakyTests: string[] = [],
   verificationCommands: string[][] = [],
 ): Promise<string> {
   await writeFile(
     path,
-    [
+    planDocument([
       'type: code_behavior',
       'id: add-slugify-tests-first',
-      'prompt: Add slugify behavior for URL-safe titles.',
+      'observable_behavior: Add slugify behavior for URL-safe titles.',
       'implementation_paths:',
       '  - src/slugify.js',
       'test_paths:',
@@ -103,8 +104,7 @@ async function writeTask(
       '  connectivity_smoke_seconds: 20',
       '  agent_seconds: 6',
       '  termination_grace_seconds: 2',
-      '',
-    ].join('\n'),
+    ]),
   );
   return path;
 }
@@ -120,14 +120,14 @@ afterEach(async () => {
 
 async function run(
   env: Record<string, string> = phaseEnv(),
-  overrides: Partial<Parameters<typeof runTask>[0]> = {},
+  overrides: Partial<Parameters<typeof runStep>[0]> = {},
 ): Promise<{ report: RunReport; artifacts: string }> {
   const artifacts = await mkdtemp(join(tmpdir(), 'harness-m2-artifacts-'));
   dirs.push(artifacts);
   const injection: RunInjection = { agent: stub, agentEnv: env };
 
-  const report = await runTask({
-    taskFile,
+  const report = await runStep({
+    planFile,
     repoPath: repo.dir,
     artifactDir: artifacts,
     sourceCodexHome: join(root, 'codex-source'),
@@ -275,11 +275,11 @@ describe('code_behavior pipeline', () => {
         ].join('\n'),
       );
       flakyRepo.commit = await commitAll(flakyRepo.dir, 'Add quarantined baseline test');
-      const flakyTask = await writeTask(join(root, 'task-flaky.yml'), [flakyId]);
+      const flakyPlan = await writePlan(join(root, 'plan-flaky.yml'), [flakyId]);
 
       const { report, artifacts } = await run(phaseEnv(), {
         repoPath: flakyRepo.dir,
-        taskFile: flakyTask,
+        planFile: flakyPlan,
       });
 
       expect(report.status).toBe('failed');
@@ -412,12 +412,12 @@ describe('code_behavior pipeline', () => {
   }, 900_000);
 
   it('still runs opaque verification commands after GREEN', async () => {
-    const opaqueFailureTask = await writeTask(
-      join(root, 'task-opaque-failure.yml'),
+    const opaqueFailurePlan = await writePlan(
+      join(root, 'plan-opaque-failure.yml'),
       [],
       [['node', '-e', 'process.exit(7)']],
     );
-    const { report, artifacts } = await run(phaseEnv(), { taskFile: opaqueFailureTask });
+    const { report, artifacts } = await run(phaseEnv(), { planFile: opaqueFailurePlan });
 
     expect(report.status).toBe('failed');
     expect(report.failedPhase).toBe('verify');
@@ -429,8 +429,8 @@ describe('code_behavior pipeline', () => {
   }, 900_000);
 
   it('accepts the implementation snapshot, not verifier mutations', async () => {
-    const mutateVerifierTask = await writeTask(
-      join(root, 'task-verifier-mutation.yml'),
+    const mutateVerifierPlan = await writePlan(
+      join(root, 'plan-verifier-mutation.yml'),
       [],
       [[
         'node',
@@ -438,7 +438,7 @@ describe('code_behavior pipeline', () => {
         "require('node:fs').writeFileSync('src/slugify.js', 'export const tampered = true;\\n')",
       ]],
     );
-    const { report } = await run(phaseEnv(), { taskFile: mutateVerifierTask });
+    const { report } = await run(phaseEnv(), { planFile: mutateVerifierPlan });
 
     expect(report.status).toBe('succeeded');
     expect(await git(repo.dir, ['show', `${report.commit ?? ''}:src/slugify.js`])).toBe(

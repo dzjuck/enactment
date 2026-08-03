@@ -8,8 +8,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
-import { runTask, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
+import { runStep, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
 import { createTargetRepo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 const LABEL = 'ai-harness.attempt';
@@ -36,7 +37,7 @@ interface Manifest {
 
 let repo: TargetRepo;
 let root: string;
-let taskFile: string;
+let planFile: string;
 let stub: RuntimeImage;
 const dirs: string[] = [];
 
@@ -53,23 +54,23 @@ beforeAll(async () => {
     JSON.stringify({ tokens: { access_token: 'sk-disposal-canary' } }),
   );
 
-  taskFile = join(root, 'task.yml');
+  planFile = join(root, 'plan.yml');
   await writeFile(
-    taskFile,
-    [
-      'id: add-slugify',
-      'prompt: Implement the slugify function in src/slugify.js',
-      'implementation_paths:',
-      '  - src/slugify.js',
-      'verification:',
-      '  commands:',
-      '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
-      'timeouts:',
-      '  connectivity_smoke_seconds: 20',
-      '  agent_seconds: 15',
-      '  termination_grace_seconds: 2',
-      '',
-    ].join('\n'),
+    planFile,
+    planDocument([
+        'type: task',
+        'id: add-slugify',
+        'observable_behavior: Implement the slugify function in src/slugify.js',
+        'implementation_paths:',
+        '  - src/slugify.js',
+        'verification:',
+        '  commands:',
+        '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
+        'timeouts:',
+        '  connectivity_smoke_seconds: 20',
+        '  agent_seconds: 15',
+        '  termination_grace_seconds: 2',
+    ]),
   );
 }, 900_000);
 
@@ -94,15 +95,15 @@ function stubEnv(overrides: Record<string, string> = {}): Record<string, string>
 
 async function run(
   env: Record<string, string>,
-  overrides: Partial<Parameters<typeof runTask>[0]> = {},
+  overrides: Partial<Parameters<typeof runStep>[0]> = {},
 ): Promise<{ report: RunReport; manifest: Manifest }> {
   const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
   dirs.push(artifacts);
 
   const injection: RunInjection = { agent: stub, agentEnv: env, ...overrides.injection };
 
-  const report = await runTask({
-    taskFile,
+  const report = await runStep({
+    planFile,
     repoPath: repo.dir,
     artifactDir: artifacts,
     sourceCodexHome: join(root, 'codex-source'),
@@ -221,7 +222,7 @@ describe('a dirty attempt workspace is thrown away with the attempt', () => {
     // A failure manifest that lost the run's identity would make the evidence unusable.
     expect(manifest.repository?.base_commit).toBe(repo.commit);
     expect(manifest.runtime?.agent_image_id).toBe(stub.id);
-    expect(manifest.inputs?.task_hash).toMatch(/^sha256:/);
+    expect(manifest.inputs?.plan_hash).toMatch(/^sha256:/);
     expect(manifest.restoration).toBeUndefined();
   }, 300_000);
 });

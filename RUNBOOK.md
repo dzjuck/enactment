@@ -1,6 +1,6 @@
 # V1 Runbook
 
-The supported operator path: build the images, run one task, read the artifacts, recover from a
+The supported operator path: build the images, run one plan, read the artifacts, recover from a
 crash. Nothing here uses the test suites.
 
 ## Support scope
@@ -33,26 +33,40 @@ npm run build            # compiles the harness into dist/
 Docker image ID and executes that ID; if an image is missing, the run stops before any container
 starts and names this command.
 
-## 2. Declare a task
+## 2. Declare a plan
+
+Work is declared as a plan: an ordered step list plus the commands that verify the finished
+branch. This build executes plans of exactly one step; a longer plan is rejected rather than
+truncated.
 
 For a tests-first behavior change:
 
 ```yaml
-type: code_behavior
-id: add-slugify
-prompt: Add URL-safe slugify behavior.
-implementation_paths:
-  - src/slugify.js
-test_paths:
-  - test/slugify.test.js
-expected_test_ids:
-  - slugify lowercases and hyphenates words
-allowed_red_categories:
-  - assertion_failure
-  - missing_implementation
-verification:
-  test_command: ["npx", "--no-install", "vitest", "run", "--globals"]
+version: 1
+id: slugify-plan
+steps:
+  - type: code_behavior
+    id: add-slugify
+    observable_behavior: Add URL-safe slugify behavior.
+    implementation_paths:
+      - src/slugify.js
+    test_paths:
+      - test/slugify.test.js
+    expected_test_ids:
+      - slugify lowercases and hyphenates words
+    allowed_red_categories:
+      - assertion_failure
+      - missing_implementation
+    verification:
+      test_command: ["npx", "--no-install", "vitest", "run", "--globals"]
+final_verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run", "--globals"]
 ```
+
+`observable_behavior` is the text sent to the agent. Plan and step IDs are lowercase slugs,
+because they name a Git branch and an artifact directory. `final_verification.commands` is
+required; it runs against the finished branch.
 
 `test_command` is the verification. `commands` is optional here and is for anything the test run
 does not cover — a type check, a linter — not a repeat of the suite.
@@ -66,23 +80,33 @@ runner inputs, asks a second agent for implementation, verifies GREEN offline, r
 commands, then commits both changes. Phase artifacts live under `baseline/`, `tests/`, `red/`,
 `implementation/`, and `green/`.
 
-The original single-agent task remains available:
+The original single-agent step type remains available:
 
 ```yaml
-id: add-slugify
-prompt: |
-  Implement the slugify function in src/slugify.js.
-implementation_paths:
-  - src/slugify.js
-verification:
+version: 1
+id: slugify-plan
+steps:
+  - type: task
+    id: add-slugify
+    observable_behavior: |
+      Implement the slugify function in src/slugify.js.
+    implementation_paths:
+      - src/slugify.js
+    verification:
+      commands:
+        - ["npx", "--no-install", "vitest", "run"]
+    timeouts:
+      connectivity_smoke_seconds: 60
+      setup_seconds: 600
+      agent_seconds: 1200
+      termination_grace_seconds: 10
+final_verification:
   commands:
     - ["npx", "--no-install", "vitest", "run"]
-timeouts:
-  connectivity_smoke_seconds: 60
-  setup_seconds: 600
-  agent_seconds: 1200
-  termination_grace_seconds: 10
 ```
+
+`operational` and `mixed` steps are rejected until their milestone, as are service, routing and
+review fields.
 
 Rules the loader enforces: no unknown fields; verification commands are argv arrays, never shell
 strings; `implementation_paths` are relative, free of `..`, and may not name `package.json` or a
@@ -94,7 +118,7 @@ lockfile. `timeouts` may lower the defaults above, never raise them.
 ## 3. Run
 
 ```sh
-node dist/cli.js run task.yml --repo /path/to/repo --artifacts ./artifacts
+node dist/cli.js run plan.yml --repo /path/to/repo --artifacts ./artifacts
 ```
 
 Exit code 0 means verified and committed. The report is printed as JSON on stdout, and the same

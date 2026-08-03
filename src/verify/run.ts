@@ -38,9 +38,9 @@ export interface VerificationOptions {
   /** The immutable implementation snapshot — the only acceptance candidate (§15). */
   snapshot: StoredArtifact;
   dependencySnapshot: Buffer;
-  /** Fixed argument arrays from `task.yml`; never shell strings (§16). */
+  /** Fixed argument arrays from the plan; never shell strings (§16). */
   commands: readonly (readonly string[])[];
-  /** Vitest argv from `task.yml`; reporter arguments are appended by the harness. */
+  /** Vitest argv from the plan; reporter arguments are appended by the harness. */
   testCommand?: readonly string[];
   artifactDir: string;
   images: RuntimeImages;

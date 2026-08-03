@@ -24,7 +24,7 @@ import { exportCommit } from '../git/export.js';
 import { idempotencyKey } from '../git/idempotency.js';
 import { withPhaseNetworks } from '../net/manage.js';
 import { proxyEnvironment, withProxy, writeProxyRecords } from '../proxy/container.js';
-import { loadTask } from '../task/load.js';
+import { loadPlan } from '../plan/load.js';
 import { runVerification } from '../verify/run.js';
 import { baselineArtifact, captureBaseline } from '../verify/baseline.js';
 import { classifyRed, redResultsArtifact } from '../verify/red.js';
@@ -41,6 +41,7 @@ import { attemptLabels, newAttemptId } from '../volume/naming.js';
 import { snapshotWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
+import { singlePlanStep } from './bridge.js';
 import { CleanupError, describeError, releaseAll, sweepAttempt, withCleanupOutcome } from './cleanup.js';
 import { PhaseFailure, type FailureCategory } from './failure.js';
 import type { RunInjection } from './inject.js';
@@ -74,7 +75,7 @@ export const RUN_PHASES = [
 export type RunPhase = (typeof RUN_PHASES)[number];
 
 export interface RunOptions {
-  taskFile: string;
+  planFile: string;
   repoPath: string;
   artifactDir: string;
   baseCommit?: string;
@@ -144,13 +145,13 @@ async function git(repoPath: string, args: string[]): Promise<string> {
 }
 
 /**
- * Drive one task from export to commit.
+ * Drive one plan step from export to commit.
  *
  * Every resource is registered for teardown as soon as it exists, and teardown runs in a
  * `finally` in reverse order — so an interrupt or a failure in any phase leaves no
  * attempt-scoped container, volume or network behind.
  */
-export async function runTask(options: RunOptions): Promise<RunReport> {
+export async function runStep(options: RunOptions): Promise<RunReport> {
   const attempt = options.injection?.attempt ?? newAttemptId();
   const teardown: (() => Promise<void>)[] = [];
   const snapshots = new ArtifactStore(join(options.artifactDir, 'snapshots'));
@@ -170,7 +171,8 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
 
   try {
     await phase('export');
-    const { task, hash: taskHash } = await loadTask(options.taskFile);
+    const { plan, hash: planHash } = await loadPlan(options.planFile);
+    const step = singlePlanStep(plan);
     const baseCommit = options.baseCommit ?? (await git(options.repoPath, ['rev-parse', 'HEAD']));
     const baseBranch =
       options.baseBranch ?? (await git(options.repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']));
@@ -185,14 +187,14 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       agent: options.injection?.agent ?? images.agent,
     };
     const { tar, hash: exportHash } = await exportCommit(options.repoPath, baseCommit);
-    const timeouts = resolveTimeouts(task.timeouts);
+    const timeouts = resolveTimeouts(step.timeouts);
 
     // Recorded now rather than on the success path: a failure manifest without the run's
     // identity cannot be used as evidence of anything.
     manifest.repository = { base_branch: baseBranch, base_commit: baseCommit };
     manifest.runtime = runtimeSection(agentImages);
     const inputs: Record<string, unknown> = {
-      task_hash: taskHash,
+      plan_hash: planHash,
       export_hash: exportHash,
       ...networkPolicySection(),
     };
@@ -252,7 +254,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     const stored = await readAuthStore(authStore);
     redact = createRedactor(collectSecrets(stored));
 
-    const policy = compileCodexPolicy({ prompt: task.prompt, workdir: '/workspace' });
+    const policy = compileCodexPolicy({ prompt: step.observable_behavior, workdir: '/workspace' });
     inputs.policy_hash = policy.hash;
 
     // CODEX_HOME is a per-attempt volume, not a bind of the host store: no host directory is
@@ -287,22 +289,22 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     snapshotHashes.pre_agent = preAgent.hash;
     let baselineResults: TestRunResults | undefined;
 
-    if (task.type === 'code_behavior') {
+    if (step.type === 'code_behavior') {
       await phase('baseline');
       const baselineDir = join(options.artifactDir, 'baseline');
       const baseline = await captureBaseline({
         policy: {
-          retryFailures: task.baseline.retry_failures,
-          knownFlakyTests: task.baseline.known_flaky_tests,
+          retryFailures: step.baseline.retry_failures,
+          knownFlakyTests: step.baseline.known_flaky_tests,
         },
-        expectedTestIds: task.expected_test_ids,
+        expectedTestIds: step.expected_test_ids,
         run: async (baselineAttempt) => {
           const verification = await runVerification({
             attempt,
             snapshot: preAgent,
             dependencySnapshot,
             commands: [],
-            testCommand: task.verification.test_command,
+            testCommand: step.verification.test_command,
             artifactDir: join(baselineDir, `attempt-${String(baselineAttempt)}`),
             graceSeconds: timeouts.termination_grace_seconds,
             images,
@@ -425,7 +427,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       );
 
       const agentUsage = usageSection(agentRun.usage);
-      if (task.type === 'code_behavior') {
+      if (step.type === 'code_behavior') {
         const phaseUsage = (manifest.usage ?? {}) as Record<string, unknown>;
         phaseUsage[agentPhase] = agentUsage;
         manifest.usage = phaseUsage;
@@ -478,16 +480,16 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     let implementation;
     let validated;
 
-    if (task.type === 'code_behavior') {
+    if (step.type === 'code_behavior') {
       const testsRun = await runAgentAndValidate(
         'tests',
-        testWritingPrompt(task),
-        task.test_paths,
+        testWritingPrompt(step),
+        step.test_paths,
         tar,
         frozenPathsForPhase(
           'tests',
-          task.verification.closure_paths,
-          task.test_paths,
+          step.verification.closure_paths,
+          step.test_paths,
         ),
       );
       await phase('red');
@@ -499,7 +501,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
           snapshot: testsRun.snapshot,
           dependencySnapshot,
           commands: [],
-          testCommand: task.verification.test_command,
+          testCommand: step.verification.test_command,
           artifactDir: redDir,
           graceSeconds: timeouts.termination_grace_seconds,
           images,
@@ -515,9 +517,9 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       const redVerdict = classifyRed({
         baseline: baselineResults,
         results: redResults,
-        expectedTestIds: task.expected_test_ids,
-        allowedRedCategories: task.allowed_red_categories,
-        implementationPaths: task.implementation_paths,
+        expectedTestIds: step.expected_test_ids,
+        allowedRedCategories: step.allowed_red_categories,
+        implementationPaths: step.implementation_paths,
       });
       manifest.red = redVerdict;
       await mkdir(redDir, { recursive: true });
@@ -540,8 +542,8 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       }
       const implementationFrozenPaths = frozenPathsForPhase(
         'implementation',
-        task.verification.closure_paths,
-        task.test_paths,
+        step.verification.closure_paths,
+        step.test_paths,
       );
       manifest.frozen = frozenSetEvidence(
         await manifestFromTar(testsRun.snapshotTar),
@@ -549,8 +551,8 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       );
       const implementationRun = await runAgentAndValidate(
         'implementation',
-        implementationPrompt(task),
-        implementationScopeWithDispute(task.implementation_paths),
+        implementationPrompt(step),
+        implementationScopeWithDispute(step.implementation_paths),
         testsRun.snapshotTar,
         implementationFrozenPaths,
       );
@@ -576,15 +578,15 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     } else {
       const run = await runAgentAndValidate(
         'agent',
-        task.prompt,
-        task.implementation_paths,
+        step.observable_behavior,
+        step.implementation_paths,
         tar,
       );
       implementation = run.snapshot;
       validated = run.validated;
     }
 
-    if (task.type === 'code_behavior') {
+    if (step.type === 'code_behavior') {
       await phase('green');
       const greenDir = join(options.artifactDir, 'green');
       let greenResults: TestRunResults | undefined;
@@ -594,7 +596,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
           snapshot: implementation,
           dependencySnapshot,
           commands: [],
-          testCommand: task.verification.test_command,
+          testCommand: step.verification.test_command,
           artifactDir: greenDir,
           graceSeconds: timeouts.termination_grace_seconds,
           images,
@@ -610,7 +612,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       const greenVerdict = classifyGreen({
         baseline: baselineResults,
         results: greenResults,
-        expectedTestIds: task.expected_test_ids,
+        expectedTestIds: step.expected_test_ids,
       });
       manifest.green = greenVerdict;
       await mkdir(greenDir, { recursive: true });
@@ -638,7 +640,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       attempt,
       snapshot: implementation,
       dependencySnapshot,
-      commands: task.verification.commands,
+      commands: step.verification.commands,
       artifactDir: options.artifactDir,
       graceSeconds: timeouts.termination_grace_seconds,
       images,
@@ -667,10 +669,10 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     const accepted = await acceptChanges({
       repoPath: options.repoPath,
       baseCommit,
-      branch: `ai-harness/${task.id}-${attempt}`,
-      taskId: task.id,
+      branch: `ai-harness/${step.id}-${attempt}`,
+      taskId: step.id,
       attempt,
-      idempotencyKey: idempotencyKey({ taskId: task.id, taskHash, baseCommit, attempt }),
+      idempotencyKey: idempotencyKey({ taskId: step.id, taskHash: planHash, baseCommit, attempt }),
       verificationStatus: verification.status,
       changes: validated.changes,
     });

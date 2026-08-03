@@ -10,6 +10,7 @@ import type { RuntimeImage } from '../../src/docker/images.js';
 import { sweepAttempt } from '../../src/run/cleanup.js';
 import { ATTEMPT_LABEL } from '../../src/volume/naming.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 const SLUGIFY = 'export function slugify(t) {\n  return String(t).toLowerCase();\n}\n';
@@ -33,21 +34,21 @@ beforeAll(async () => {
   );
 
   await writeFile(
-    join(root, 'task.yml'),
-    [
-      'id: add-slugify',
-      'prompt: Implement the slugify function in src/slugify.js',
-      'implementation_paths:',
-      '  - src/slugify.js',
-      'verification:',
-      '  commands:',
-      '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
-      'timeouts:',
-      '  connectivity_smoke_seconds: 20',
-      '  agent_seconds: 120',
-      '  termination_grace_seconds: 2',
-      '',
-    ].join('\n'),
+    join(root, 'plan.yml'),
+    planDocument([
+        'type: task',
+        'id: add-slugify',
+        'observable_behavior: Implement the slugify function in src/slugify.js',
+        'implementation_paths:',
+        '  - src/slugify.js',
+        'verification:',
+        '  commands:',
+        '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
+        'timeouts:',
+        '  connectivity_smoke_seconds: 20',
+        '  agent_seconds: 120',
+        '  termination_grace_seconds: 2',
+    ]),
   );
 
   runnerScript = join(root, 'runner.mjs');
@@ -55,8 +56,8 @@ beforeAll(async () => {
     runnerScript,
     [
       "import { appendFile } from 'node:fs/promises';",
-      `import { runTask } from ${JSON.stringify(join(process.cwd(), 'dist/run/orchestrator.js'))};`,
-      'await runTask({',
+      `import { runStep } from ${JSON.stringify(join(process.cwd(), 'dist/run/orchestrator.js'))};`,
+      'await runStep({',
       '  ...JSON.parse(process.env.HARNESS_TEST_RUN),',
       '  onPhase: (phase) => appendFile(process.env.HARNESS_TEST_PHASES, `${phase}\\n`),',
       '});',
@@ -123,7 +124,7 @@ describe('orphans left by a run that was killed outright', () => {
       env: {
         HARNESS_TEST_PHASES: phasesFile,
         HARNESS_TEST_RUN: JSON.stringify({
-          taskFile: join(root, 'task.yml'),
+          planFile: join(root, 'plan.yml'),
           repoPath: repo.dir,
           artifactDir: artifacts,
           sourceCodexHome: join(root, 'codex-source'),

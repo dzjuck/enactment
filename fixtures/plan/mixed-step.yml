@@ -1,0 +1,10 @@
+version: 1
+id: slugify-plan
+steps:
+  - type: mixed
+    id: start-server
+    observable_behavior: The server starts and answers /health.
+    implementation_paths: [src/server.js]
+final_verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]

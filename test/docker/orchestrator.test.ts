@@ -8,8 +8,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { AUTH_FILE } from '../../src/auth/store.js';
 import { resolveRuntimeImages, type RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
-import { runTask, RUN_PHASES, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
+import { runStep, RUN_PHASES, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
 import { createTargetRepo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 const CANARY = 'sk-orchestrator-canary-77d3f19a';
@@ -35,7 +36,7 @@ const SLUGIFY = `export function slugify(title) {
 
 let repo: TargetRepo;
 let root: string;
-let taskFile: string;
+let planFile: string;
 let stub: RuntimeImage;
 let runnerScript: string;
 const dirs: string[] = [];
@@ -68,38 +69,38 @@ beforeAll(async () => {
     JSON.stringify({ tokens: { access_token: CANARY, refresh_token: `refresh-${CANARY}` } }),
   );
 
-  taskFile = join(root, 'task.yml');
+  planFile = join(root, 'plan.yml');
   await writeFile(
-    taskFile,
-    [
-      'id: add-slugify',
-      'prompt: Implement the slugify function in src/slugify.js',
-      'implementation_paths:',
-      '  - src/slugify.js',
-      'verification:',
-      '  commands:',
-      '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
-      'timeouts:',
-      '  connectivity_smoke_seconds: 20',
-      '  agent_seconds: 15',
-      '  termination_grace_seconds: 2',
-      '',
-    ].join('\n'),
+    planFile,
+    planDocument([
+        'type: task',
+        'id: add-slugify',
+        'observable_behavior: Implement the slugify function in src/slugify.js',
+        'implementation_paths:',
+        '  - src/slugify.js',
+        'verification:',
+        '  commands:',
+        '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
+        'timeouts:',
+        '  connectivity_smoke_seconds: 20',
+        '  agent_seconds: 15',
+        '  termination_grace_seconds: 2',
+    ]),
   );
 
   // The production CLI has no image or environment override, so the interrupt test drives
-  // `runTask` in a child process of its own rather than through an escape hatch.
+  // `runStep` in a child process of its own rather than through an escape hatch.
   runnerScript = join(root, 'run-with-stub.mjs');
   await writeFile(
     runnerScript,
     [
       "import { appendFile, writeFile } from 'node:fs/promises';",
-      `import { runTask } from ${JSON.stringify(join(process.cwd(), 'dist/run/orchestrator.js'))};`,
+      `import { runStep } from ${JSON.stringify(join(process.cwd(), 'dist/run/orchestrator.js'))};`,
       'const controller = new AbortController();',
       "for (const signal of ['SIGINT', 'SIGTERM']) {",
       '  process.on(signal, () => { controller.abort(); });',
       '}',
-      'const report = await runTask({',
+      'const report = await runStep({',
       '  ...JSON.parse(process.env.HARNESS_TEST_RUN),',
       '  onPhase: (phase) => appendFile(process.env.HARNESS_TEST_PHASES, `${phase}\\n`),',
       '  signal: controller.signal,',
@@ -152,12 +153,12 @@ async function artifactDir(): Promise<string> {
 }
 
 async function run(
-  overrides: Partial<Parameters<typeof runTask>[0]> = {},
+  overrides: Partial<Parameters<typeof runStep>[0]> = {},
 ): Promise<{ report: RunReport; artifacts: string }> {
   const artifacts = await artifactDir();
 
-  const report = await runTask({
-    taskFile,
+  const report = await runStep({
+    planFile,
     repoPath: repo.dir,
     artifactDir: artifacts,
     sourceCodexHome: join(root, 'codex-source'),
@@ -286,7 +287,7 @@ describe('orchestrator', () => {
 
     expect(manifest.repository.base_branch).toBe('main');
     expect(manifest.repository.base_commit).toBe(repo.commit);
-    expect(manifest.inputs.task_hash).toMatch(/^sha256:/);
+    expect(manifest.inputs.plan_hash).toMatch(/^sha256:/);
     expect(manifest.inputs.export_hash).toMatch(/^sha256:/);
     expect(manifest.inputs.network_policy_hash).toMatch(/^sha256:/);
     expect(manifest.inputs.dependency_cache_key).toMatch(/^sha256:/);
@@ -336,7 +337,7 @@ describe('orchestrator', () => {
         HARNESS_TEST_REPORT: reportFile,
         HARNESS_TEST_PHASES: phasesFile,
         HARNESS_TEST_RUN: JSON.stringify({
-          taskFile,
+          planFile,
           repoPath: repo.dir,
           artifactDir: artifacts,
           sourceCodexHome: join(root, 'codex-source'),

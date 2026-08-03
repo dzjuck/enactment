@@ -1,0 +1,14 @@
+version: 1
+id: slugify-plan
+steps:
+  - type: task
+    id: add-slugify
+    observable_behavior: Implement the slugify function in src/slugify.js.
+    implementation_paths:
+      - package-lock.json
+    verification:
+      commands:
+        - ["npx", "--no-install", "vitest", "run"]
+final_verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]

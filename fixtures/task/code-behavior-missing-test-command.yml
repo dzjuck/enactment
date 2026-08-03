@@ -1,8 +1,0 @@
-type: code_behavior
-id: add-slugify-tests-first
-prompt: Add slugify behavior.
-implementation_paths: [src/slugify.js]
-test_paths: [test/slugify.test.js]
-expected_test_ids: [slugify works]
-verification:
-  commands: [["npm", "test"]]

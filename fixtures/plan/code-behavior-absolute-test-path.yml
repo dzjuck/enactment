@@ -1,0 +1,15 @@
+version: 1
+id: slugify-plan
+steps:
+  - type: code_behavior
+    id: add-slugify-tests-first
+    observable_behavior: Add slugify behavior.
+    implementation_paths: [src/slugify.js]
+    test_paths: [/tmp/slugify.test.js]
+    expected_test_ids: [slugify works]
+    verification:
+      test_command: ["npx", "--no-install", "vitest", "run"]
+      commands: [["npm", "test"]]
+final_verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]

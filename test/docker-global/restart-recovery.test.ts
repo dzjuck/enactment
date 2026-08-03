@@ -9,6 +9,7 @@ import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
 import { ATTEMPT_LABEL } from '../../src/volume/naming.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 /**
@@ -24,7 +25,7 @@ const SLUGIFY = 'export function slugify(t) {\n  return String(t).toLowerCase();
 
 let repo: TargetRepo;
 let root: string;
-let taskFile: string;
+let planFile: string;
 let runnerScript: string;
 let stub: RuntimeImage;
 
@@ -40,23 +41,23 @@ beforeAll(async () => {
     JSON.stringify({ tokens: { access_token: 'sk-restart-canary' } }),
   );
 
-  taskFile = join(root, 'task.yml');
+  planFile = join(root, 'plan.yml');
   await writeFile(
-    taskFile,
-    [
-      'id: add-slugify',
-      'prompt: Implement the slugify function in src/slugify.js',
-      'implementation_paths:',
-      '  - src/slugify.js',
-      'verification:',
-      '  commands:',
-      '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
-      'timeouts:',
-      '  connectivity_smoke_seconds: 20',
-      '  agent_seconds: 300',
-      '  termination_grace_seconds: 2',
-      '',
-    ].join('\n'),
+    planFile,
+    planDocument([
+        'type: task',
+        'id: add-slugify',
+        'observable_behavior: Implement the slugify function in src/slugify.js',
+        'implementation_paths:',
+        '  - src/slugify.js',
+        'verification:',
+        '  commands:',
+        '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
+        'timeouts:',
+        '  connectivity_smoke_seconds: 20',
+        '  agent_seconds: 300',
+        '  termination_grace_seconds: 2',
+    ]),
   );
 
   // The production CLI has no stub seam, so the run that gets killed is driven directly.
@@ -65,8 +66,8 @@ beforeAll(async () => {
     runnerScript,
     [
       "import { appendFile } from 'node:fs/promises';",
-      `import { runTask } from ${JSON.stringify(join(process.cwd(), 'dist/run/orchestrator.js'))};`,
-      'await runTask({',
+      `import { runStep } from ${JSON.stringify(join(process.cwd(), 'dist/run/orchestrator.js'))};`,
+      'await runStep({',
       '  ...JSON.parse(process.env.HARNESS_TEST_RUN),',
       '  onPhase: (phase) => appendFile(process.env.HARNESS_TEST_PHASES, `${phase}\\n`),',
       '});',
@@ -121,7 +122,7 @@ describe('a SIGKILLed run is cleaned up by the next production CLI start', () =>
       env: {
         HARNESS_TEST_PHASES: phasesFile,
         HARNESS_TEST_RUN: JSON.stringify({
-          taskFile,
+          planFile,
           repoPath: repo.dir,
           artifactDir: artifacts,
           sourceCodexHome: join(root, 'codex-source'),
@@ -165,7 +166,7 @@ describe('a SIGKILLed run is cleaned up by the next production CLI start', () =>
         [
           'dist/cli.js',
           'run',
-          taskFile,
+          planFile,
           '--repo',
           join(root, 'no-such-repo'),
           '--artifacts',

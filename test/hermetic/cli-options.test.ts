@@ -20,13 +20,13 @@ const IMAGES: RuntimeImages = {
   proxy: { role: 'proxy', id: digits(4) },
 };
 
-const BASE = ['run', 'task.yml', '--repo', '/repo'];
+const BASE = ['run', 'plan.yml', '--repo', '/repo'];
 
 describe('CLI option parsing', () => {
   it('accepts the supported production options', () => {
     const options = parseRunOptions([...BASE, '--artifacts', '/out'], {});
 
-    expect(options.taskFile).toBe('task.yml');
+    expect(options.planFile).toBe('plan.yml');
     expect(options.repoPath).toBe('/repo');
     expect(options.artifactDir).toBe('/out');
   });
@@ -50,10 +50,10 @@ describe('CLI option parsing', () => {
     expect(() => parseRunOptions([...BASE, '--policy', 'off'], {})).toThrow(CliUsageError);
   });
 
-  it('requires the run command, a task file and a repository', () => {
-    expect(() => parseRunOptions(['task.yml', '--repo', '/repo'], {})).toThrow(CliUsageError);
+  it('requires the run command, a plan file and a repository', () => {
+    expect(() => parseRunOptions(['plan.yml', '--repo', '/repo'], {})).toThrow(CliUsageError);
     expect(() => parseRunOptions(['run', '--repo', '/repo'], {})).toThrow(CliUsageError);
-    expect(() => parseRunOptions(['run', 'task.yml'], {})).toThrow(CliUsageError);
+    expect(() => parseRunOptions(['run', 'plan.yml'], {})).toThrow(CliUsageError);
   });
 
   it('reads only the harness state environment variables', () => {

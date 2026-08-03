@@ -1,7 +1,0 @@
-id: add-slugify
-prompt: Implement the slugify function in src/slugify.js.
-implementation_paths:
-  - package-lock.json
-verification:
-  commands:
-    - ["npx", "--no-install", "vitest", "run"]

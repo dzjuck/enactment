@@ -1,0 +1,6 @@
+version: 1
+id: slugify-plan
+steps: []
+final_verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]

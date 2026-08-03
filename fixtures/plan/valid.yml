@@ -1,0 +1,36 @@
+version: 1
+id: slugify-plan
+steps:
+  - type: task
+    id: add-slugify
+    observable_behavior: |
+      Implement the slugify function in src/slugify.js so that it converts a title
+      into a URL-safe slug.
+    implementation_paths:
+      - src/slugify.js
+      - src/util/**
+    verification:
+      commands:
+        - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]
+    timeouts:
+      connectivity_smoke_seconds: 30
+      setup_seconds: 300
+      agent_seconds: 600
+      termination_grace_seconds: 5
+  - type: code_behavior
+    id: add-slugify-tests-first
+    observable_behavior: |
+      Add slugify behavior.
+    implementation_paths:
+      - src/slugify.js
+    test_paths:
+      - test/slugify.test.js
+    expected_test_ids:
+      - slugify lowercases and hyphenates
+    verification:
+      test_command: ["npx", "--no-install", "vitest", "run"]
+      commands:
+        - ["npm", "run", "typecheck"]
+final_verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]

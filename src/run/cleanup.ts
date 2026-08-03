@@ -116,7 +116,7 @@ export async function sweepAttempt(
  * This is the restart path: a process killed outright leaves labelled resources whose attempt
  * id nobody remembers, so the only handle on them is the label itself. Because its blast
  * radius is every harness resource on the daemon, it belongs at production CLI startup and
- * nowhere else — `runTask` stays attempt-scoped, which is what lets suites run in parallel.
+ * nowhere else — `runStep` stays attempt-scoped, which is what lets suites run in parallel.
  * The consequence, and the V1 trade: two production CLI runs at once are unsupported.
  */
 export async function sweepHarness(dependencies: HarnessSweepDependencies = {}): Promise<void> {

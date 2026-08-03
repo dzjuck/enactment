@@ -1,0 +1,13 @@
+version: 1
+id: slugify-plan
+steps:
+  - type: task
+    id: add-slugify
+    implementation_paths:
+      - src/slugify.js
+    verification:
+      commands:
+        - ["npx", "--no-install", "vitest", "run"]
+final_verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]

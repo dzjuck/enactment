@@ -8,16 +8,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage, RuntimeImages } from '../../src/docker/images.js';
 import { sweepHarness } from '../../src/run/cleanup.js';
-import { runTask } from '../../src/run/orchestrator.js';
+import { runStep } from '../../src/run/orchestrator.js';
 import { ATTEMPT_LABEL, ROLE_LABEL } from '../../src/volume/naming.js';
 import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 /**
  * This suite sweeps every harness-labelled resource on the daemon, so it runs in its own
  * project, alone. Inside the parallel `docker` project it would delete another file's
- * containers mid-run — which is precisely why `runTask` itself never sweeps globally.
+ * containers mid-run — which is precisely why `runStep` itself never sweeps globally.
  */
 
 /** The implementation the fixture's own test suite accepts, so the run reaches a commit. */
@@ -31,7 +32,7 @@ const SLUGIFY = `export function slugify(title) {
 
 let repo: TargetRepo;
 let root: string;
-let taskFile: string;
+let planFile: string;
 let stub: RuntimeImage;
 let images: RuntimeImages;
 const dirs: string[] = [];
@@ -50,23 +51,23 @@ beforeAll(async () => {
     JSON.stringify({ tokens: { access_token: 'sk-startup-canary' } }),
   );
 
-  taskFile = join(root, 'task.yml');
+  planFile = join(root, 'plan.yml');
   await writeFile(
-    taskFile,
-    [
-      'id: add-slugify',
-      'prompt: Implement the slugify function in src/slugify.js',
-      'implementation_paths:',
-      '  - src/slugify.js',
-      'verification:',
-      '  commands:',
-      '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
-      'timeouts:',
-      '  connectivity_smoke_seconds: 20',
-      '  agent_seconds: 30',
-      '  termination_grace_seconds: 2',
-      '',
-    ].join('\n'),
+    planFile,
+    planDocument([
+        'type: task',
+        'id: add-slugify',
+        'observable_behavior: Implement the slugify function in src/slugify.js',
+        'implementation_paths:',
+        '  - src/slugify.js',
+        'verification:',
+        '  commands:',
+        '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
+        'timeouts:',
+        '  connectivity_smoke_seconds: 20',
+        '  agent_seconds: 30',
+        '  termination_grace_seconds: 2',
+    ]),
   );
 }, 900_000);
 
@@ -123,8 +124,8 @@ describe('a production restart cleans up after a crashed one', () => {
     const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
     dirs.push(artifacts);
 
-    const report = await runTask({
-      taskFile,
+    const report = await runStep({
+      planFile,
       repoPath: repo.dir,
       artifactDir: artifacts,
       sourceCodexHome: join(root, 'codex-source'),
@@ -148,7 +149,7 @@ describe('a production restart cleans up after a crashed one', () => {
     await expect(labelled('volume', report.attempt)).resolves.toEqual([]);
     await expect(labelled('network', report.attempt)).resolves.toEqual([]);
 
-    // ...and the resources belonging to another attempt are still there, because `runTask`
+    // ...and the resources belonging to another attempt are still there, because `runStep`
     // owns its attempt and nothing else.
     await expect(labelled('container', foreign)).resolves.not.toEqual([]);
     await expect(labelled('volume', foreign)).resolves.not.toEqual([]);

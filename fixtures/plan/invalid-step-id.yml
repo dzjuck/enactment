@@ -1,0 +1,12 @@
+version: 1
+id: slugify-plan
+steps:
+  - type: task
+    id: ../escape
+    observable_behavior: Implement the slugify function in src/slugify.js.
+    implementation_paths: [src/slugify.js]
+    verification:
+      commands: [["npx", "--no-install", "vitest", "run"]]
+final_verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]

@@ -95,7 +95,7 @@ describe('sweepHarness', () => {
 });
 
 describe('production startup', () => {
-  const OPTIONS = { taskFile: 'task.yml', repoPath: '/repo', artifactDir: '/out' } satisfies
+  const OPTIONS = { planFile: 'plan.yml', repoPath: '/repo', artifactDir: '/out' } satisfies
     RunOptions;
   const REPORT: RunReport = { status: 'succeeded', attempt: 'a1' };
 
@@ -131,16 +131,16 @@ describe('production startup', () => {
     expect(started).toBe(false);
   });
 
-  it('is reached only through the CLI, never from runTask', async () => {
+  it('is reached only through the CLI, never from runStep', async () => {
     const orchestrator = await readFile(join(SRC, 'run/orchestrator.ts'), 'utf8');
     const cli = await readFile(join(SRC, 'cli.ts'), 'utf8');
 
-    // Docker suites drive `runTask` directly and in parallel; a global sweep in there would
+    // Docker suites drive `runStep` directly and in parallel; a global sweep in there would
     // delete another test file's containers mid-run.
     expect(orchestrator).not.toContain('sweepHarness');
     expect(orchestrator).toContain('sweepAttempt');
 
     expect(cli).toContain('runProduction');
-    expect(cli).not.toContain('runTask');
+    expect(cli).not.toContain('runStep');
   });
 });

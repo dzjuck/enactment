@@ -1,5 +1,5 @@
 import { sweepHarness } from './cleanup.js';
-import { runTask, type RunOptions, type RunReport } from './orchestrator.js';
+import { runStep, type RunOptions, type RunReport } from './orchestrator.js';
 
 export interface ProductionDependencies {
   sweep?: () => Promise<void>;
@@ -24,7 +24,7 @@ export async function runProduction(
   dependencies: ProductionDependencies = {},
 ): Promise<RunReport> {
   const sweep = dependencies.sweep ?? sweepHarness;
-  const run = dependencies.run ?? runTask;
+  const run = dependencies.run ?? runStep;
 
   await sweep();
 

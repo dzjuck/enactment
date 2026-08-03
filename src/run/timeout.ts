@@ -2,7 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { execa } from 'execa';
 
-import { DEFAULT_TIMEOUTS } from '../task/schema.js';
+import { DEFAULT_TIMEOUTS } from '../plan/schema.js';
 
 export interface Timeouts {
   connectivity_smoke_seconds: number;

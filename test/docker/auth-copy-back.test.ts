@@ -7,10 +7,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
-import { runTask, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
+import { runStep, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
 import { authVolumeName } from '../../src/volume/naming.js';
 import { volumeExists } from '../../src/volume/workspace.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 const SLUGIFY = `export function slugify(title) {
@@ -31,7 +32,7 @@ const ROTATED = `${JSON.stringify({
 
 let repo: TargetRepo;
 let root: string;
-let taskFile: string;
+let planFile: string;
 let stub: RuntimeImage;
 let stores = 0;
 const dirs: string[] = [];
@@ -45,23 +46,23 @@ beforeAll(async () => {
   await mkdir(source, { recursive: true });
   await writeFile(join(source, AUTH_FILE), SEEDED);
 
-  taskFile = join(root, 'task.yml');
+  planFile = join(root, 'plan.yml');
   await writeFile(
-    taskFile,
-    [
-      'id: add-slugify',
-      'prompt: Implement the slugify function in src/slugify.js',
-      'implementation_paths:',
-      '  - src/slugify.js',
-      'verification:',
-      '  commands:',
-      '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
-      'timeouts:',
-      '  connectivity_smoke_seconds: 20',
-      '  agent_seconds: 15',
-      '  termination_grace_seconds: 2',
-      '',
-    ].join('\n'),
+    planFile,
+    planDocument([
+        'type: task',
+        'id: add-slugify',
+        'observable_behavior: Implement the slugify function in src/slugify.js',
+        'implementation_paths:',
+        '  - src/slugify.js',
+        'verification:',
+        '  commands:',
+        '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
+        'timeouts:',
+        '  connectivity_smoke_seconds: 20',
+        '  agent_seconds: 15',
+        '  termination_grace_seconds: 2',
+    ]),
   );
 }, 900_000);
 
@@ -83,14 +84,14 @@ interface Outcome {
 }
 
 /**
- * Run a task whose agent rotates its credential and then meets `mode`'s fate.
+ * Run a step whose agent rotates its credential and then meets `mode`'s fate.
  *
  * Each run gets its own store, seeded from the same source: the store is what copy-back
  * rewrites, so a shared one would carry a previous test's rotation.
  */
 async function runRotating(
   env: Record<string, string>,
-  overrides: Partial<Parameters<typeof runTask>[0]> = {},
+  overrides: Partial<Parameters<typeof runStep>[0]> = {},
 ): Promise<Outcome> {
   const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
   dirs.push(artifacts);
@@ -98,8 +99,8 @@ async function runRotating(
   stores += 1;
   const storeDirectory = join(root, `store-${String(stores)}`);
 
-  const report = await runTask({
-    taskFile,
+  const report = await runStep({
+    planFile,
     repoPath: repo.dir,
     artifactDir: artifacts,
     sourceCodexHome: join(root, 'codex-source'),

@@ -9,7 +9,7 @@ export class CliUsageError extends Error {
   }
 }
 
-export const CLI_USAGE = 'usage: harness run <task.yml> --repo <path> [--artifacts <dir>]';
+export const CLI_USAGE = 'usage: harness run <plan.yml> --repo <path> [--artifacts <dir>]';
 
 /**
  * Parse `harness run` into run options.
@@ -36,17 +36,17 @@ export function parseRunOptions(argv: string[], env: NodeJS.ProcessEnv = process
     throw new CliUsageError(`${error instanceof Error ? error.message : String(error)}\n${CLI_USAGE}`);
   }
 
-  const [command, taskFile, ...surplus] = parsed.positionals;
+  const [command, planFile, ...surplus] = parsed.positionals;
 
   if (command !== 'run') throw new CliUsageError(`unknown command "${command ?? ''}"\n${CLI_USAGE}`);
-  if (taskFile === undefined) throw new CliUsageError(`no task file given\n${CLI_USAGE}`);
+  if (planFile === undefined) throw new CliUsageError(`no plan file given\n${CLI_USAGE}`);
   if (surplus.length > 0) {
     throw new CliUsageError(`unexpected argument "${surplus[0] ?? ''}"\n${CLI_USAGE}`);
   }
   if (parsed.values.repo === undefined) throw new CliUsageError(`--repo is required\n${CLI_USAGE}`);
 
   const options: RunOptions = {
-    taskFile,
+    planFile,
     repoPath: parsed.values.repo,
     artifactDir: parsed.values.artifacts ?? 'artifacts',
   };

@@ -27,14 +27,14 @@ interface ProxyRecord {
 
 let repo: TargetRepo;
 let root: string;
-let taskFile: string;
+let planFile: string;
 let artifacts: string;
 
 beforeAll(async () => {
   repo = await createM2Repo();
   root = await mkdtemp(join(tmpdir(), 'harness-live-'));
   artifacts = join(root, 'artifacts');
-  taskFile = join(repo.dir, 'task.yml');
+  planFile = join(repo.dir, 'plan.yml');
 }, 900_000);
 
 afterAll(async () => {
@@ -63,7 +63,7 @@ describe('real Codex tests-first run', () => {
     const images = await runtimeImages();
 
     // No store or cache overrides: the persistent harness state is deliberately what is used.
-    const report = await runProduction({ taskFile, repoPath: repo.dir, artifactDir: artifacts });
+    const report = await runProduction({ planFile, repoPath: repo.dir, artifactDir: artifacts });
 
     expect(report.cleanupErrors).toBeUndefined();
     expect(report.status).toBe('succeeded');
