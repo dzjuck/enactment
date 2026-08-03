@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { buildAgentSpec } from '../../src/adapters/codex/run.js';
 import { AGENT_HOME, buildRunArgs } from '../../src/docker/args.js';
 import type { RuntimeImages } from '../../src/docker/images.js';
-import { CliUsageError, parseRunOptions } from '../../src/run/options.js';
+import { parseCommand } from '../../src/run/options.js';
 
 const SRC = fileURLToPath(new URL('../../src', import.meta.url));
 
@@ -20,58 +20,11 @@ const IMAGES: RuntimeImages = {
   proxy: { role: 'proxy', id: digits(4) },
 };
 
-const BASE = ['run', 'plan.yml', '--repo', '/repo'];
-
-describe('CLI option parsing', () => {
-  it('accepts the supported production options', () => {
-    const options = parseRunOptions([...BASE, '--artifacts', '/out'], {});
-
-    expect(options.planFile).toBe('plan.yml');
-    expect(options.repoPath).toBe('/repo');
-    expect(options.artifactDir).toBe('/out');
-  });
-
-  it('rejects --agent-image, naming it', () => {
-    const error = (() => {
-      try {
-        parseRunOptions([...BASE, '--agent-image', 'ai-harness/stub-agent:test'], {});
-        return undefined;
-      } catch (cause: unknown) {
-        return cause;
-      }
-    })();
-
-    expect(error).toBeInstanceOf(CliUsageError);
-    expect((error as Error).message).toContain('--agent-image');
-  });
-
-  it('rejects any other unknown option instead of silently dropping it', () => {
-    expect(() => parseRunOptions([...BASE, '--network', 'host'], {})).toThrow(CliUsageError);
-    expect(() => parseRunOptions([...BASE, '--policy', 'off'], {})).toThrow(CliUsageError);
-  });
-
-  it('requires the run command, a plan file and a repository', () => {
-    expect(() => parseRunOptions(['plan.yml', '--repo', '/repo'], {})).toThrow(CliUsageError);
-    expect(() => parseRunOptions(['run', '--repo', '/repo'], {})).toThrow(CliUsageError);
-    expect(() => parseRunOptions(['run', 'plan.yml'], {})).toThrow(CliUsageError);
-  });
-
-  it('reads only the harness state environment variables', () => {
-    const options = parseRunOptions(BASE, {
-      HARNESS_SOURCE_CODEX_HOME: '/codex',
-      HARNESS_STORE_DIR: '/store',
-      HARNESS_DEPS_DIR: '/deps',
-    });
-
-    expect(options.sourceCodexHome).toBe('/codex');
-    expect(options.storeDirectory).toBe('/store');
-    expect(options.dependencyCacheDirectory).toBe('/deps');
-  });
-});
+const BASE = ['run', 'execution-manifest.yml', '--repo', '/repo'];
 
 describe('HARNESS_AGENT_ENV has no production effect', () => {
-  it('contributes nothing to the parsed run options', () => {
-    const options = parseRunOptions(BASE, {
+  it('contributes nothing to the parsed command', () => {
+    const options = parseCommand(BASE, {
       HARNESS_AGENT_ENV: JSON.stringify({
         CODEX_HOME: '/evil',
         HOME: '/evil',

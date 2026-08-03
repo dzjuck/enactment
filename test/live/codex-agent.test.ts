@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { PROXY_RECORDS_FILE } from '../../src/proxy/container.js';
-import { runProduction } from '../../src/run/production.js';
+import type { PlanReport } from '../../src/run/coordinator.js';
+import { parseCommand } from '../../src/run/options.js';
+import { execute } from '../../src/run/production.js';
 import { runtimeImages } from '../helpers/images.js';
 import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
@@ -28,6 +30,7 @@ interface ProxyRecord {
 let repo: TargetRepo;
 let root: string;
 let planFile: string;
+let manifestPath: string;
 let artifacts: string;
 
 beforeAll(async () => {
@@ -35,6 +38,7 @@ beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), 'harness-live-'));
   artifacts = join(root, 'artifacts');
   planFile = join(repo.dir, 'plan.yml');
+  manifestPath = join(root, 'execution-manifest.yml');
 }, 900_000);
 
 afterAll(async () => {
@@ -51,7 +55,7 @@ afterAll(async () => {
  * profile, so a real run that reaches a verified commit is what demonstrates the bypass works
  * end to end.
  *
- * It runs through `runProduction` — the same entry point the CLI uses — rather than
+ * It runs through `prepare` and `run` — the same entry points the CLI uses — rather than
  * assembling the phases itself, for two reasons. The credential store is the persistent one,
  * so a rotated refresh token is copied back to where the next run will look for it instead of
  * into a temporary directory this suite then deletes. And a copy-back failure reaches the
@@ -62,30 +66,55 @@ describe('real Codex tests-first run', () => {
   it('uses separate real agents to write tests and implementation, then commits both', async () => {
     const images = await runtimeImages();
 
-    // No store or cache overrides: the persistent harness state is deliberately what is used.
-    const report = await runProduction({ planFile, repoPath: repo.dir, artifactDir: artifacts });
+    const prepared = await execute(
+      parseCommand(['prepare', planFile, '--repo', repo.dir, '--output', manifestPath]),
+    );
+    expect(prepared.exitCode).toBe(0);
 
+    // No store or dependency-cache overrides: the persistent harness state is deliberately
+    // what is used. Only the plan database belongs to this run.
+    const result = await execute(
+      parseCommand(['run', manifestPath, '--repo', repo.dir, '--artifacts', artifacts], {
+        ...process.env,
+        HARNESS_STATE_DIR: join(root, 'state'),
+      }),
+    );
+
+    const report = result.report as PlanReport;
     expect(report.cleanupErrors).toBeUndefined();
-    expect(report.status).toBe('succeeded');
-    expect(report.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(report.state).toBe('completed');
+    expect(report.finalVerification?.status).toBe('pass');
+
+    const step = report.steps[0];
+    expect(step?.commit).toMatch(/^[0-9a-f]{40}$/);
+
+    // Per-attempt evidence now lives under the plan tree.
+    const stepArtifacts = join(
+      artifacts,
+      'm2-slugify',
+      'steps',
+      'add-slugify',
+      step?.attempt ?? '',
+      'run-1',
+    );
 
     // Separate agents really wrote the declared test and implementation.
     const committed = await git(repo.dir, [
       'show',
       '--name-only',
       '--pretty=format:',
-      report.commit ?? '',
+      step?.commit ?? '',
     ]);
     expect(committed.split('\n').filter((line) => line !== '')).toEqual([
       'src/slugify.js',
       'test/slugify.test.js',
     ]);
-    expect(await git(repo.dir, ['show', `${report.commit ?? ''}:src/slugify.js`])).not.toContain(
+    expect(await git(repo.dir, ['show', `${step?.commit ?? ''}:src/slugify.js`])).not.toContain(
       'not implemented',
     );
 
     const manifest = JSON.parse(
-      await readFile(join(artifacts, 'run-manifest.json'), 'utf8'),
+      await readFile(join(stepArtifacts, 'run-manifest.json'), 'utf8'),
     ) as Manifest;
 
     // What ran is what was recorded, for the real pinned image set.
@@ -103,7 +132,7 @@ describe('real Codex tests-first run', () => {
     const records = (
       await Promise.all(
         ['tests', 'implementation'].map((phase) =>
-          readFile(join(artifacts, phase, PROXY_RECORDS_FILE), 'utf8'),
+          readFile(join(stepArtifacts, phase, PROXY_RECORDS_FILE), 'utf8'),
         ),
       )
     )

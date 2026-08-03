@@ -1,32 +1,168 @@
+import { join } from 'node:path';
+
+import type { RuntimeImages } from '../docker/images.js';
+import {
+  ApprovalError,
+  buildManifest,
+  loadManifest,
+  validateManifest,
+  writeManifest,
+} from '../plan/execution-manifest.js';
+import { stateDirectory } from '../state/paths.js';
+import { StateStore } from '../state/store.js';
 import { sweepHarness } from './cleanup.js';
-import { runSinglePlanStep, type RunOptions, type RunReport } from './bridge.js';
+import { runPlan, type CoordinatorOptions, type PlanReport } from './coordinator.js';
+import type { CancelCommand, Command, PrepareCommand, RunCommand } from './options.js';
 
 export interface ProductionDependencies {
   sweep?: () => Promise<void>;
-  run?: (options: RunOptions) => Promise<RunReport>;
+  resolveImages?: () => Promise<RuntimeImages>;
+  coordinate?: (options: CoordinatorOptions) => Promise<PlanReport>;
+}
+
+export interface CommandResult {
+  /** Printed as JSON on stdout, whatever the outcome. */
+  report: unknown;
+  exitCode: number;
+}
+
+function databasePath(command: Command): string {
+  return join(command.stateDirectory ?? stateDirectory(), 'state.db');
+}
+
+function failure(error: unknown): CommandResult {
+  return {
+    report: {
+      ...(error instanceof ApprovalError ? { error: error.reason } : { error: 'failed' }),
+      message: error instanceof Error ? error.message : String(error),
+    },
+    exitCode: 1,
+  };
 }
 
 /**
- * The production entry point: clean up after a previous process, then run the plan.
+ * Resolve a plan into a candidate manifest for the user to approve.
  *
- * A V1 harness killed outright — SIGKILL, a closed laptop, a crashed process — leaves labelled
- * containers, volumes and networks behind, and the attempt id that owned them dies with the
- * process. Startup is the one moment where removing all of them is unambiguous, because no
- * other run of this harness is supposed to exist: V1 does not support two production runs at
- * once, and this is where that assumption is cashed in.
- *
- * The cleanup runs before the task, not after: leftovers a run trips over are worth more as a
- * clean start than as a diagnostic. If it cannot reach an empty state the run never starts —
- * a harness that cannot clean up is not in a state where its next attempt means anything.
+ * Read-only apart from the manifest it writes: no sweep, no container, no plan state. Running
+ * the manifest is the approval, so nothing here may leave a trace that looks like one.
  */
-export async function runProduction(
-  options: RunOptions,
+async function prepare(
+  command: PrepareCommand,
+  dependencies: ProductionDependencies,
+): Promise<CommandResult> {
+  const manifest = await buildManifest({
+    planFile: command.planFile,
+    manifestPath: command.output,
+    repoPath: command.repoPath,
+    ...(dependencies.resolveImages === undefined
+      ? {}
+      : { resolveImages: dependencies.resolveImages }),
+  });
+
+  await writeManifest(command.output, manifest);
+
+  return { report: { prepared: command.output, ...manifest }, exitCode: 0 };
+}
+
+/**
+ * The one approval action: clean up after a previous process, prove the approval still holds,
+ * then run the plan.
+ *
+ * The order is the point. The sweep comes first because a V1 harness killed outright leaves
+ * labelled containers, volumes and networks whose owning attempt id died with the process, and
+ * startup is the only unambiguous moment to remove them — V1 does not support two production
+ * runs at once, and this is where that assumption is cashed in. Validation comes next, so a
+ * drifted approval stops before any plan state advances. Artifact allocation stays the
+ * coordinator's, so evidence and progress cannot disagree about where a run wrote.
+ */
+async function run(
+  command: RunCommand,
+  dependencies: ProductionDependencies,
+  signal?: AbortSignal,
+): Promise<CommandResult> {
+  const coordinate = dependencies.coordinate ?? runPlan;
+
+  await (dependencies.sweep ?? sweepHarness)();
+
+  const loaded = await loadManifest(command.manifestPath);
+  const approved = await validateManifest(loaded, {
+    repoPath: command.repoPath,
+    ...(dependencies.resolveImages === undefined
+      ? {}
+      : { resolveImages: dependencies.resolveImages }),
+  });
+
+  const store = StateStore.open(databasePath(command));
+
+  try {
+    const report = await coordinate({
+      approved,
+      store,
+      artifactsRoot: command.artifactDir,
+      manifestPath: command.manifestPath,
+      ...(command.sourceCodexHome === undefined
+        ? {}
+        : { sourceCodexHome: command.sourceCodexHome }),
+      ...(command.storeDirectory === undefined ? {} : { storeDirectory: command.storeDirectory }),
+      ...(command.dependencyCacheDirectory === undefined
+        ? {}
+        : { dependencyCacheDirectory: command.dependencyCacheDirectory }),
+      ...(signal === undefined ? {} : { signal }),
+    });
+
+    return { report, exitCode: report.state === 'completed' ? 0 : 1 };
+  } finally {
+    store.close();
+  }
+}
+
+/**
+ * Release a repository from the plan that owns it.
+ *
+ * Only SQLite changes: the branch, its commits, the attempt history and the artifacts are all
+ * evidence of work that really happened, and cancelling a plan is not a reason to destroy it.
+ * Idempotent, because an operator retrying a cancel should not have to know whether the first
+ * one landed.
+ */
+async function cancel(command: CancelCommand): Promise<CommandResult> {
+  const loaded = await loadManifest(command.manifestPath);
+  const store = StateStore.open(databasePath(command));
+
+  try {
+    const plan = store.planForManifest(command.repoPath, loaded.manifestHash);
+
+    if (plan === undefined) {
+      return {
+        report: {
+          error: 'not_registered',
+          message: `no plan from ${command.manifestPath} is registered against ${command.repoPath}`,
+        },
+        exitCode: 1,
+      };
+    }
+
+    if (plan.state !== 'cancelled') store.cancelPlan(command.repoPath, loaded.manifestHash);
+
+    return {
+      report: { plan: plan.planId, state: 'cancelled', branch: plan.branch, head: plan.headCommit },
+      exitCode: 0,
+    };
+  } finally {
+    store.close();
+  }
+}
+
+/** Dispatch one parsed command, turning any failure into a report and a non-zero exit. */
+export async function execute(
+  command: Command,
   dependencies: ProductionDependencies = {},
-): Promise<RunReport> {
-  const sweep = dependencies.sweep ?? sweepHarness;
-  const run = dependencies.run ?? runSinglePlanStep;
-
-  await sweep();
-
-  return await run(options);
+  signal?: AbortSignal,
+): Promise<CommandResult> {
+  try {
+    if (command.kind === 'prepare') return await prepare(command, dependencies);
+    if (command.kind === 'cancel') return await cancel(command);
+    return await run(command, dependencies, signal);
+  } catch (error) {
+    return failure(error);
+  }
 }

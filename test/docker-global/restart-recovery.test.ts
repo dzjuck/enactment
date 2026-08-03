@@ -159,14 +159,24 @@ describe('a SIGKILLed run is cleaned up by the next production CLI start', () =>
       expect(await labelled('container')).not.toEqual([]);
       expect(await labelled('volume')).not.toEqual([]);
 
-      // The real binary. It fails in the export phase — after the startup sweep, before any
+      // A real approval, resolved against the real daemon and the real repository.
+      const manifestPath = join(root, 'execution-manifest.yml');
+      const prepared = await execa(
+        'node',
+        ['dist/cli.js', 'prepare', planFile, '--repo', repo.dir, '--output', manifestPath],
+        { reject: false, env: { HARNESS_STATE_DIR: join(root, 'state') } },
+      );
+      expect(prepared.exitCode, prepared.stderr).toBe(0);
+
+      // The real binary, pointed at a repository that does not exist. It fails validating the
+      // approved base — after the startup sweep, before the plan database and before any
       // container — so the check costs no provider tokens.
       const restarted = await execa(
         'node',
         [
           'dist/cli.js',
           'run',
-          planFile,
+          manifestPath,
           '--repo',
           join(root, 'no-such-repo'),
           '--artifacts',
@@ -175,9 +185,9 @@ describe('a SIGKILLed run is cleaned up by the next production CLI start', () =>
         { reject: false, env: { HARNESS_STATE_DIR: join(root, 'state') } },
       );
 
-      const report = JSON.parse(restarted.stdout) as { status: string; failedPhase?: string };
-      expect(report.status).toBe('failed');
-      expect(report.failedPhase).toBe('export');
+      expect(restarted.exitCode).toBe(1);
+      const report = JSON.parse(restarted.stdout) as { error: string };
+      expect(report.error).toBe('base_unresolvable');
 
       // The sweep is what removed them: this CLI run never got far enough to create anything.
       expect(await labelled('container')).toEqual([]);

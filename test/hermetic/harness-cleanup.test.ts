@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { CleanupError, sweepHarness } from '../../src/run/cleanup.js';
-import type { RunOptions, RunReport } from '../../src/run/bridge.js';
-import { runProduction } from '../../src/run/production.js';
+import type { RunCommand } from '../../src/run/options.js';
+import { execute } from '../../src/run/production.js';
 
 const SRC = fileURLToPath(new URL('../../src', import.meta.url));
 
@@ -95,52 +95,40 @@ describe('sweepHarness', () => {
 });
 
 describe('production startup', () => {
-  const OPTIONS = { planFile: 'plan.yml', repoPath: '/repo', artifactDir: '/out' } satisfies
-    RunOptions;
-  const REPORT: RunReport = { status: 'succeeded', attempt: 'a1' };
+  const COMMAND = {
+    kind: 'run',
+    manifestPath: 'execution-manifest.yml',
+    repoPath: '/repo',
+    artifactDir: '/out',
+  } as const satisfies RunCommand;
 
-  it('cleans stale resources before the run starts', async () => {
-    const order: string[] = [];
+  it('never validates or coordinates when the stale-resource cleanup failed', async () => {
+    let started = false;
 
-    const report = await runProduction(OPTIONS, {
-      sweep: async () => void order.push('sweep'),
-      run: async (options: RunOptions) => {
-        order.push('run');
-        expect(options).toBe(OPTIONS);
-        return REPORT;
+    const result = await execute(COMMAND, {
+      sweep: () => Promise.reject(new CleanupError(['volume v-stuck still present'])),
+      coordinate: () => {
+        started = true;
+        return Promise.reject(new Error('should not run'));
       },
     });
 
-    expect(order).toEqual(['sweep', 'run']);
-    expect(report).toBe(REPORT);
-  });
-
-  it('never starts a run when the stale-resource cleanup failed', async () => {
-    let started = false;
-
-    await expect(
-      runProduction(OPTIONS, {
-        sweep: () => Promise.reject(new CleanupError(['volume v-stuck still present'])),
-        run: async () => {
-          started = true;
-          return REPORT;
-        },
-      }),
-    ).rejects.toBeInstanceOf(CleanupError);
-
     expect(started).toBe(false);
+    expect(result.exitCode).toBe(1);
+    expect(result.report).toMatchObject({ message: expect.stringContaining('v-stuck') });
   });
 
-  it('is reached only through the CLI, never from the executor', async () => {
+  it('is reached only through the production entry point, never from the executor', async () => {
     const orchestrator = await readFile(join(SRC, 'run/orchestrator.ts'), 'utf8');
-    const cli = await readFile(join(SRC, 'cli.ts'), 'utf8');
+    const coordinator = await readFile(join(SRC, 'run/coordinator.ts'), 'utf8');
+    const production = await readFile(join(SRC, 'run/production.ts'), 'utf8');
 
-    // Docker suites drive the executor directly and in parallel; a global sweep in there
-    // would delete another test file's containers mid-run.
+    // The Docker suites drive the executor and the coordinator directly, in parallel; a
+    // global sweep in either would delete another test file's containers mid-run.
     expect(orchestrator).not.toContain('sweepHarness');
     expect(orchestrator).toContain('sweepAttempt');
+    expect(coordinator).not.toContain('sweepHarness');
 
-    expect(cli).toContain('runProduction');
-    expect(cli).not.toContain('runSinglePlanStep');
+    expect(production).toContain('sweepHarness');
   });
 });

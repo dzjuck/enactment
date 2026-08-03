@@ -1,7 +1,5 @@
 import { parseArgs } from 'node:util';
 
-import type { RunOptions } from './bridge.js';
-
 export class CliUsageError extends Error {
   constructor(message: string) {
     super(message);
@@ -9,54 +7,126 @@ export class CliUsageError extends Error {
   }
 }
 
-export const CLI_USAGE = 'usage: harness run <plan.yml> --repo <path> [--artifacts <dir>]';
+export const CLI_USAGE = [
+  'usage:',
+  '  harness prepare <plan.yml> --repo <path> --output <execution-manifest.yml>',
+  '  harness run <execution-manifest.yml> --repo <path> [--artifacts <dir>]',
+  '  harness cancel <execution-manifest.yml> --repo <path>',
+].join('\n');
+
+/** Harness state locations only. Nothing here reaches the container contract. */
+export interface StateLocations {
+  sourceCodexHome?: string;
+  storeDirectory?: string;
+  dependencyCacheDirectory?: string;
+  /** Where `state.db` lives; the plan database is opened under it. */
+  stateDirectory?: string;
+}
+
+export interface PrepareCommand extends StateLocations {
+  kind: 'prepare';
+  planFile: string;
+  repoPath: string;
+  output: string;
+}
+
+export interface RunCommand extends StateLocations {
+  kind: 'run';
+  manifestPath: string;
+  repoPath: string;
+  artifactDir: string;
+}
+
+export interface CancelCommand extends StateLocations {
+  kind: 'cancel';
+  manifestPath: string;
+  repoPath: string;
+}
+
+export type Command = PrepareCommand | RunCommand | CancelCommand;
+
+/** Which options each command accepts. An option outside its command's set is an error. */
+const ACCEPTED = {
+  prepare: ['repo', 'output'],
+  run: ['repo', 'artifacts'],
+  cancel: ['repo'],
+} as const;
+
+function stateLocations(env: NodeJS.ProcessEnv): StateLocations {
+  const locations: StateLocations = {};
+
+  if (env.HARNESS_SOURCE_CODEX_HOME !== undefined) {
+    locations.sourceCodexHome = env.HARNESS_SOURCE_CODEX_HOME;
+  }
+  if (env.HARNESS_STORE_DIR !== undefined) locations.storeDirectory = env.HARNESS_STORE_DIR;
+  if (env.HARNESS_DEPS_DIR !== undefined) locations.dependencyCacheDirectory = env.HARNESS_DEPS_DIR;
+  if (env.HARNESS_STATE_DIR !== undefined) locations.stateDirectory = env.HARNESS_STATE_DIR;
+
+  return locations;
+}
 
 /**
- * Parse `harness run` into run options.
+ * Parse one supported command.
  *
- * Parsing is strict: an option this function does not declare is an error rather than a
- * value that quietly disappears. There is no image or policy override — the pinned runtime
- * image set is the only thing production can run, and substitution exists only through the
- * internal `RunInjection` seam, which nothing here can reach.
+ * Parsing is strict twice over: an option this function does not declare is an error, and an
+ * option belonging to a *different* command is an error too. There is no image, network or
+ * policy override anywhere — the approved manifest is the only thing production executes
+ * from, and substitution exists solely through the internal `RunInjection` seam, which
+ * nothing here can reach.
  */
-export function parseRunOptions(argv: string[], env: NodeJS.ProcessEnv = process.env): RunOptions {
-  let parsed;
+export function parseCommand(argv: string[], env: NodeJS.ProcessEnv = process.env): Command {
+  const [name, ...rest] = argv;
 
-  try {
-    parsed = parseArgs({
-      args: argv,
-      allowPositionals: true,
-      strict: true,
-      options: {
-        repo: { type: 'string' },
-        artifacts: { type: 'string' },
-      },
-    });
-  } catch (error) {
-    throw new CliUsageError(`${error instanceof Error ? error.message : String(error)}\n${CLI_USAGE}`);
+  if (name !== 'prepare' && name !== 'run' && name !== 'cancel') {
+    throw new CliUsageError(`unknown command "${name ?? ''}"\n${CLI_USAGE}`);
   }
 
-  const [command, planFile, ...surplus] = parsed.positionals;
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: rest,
+      allowPositionals: true,
+      strict: true,
+      options: Object.fromEntries(
+        ACCEPTED[name].map((option) => [option, { type: 'string' as const }]),
+      ),
+    });
+  } catch (error) {
+    throw new CliUsageError(
+      `${error instanceof Error ? error.message : String(error)}\n${CLI_USAGE}`,
+    );
+  }
 
-  if (command !== 'run') throw new CliUsageError(`unknown command "${command ?? ''}"\n${CLI_USAGE}`);
-  if (planFile === undefined) throw new CliUsageError(`no plan file given\n${CLI_USAGE}`);
+  const [file, ...surplus] = parsed.positionals;
+  if (file === undefined) {
+    throw new CliUsageError(
+      `${name} needs a ${name === 'prepare' ? 'plan' : 'manifest'} file\n${CLI_USAGE}`,
+    );
+  }
   if (surplus.length > 0) {
     throw new CliUsageError(`unexpected argument "${surplus[0] ?? ''}"\n${CLI_USAGE}`);
   }
-  if (parsed.values.repo === undefined) throw new CliUsageError(`--repo is required\n${CLI_USAGE}`);
 
-  const options: RunOptions = {
-    planFile,
-    repoPath: parsed.values.repo,
-    artifactDir: parsed.values.artifacts ?? 'artifacts',
-  };
+  const repoPath = parsed.values.repo;
+  if (repoPath === undefined) throw new CliUsageError(`--repo is required\n${CLI_USAGE}`);
 
-  // Harness state locations only: nothing here reaches the container contract.
-  if (env.HARNESS_SOURCE_CODEX_HOME !== undefined) {
-    options.sourceCodexHome = env.HARNESS_SOURCE_CODEX_HOME;
+  const locations = stateLocations(env);
+
+  if (name === 'prepare') {
+    const output = parsed.values.output;
+    if (output === undefined) throw new CliUsageError(`--output is required\n${CLI_USAGE}`);
+    return { kind: 'prepare', planFile: file, repoPath, output, ...locations };
   }
-  if (env.HARNESS_STORE_DIR !== undefined) options.storeDirectory = env.HARNESS_STORE_DIR;
-  if (env.HARNESS_DEPS_DIR !== undefined) options.dependencyCacheDirectory = env.HARNESS_DEPS_DIR;
 
-  return options;
+  if (name === 'cancel') {
+    return { kind: 'cancel', manifestPath: file, repoPath, ...locations };
+  }
+
+  return {
+    kind: 'run',
+    manifestPath: file,
+    repoPath,
+    artifactDir: parsed.values.artifacts ?? 'artifacts',
+    ...locations,
+  };
 }
