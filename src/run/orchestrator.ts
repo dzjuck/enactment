@@ -26,6 +26,7 @@ import { withPhaseNetworks } from '../net/manage.js';
 import { proxyEnvironment, withProxy, writeProxyRecords } from '../proxy/container.js';
 import { loadTask } from '../task/load.js';
 import { runVerification } from '../verify/run.js';
+import { baselineArtifact, captureBaseline } from '../verify/baseline.js';
 import { attemptLabels, newAttemptId } from '../volume/naming.js';
 import { snapshotWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
@@ -50,6 +51,7 @@ export const RUN_PHASES = [
 ] as const;
 
 export type RunPhase =
+  | 'baseline'
   | (typeof RUN_PHASES)[number]
   | 'tests'
   | 'tests_diff'
@@ -84,6 +86,7 @@ export interface RunReport {
 }
 
 const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
+  baseline: 'baseline_failed',
   export: 'internal_error',
   setup: 'setup_failed',
   workspace: 'internal_error',
@@ -263,6 +266,53 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       attemptLabels(attempt, 'snapshot'),
     );
     snapshotHashes.pre_agent = preAgent.hash;
+
+    if (task.type === 'code_behavior') {
+      await phase('baseline');
+      const baselineDir = join(options.artifactDir, 'baseline');
+      const baseline = await captureBaseline({
+        policy: {
+          retryFailures: task.baseline.retry_failures,
+          knownFlakyTests: task.baseline.known_flaky_tests,
+        },
+        expectedTestIds: task.expected_test_ids,
+        run: async (baselineAttempt) => {
+          const verification = await runVerification({
+            attempt,
+            snapshot: preAgent,
+            dependencySnapshot,
+            commands: [],
+            testCommand: task.verification.test_command,
+            artifactDir: join(baselineDir, `attempt-${String(baselineAttempt)}`),
+            graceSeconds: timeouts.termination_grace_seconds,
+            images,
+            redact,
+          });
+          if (verification.testResults === undefined) {
+            throw new PhaseFailure(
+              'baseline',
+              'baseline_failed',
+              `baseline test runner ${verification.status}`,
+            );
+          }
+          return verification.testResults;
+        },
+      });
+      const artifact = baselineArtifact(baseline);
+      manifest.baseline = artifact;
+      await mkdir(baselineDir, { recursive: true });
+      await writeFile(
+        join(baselineDir, 'baseline.json'),
+        redact(`${JSON.stringify(artifact, null, 2)}\n`),
+      );
+      if (baseline.status === 'fail') {
+        throw new PhaseFailure(
+          'baseline',
+          'baseline_failed',
+          `baseline failed: ${baseline.failures.join('; ')}`,
+        );
+      }
+    }
 
     type AgentPhase = 'agent' | 'tests' | 'implementation';
 

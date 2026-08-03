@@ -4,6 +4,7 @@
  * and produced a bad change.
  */
 export const FAILURE_CATEGORIES = [
+  'baseline_failed',
   'provider_connectivity_timeout',
   'agent_timeout',
   'agent_failed',

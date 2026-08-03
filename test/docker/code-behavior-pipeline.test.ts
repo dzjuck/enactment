@@ -8,8 +8,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
-import { runTask, type RunReport } from '../../src/run/orchestrator.js';
-import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import { runTask, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
+import { commitAll, createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 const TEST_SOURCE = `import { slugify } from '../src/slugify.js';
@@ -55,9 +55,12 @@ beforeAll(async () => {
   await mkdir(source, { recursive: true });
   await writeFile(join(source, AUTH_FILE), JSON.stringify({ tokens: { access_token: 'm2-canary' } }));
 
-  taskFile = join(root, 'task.yml');
+  taskFile = await writeTask(join(root, 'task.yml'));
+}, 900_000);
+
+async function writeTask(path: string, knownFlakyTests: string[] = []): Promise<string> {
   await writeFile(
-    taskFile,
+    path,
     [
       'type: code_behavior',
       'id: add-slugify-tests-first',
@@ -72,6 +75,13 @@ beforeAll(async () => {
       '  test_command: ["npx", "--no-install", "vitest", "run", "--globals"]',
       '  commands:',
       '    - ["npx", "--no-install", "vitest", "run", "--globals"]',
+      ...(knownFlakyTests.length === 0
+        ? []
+        : [
+            'baseline:',
+            '  known_flaky_tests:',
+            ...knownFlakyTests.map((id) => `    - ${id}`),
+          ]),
       'timeouts:',
       '  connectivity_smoke_seconds: 20',
       '  agent_seconds: 6',
@@ -79,7 +89,8 @@ beforeAll(async () => {
       '',
     ].join('\n'),
   );
-}, 900_000);
+  return path;
+}
 
 afterAll(async () => {
   await removeRepo(repo.dir);
@@ -92,6 +103,7 @@ afterEach(async () => {
 
 async function run(
   env: Record<string, string> = phaseEnv(),
+  overrides: Partial<Parameters<typeof runTask>[0]> = {},
 ): Promise<{ report: RunReport; artifacts: string }> {
   const artifacts = await mkdtemp(join(tmpdir(), 'harness-m2-artifacts-'));
   dirs.push(artifacts);
@@ -105,6 +117,7 @@ async function run(
     storeDirectory: join(root, 'store'),
     dependencyCacheDirectory: join(root, 'deps'),
     injection,
+    ...overrides,
   });
 
   return { report, artifacts };
@@ -151,6 +164,112 @@ describe('code_behavior pipeline', () => {
     await expect(
       access(join(artifacts, 'implementation/agent-events.jsonl')),
     ).resolves.toBeUndefined();
+  }, 900_000);
+
+  it('captures the clean pre-agent baseline and stores every existing test', async () => {
+    const seen: RunPhase[] = [];
+    const { report, artifacts } = await run(phaseEnv(), {
+      onPhase: (phase) => void seen.push(phase),
+    });
+
+    expect(report.status).toBe('succeeded');
+    expect(seen.indexOf('baseline')).toBeLessThan(seen.indexOf('tests'));
+
+    const baseline = JSON.parse(
+      await readFile(join(artifacts, 'baseline/baseline.json'), 'utf8'),
+    ) as { tests: { id: string; status: string }[] };
+    expect(baseline.tests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'existing behavior already passes', status: 'passed' }),
+        expect.objectContaining({
+          id: 'baseline verifier is offline and has no provider auth',
+          status: 'passed',
+        }),
+      ]),
+    );
+  }, 900_000);
+
+  it('blocks a genuine baseline failure before starting an agent', async () => {
+    const brokenRepo = await createM2Repo();
+    const seen: RunPhase[] = [];
+    try {
+      await writeFile(
+        join(brokenRepo.dir, 'test/broken.test.js'),
+        "it('genuine baseline failure', () => { expect(true).toBe(false); });\n",
+      );
+      brokenRepo.commit = await commitAll(brokenRepo.dir, 'Add broken baseline test');
+
+      const { report, artifacts } = await run(phaseEnv(), {
+        repoPath: brokenRepo.dir,
+        onPhase: (phase) => void seen.push(phase),
+      });
+
+      expect(report.status).toBe('failed');
+      expect(report.failedPhase).toBe('baseline');
+      expect(report.category).toBe('baseline_failed');
+      expect(report.message).toContain('genuine baseline failure');
+      expect(seen).not.toContain('tests');
+      await expect(access(join(artifacts, 'tests/prompt.txt'))).rejects.toThrow();
+    } finally {
+      await removeRepo(brokenRepo.dir);
+    }
+  }, 900_000);
+
+  it('continues past an approved quarantine and records it', async () => {
+    const flakyRepo = await createM2Repo();
+    const flakyId = 'baseline-only quarantine';
+    try {
+      await writeFile(
+        join(flakyRepo.dir, 'test/flaky.test.js'),
+        [
+          `it('${flakyId}', () => {`,
+          '  expect(true).toBe(false);',
+          '});',
+          '',
+        ].join('\n'),
+      );
+      flakyRepo.commit = await commitAll(flakyRepo.dir, 'Add quarantined baseline test');
+      const flakyTask = await writeTask(join(root, 'task-flaky.yml'), [flakyId]);
+
+      const { report, artifacts } = await run(phaseEnv(), {
+        repoPath: flakyRepo.dir,
+        taskFile: flakyTask,
+      });
+
+      expect(report.status).toBe('failed');
+      expect(report.failedPhase).toBe('verify');
+      const manifest = JSON.parse(
+        await readFile(join(artifacts, 'run-manifest.json'), 'utf8'),
+      ) as { baseline: { quarantined: string[] } };
+      expect(manifest.baseline.quarantined).toEqual([flakyId]);
+      await expect(access(join(artifacts, 'tests/prompt.txt'))).resolves.toBeUndefined();
+    } finally {
+      await removeRepo(flakyRepo.dir);
+    }
+  }, 900_000);
+
+  it('blocks when an expected test ID already exists at baseline', async () => {
+    const completedRepo = await createM2Repo();
+    try {
+      await writeFile(
+        join(completedRepo.dir, 'test/slugify.test.js'),
+        [
+          "describe('slugify', () => {",
+          "  it('lowercases and hyphenates words', () => { expect(true).toBe(true); });",
+          '});',
+          '',
+        ].join('\n'),
+      );
+      completedRepo.commit = await commitAll(completedRepo.dir, 'Add completed expected test');
+
+      const { report } = await run(phaseEnv(), { repoPath: completedRepo.dir });
+
+      expect(report.status).toBe('failed');
+      expect(report.category).toBe('baseline_failed');
+      expect(report.message).toContain('slugify lowercases and hyphenates words');
+    } finally {
+      await removeRepo(completedRepo.dir);
+    }
   }, 900_000);
 
   it('rejects implementation written during the tests phase', async () => {
