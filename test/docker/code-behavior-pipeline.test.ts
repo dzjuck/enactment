@@ -9,11 +9,11 @@ import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
 import {
-  runStep,
+  runSinglePlanStep,
   RUN_PHASES,
   type RunPhase,
   type RunReport,
-} from '../../src/run/orchestrator.js';
+} from '../../src/run/bridge.js';
 import {
   commitAll,
   createM2Repo,
@@ -128,13 +128,13 @@ afterEach(async () => {
 
 async function run(
   env: Record<string, string> = phaseEnv(),
-  overrides: Partial<Parameters<typeof runStep>[0]> = {},
+  overrides: Partial<Parameters<typeof runSinglePlanStep>[0]> = {},
 ): Promise<{ report: RunReport; artifacts: string }> {
   const artifacts = await mkdtemp(join(tmpdir(), 'harness-m2-artifacts-'));
   dirs.push(artifacts);
   const injection: RunInjection = { agent: stub, agentEnv: env };
 
-  const report = await runStep({
+  const report = await runSinglePlanStep({
     planFile,
     repoPath: repo.dir,
     artifactDir: artifacts,

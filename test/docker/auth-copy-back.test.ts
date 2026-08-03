@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
-import { runStep, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
+import { runSinglePlanStep, type RunPhase, type RunReport } from '../../src/run/bridge.js';
 import { authVolumeName } from '../../src/volume/naming.js';
 import { volumeExists } from '../../src/volume/workspace.js';
 import {
@@ -97,7 +97,7 @@ interface Outcome {
  */
 async function runRotating(
   env: Record<string, string>,
-  overrides: Partial<Parameters<typeof runStep>[0]> = {},
+  overrides: Partial<Parameters<typeof runSinglePlanStep>[0]> = {},
 ): Promise<Outcome> {
   const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
   dirs.push(artifacts);
@@ -105,7 +105,7 @@ async function runRotating(
   stores += 1;
   const storeDirectory = join(root, `store-${String(stores)}`);
 
-  const report = await runStep({
+  const report = await runSinglePlanStep({
     planFile,
     repoPath: repo.dir,
     artifactDir: artifacts,

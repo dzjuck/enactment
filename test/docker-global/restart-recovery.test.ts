@@ -66,8 +66,8 @@ beforeAll(async () => {
     runnerScript,
     [
       "import { appendFile } from 'node:fs/promises';",
-      `import { runStep } from ${JSON.stringify(join(process.cwd(), 'dist/run/orchestrator.js'))};`,
-      'await runStep({',
+      `import { runSinglePlanStep } from ${JSON.stringify(join(process.cwd(), 'dist/run/bridge.js'))};`,
+      'await runSinglePlanStep({',
       '  ...JSON.parse(process.env.HARNESS_TEST_RUN),',
       '  onPhase: (phase) => appendFile(process.env.HARNESS_TEST_PHASES, `${phase}\\n`),',
       '});',

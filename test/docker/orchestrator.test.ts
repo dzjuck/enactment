@@ -8,7 +8,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { AUTH_FILE } from '../../src/auth/store.js';
 import { resolveRuntimeImages, type RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
-import { runStep, RUN_PHASES, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
+import {
+  runSinglePlanStep,
+  RUN_PHASES,
+  type RunPhase,
+  type RunReport,
+  type StepEvent,
+} from '../../src/run/bridge.js';
 import {
   createTargetRepo,
   git,
@@ -95,18 +101,18 @@ beforeAll(async () => {
   );
 
   // The production CLI has no image or environment override, so the interrupt test drives
-  // `runStep` in a child process of its own rather than through an escape hatch.
+  // `runSinglePlanStep` in a child process of its own rather than through an escape hatch.
   runnerScript = join(root, 'run-with-stub.mjs');
   await writeFile(
     runnerScript,
     [
       "import { appendFile, writeFile } from 'node:fs/promises';",
-      `import { runStep } from ${JSON.stringify(join(process.cwd(), 'dist/run/orchestrator.js'))};`,
+      `import { runSinglePlanStep } from ${JSON.stringify(join(process.cwd(), 'dist/run/bridge.js'))};`,
       'const controller = new AbortController();',
       "for (const signal of ['SIGINT', 'SIGTERM']) {",
       '  process.on(signal, () => { controller.abort(); });',
       '}',
-      'const report = await runStep({',
+      'const report = await runSinglePlanStep({',
       '  ...JSON.parse(process.env.HARNESS_TEST_RUN),',
       '  onPhase: (phase) => appendFile(process.env.HARNESS_TEST_PHASES, `${phase}\\n`),',
       '  signal: controller.signal,',
@@ -160,11 +166,11 @@ async function artifactDir(): Promise<string> {
 }
 
 async function run(
-  overrides: Partial<Parameters<typeof runStep>[0]> = {},
+  overrides: Partial<Parameters<typeof runSinglePlanStep>[0]> = {},
 ): Promise<{ report: RunReport; artifacts: string }> {
   const artifacts = await artifactDir();
 
-  const report = await runStep({
+  const report = await runSinglePlanStep({
     planFile,
     repoPath: repo.dir,
     artifactDir: artifacts,
@@ -282,6 +288,43 @@ describe('orchestrator', () => {
 
     expect(report.status).toBe('succeeded');
     await expectNoResources(report.attempt);
+  }, 900_000);
+
+  it('reports its diagnostic phases in order, then the verified candidate, then accepting', async () => {
+    const events: StepEvent[] = [];
+    const { report, artifacts } = await run({ onEvent: (event) => void events.push(event) });
+
+    expect(report.status).toBe('succeeded');
+
+    const phases = events.flatMap((event) => (event.kind === 'phase' ? [event.phase] : []));
+    expect(phases).toEqual(['preparing', 'implementation', 'verify']);
+
+    const tail = events.slice(phases.length);
+    expect(tail.map((event) => event.kind)).toEqual(['candidate', 'accepting']);
+
+    // The acceptance candidate is recorded before the attempt enters `accepting`, so recovery
+    // never needs new model output for a snapshot that was already verified.
+    const candidate = tail[0];
+    if (candidate?.kind !== 'candidate') throw new Error('expected a candidate event');
+    const manifest = JSON.parse(await readFile(join(artifacts, 'run-manifest.json'), 'utf8')) as {
+      snapshots: { implementation: string };
+    };
+    expect(candidate.snapshot).toBe(manifest.snapshots.implementation);
+  }, 900_000);
+
+  it('emits no candidate or accepting event when a phase fails', async () => {
+    const events: StepEvent[] = [];
+    const { report } = await run({
+      onEvent: (event) => void events.push(event),
+      onPhase: (current) => {
+        if (current === 'verify') throw new Error('injected verify failure');
+      },
+    });
+
+    expect(report.status).toBe('failed');
+    expect(events.map((event) => event.kind)).not.toContain('candidate');
+    expect(events.map((event) => event.kind)).not.toContain('accepting');
+    expect(events.at(-1)).toEqual({ kind: 'phase', phase: 'verify' });
   }, 900_000);
 
   it('records the §20 manifest fields', async () => {

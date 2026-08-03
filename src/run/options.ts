@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 
-import type { RunOptions } from './orchestrator.js';
+import type { RunOptions } from './bridge.js';
 
 export class CliUsageError extends Error {
   constructor(message: string) {

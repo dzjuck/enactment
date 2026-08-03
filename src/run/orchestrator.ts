@@ -1,13 +1,12 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { execa } from 'execa';
-
+import type { PlanStep } from '../plan/schema.js';
 import { compileCodexPolicy } from '../adapters/codex/policy.js';
 import { implementationPrompt, testWritingPrompt } from '../adapters/codex/prompts.js';
 import { runCodexAgent, type AgentRunResult } from '../adapters/codex/run.js';
 import { providerSmokeTest } from '../adapters/codex/smoke.js';
-import { ArtifactStore } from '../artifacts/store.js';
+import type { ArtifactStore } from '../artifacts/store.js';
 import { collectSecrets, createRedactor } from '../artifacts/redact.js';
 import { readAuthStore, seedAuthStore } from '../auth/store.js';
 import { authMount, copyBackAuth, createAuthVolume } from '../auth/volume.js';
@@ -17,13 +16,11 @@ import { DependencyCache, ensureDependencySnapshot } from '../deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
 import { manifestFromTar, sourceDiff } from '../diff/source-diff.js';
 import { DiffValidationError, validateChanges } from '../diff/validate.js';
-import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
+import type { RuntimeImages } from '../docker/images.js';
 import { acceptChanges } from '../git/accept.js';
 import { exportCommit } from '../git/export.js';
-import { idempotencyKey } from '../git/idempotency.js';
 import { withPhaseNetworks } from '../net/manage.js';
 import { proxyEnvironment, withProxy, writeProxyRecords } from '../proxy/container.js';
-import { loadPlan } from '../plan/load.js';
 import { runVerification } from '../verify/run.js';
 import { baselineArtifact, captureBaseline } from '../verify/baseline.js';
 import { classifyRed, redResultsArtifact } from '../verify/red.js';
@@ -36,12 +33,12 @@ import {
   excludeDispute,
   implementationScopeWithDispute,
 } from '../verify/dispute.js';
-import { attemptLabels, newAttemptId } from '../volume/naming.js';
+import { attemptLabels } from '../volume/naming.js';
 import { snapshotWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
+import type { AttemptPhase } from '../state/store.js';
 import { stateDirectory } from '../state/paths.js';
-import { singlePlanStep } from './bridge.js';
 import { CleanupError, describeError, releaseAll, sweepAttempt, withCleanupOutcome } from './cleanup.js';
 import { PhaseFailure, type FailureCategory } from './failure.js';
 import type { RunInjection } from './inject.js';
@@ -74,20 +71,57 @@ export const RUN_PHASES = [
 
 export type RunPhase = (typeof RUN_PHASES)[number];
 
-export interface RunOptions {
-  planFile: string;
+/**
+ * What a step executor reports back for the state store: the diagnostic phase it reached,
+ * the verified acceptance candidate, and the moment acceptance begins.
+ *
+ * One narrow callback rather than three: the coordinator is the only consumer and it wants
+ * these in order, not as three independently sequenced hooks.
+ */
+export type StepEvent =
+  | { kind: 'phase'; phase: AttemptPhase }
+  | { kind: 'candidate'; snapshot: string }
+  | { kind: 'accepting' };
+
+export type OnStepEvent = (event: StepEvent) => void | Promise<void>;
+
+/**
+ * Everything one step needs, all of it already approved and resolved by the caller.
+ *
+ * The executor loads no plan, resolves no image and reads no repository head: what it runs
+ * is exactly what the approval covered, and there is no second resolution that could differ
+ * from the one recorded in the manifest.
+ */
+export interface StepExecutionOptions {
+  step: PlanStep;
+  planId: string;
+  /** Identity of the approval this step is executing under. */
+  planHash: string;
+  manifestHash: string;
+  images: RuntimeImages;
+
   repoPath: string;
+  baseBranch: string;
+  /** The commit this step builds on: the approved base, or the previous accepted commit. */
+  parentCommit: string;
+  branch: string;
+  branchExists: boolean;
+
+  attempt: string;
+  idempotencyKey: string;
+
+  /** This attempt run's evidence directory. */
   artifactDir: string;
-  baseCommit?: string;
-  baseBranch?: string;
-  /** Identity of the approved manifest, once one exists. */
-  manifestHash?: string;
+  /** Plan-scoped and shared by every attempt: snapshots are content-addressed. */
+  snapshots: ArtifactStore;
+
   sourceCodexHome?: string;
   storeDirectory?: string;
   dependencyCacheDirectory?: string;
   /** Test-only substitution of runtime images and agent environment. See `RunInjection`. */
   injection?: RunInjection;
   onPhase?: (phase: RunPhase) => void | Promise<void>;
+  onEvent?: OnStepEvent;
   signal?: AbortSignal;
 }
 
@@ -136,48 +170,68 @@ function classify(phase: RunPhase, error: unknown): FailureCategory {
   return PHASE_CATEGORY[phase];
 }
 
-async function git(repoPath: string, args: string[]): Promise<string> {
-  const { stdout } = await execa('git', ['-C', repoPath, ...args]);
-  return stdout;
-}
+/** The diagnostic phase each execution phase reports to the state store. */
+const ATTEMPT_PHASE: Record<RunPhase, AttemptPhase> = {
+  export: 'preparing',
+  setup: 'preparing',
+  workspace: 'preparing',
+  connectivity: 'preparing',
+  baseline: 'baseline',
+  tests: 'tests',
+  tests_diff: 'tests',
+  red: 'red',
+  agent: 'implementation',
+  diff: 'implementation',
+  implementation: 'implementation',
+  implementation_diff: 'implementation',
+  green: 'green',
+  verify: 'verify',
+  commit: 'verify',
+};
 
 /**
  * Drive one plan step from export to commit.
+ *
+ * Every input is supplied already approved and resolved — the step, the images, the parent
+ * commit, the attempt id, the idempotency key — so nothing here can execute against a value
+ * the approval did not cover.
  *
  * Every resource is registered for teardown as soon as it exists, and teardown runs in a
  * `finally` in reverse order — so an interrupt or a failure in any phase leaves no
  * attempt-scoped container, volume or network behind.
  */
-export async function runStep(options: RunOptions): Promise<RunReport> {
-  const attempt = options.injection?.attempt ?? newAttemptId();
+export async function runStep(options: StepExecutionOptions): Promise<RunReport> {
+  const { attempt, step, images, snapshots } = options;
+  const baseCommit = options.parentCommit;
   const teardown: (() => Promise<void>)[] = [];
-  const snapshots = new ArtifactStore(join(options.artifactDir, 'snapshots'));
 
   let report: RunReport = { status: 'failed', attempt };
   let current: RunPhase = 'export';
   const manifest: Record<string, unknown> = { attempt };
   let redact = createRedactor([]);
+  let reported: AttemptPhase | undefined;
 
   const phase = async (next: RunPhase): Promise<void> => {
     current = next;
     if (options.signal?.aborted === true) {
       throw new PhaseFailure(next, 'internal_error', 'run was interrupted');
     }
+    // Reported on entering the phase, before the phase runs: the stored value has to name
+    // where the attempt was when it died, and a phase that fails immediately was still
+    // reached. Deduplicated, because several execution phases share one diagnostic phase and
+    // the state store wants progress, not one write per container.
+    const diagnostic = ATTEMPT_PHASE[next];
+    if (diagnostic !== reported) {
+      reported = diagnostic;
+      await options.onEvent?.({ kind: 'phase', phase: diagnostic });
+    }
+
     await options.onPhase?.(next);
   };
 
   try {
     await phase('export');
-    const { plan, hash: planHash } = await loadPlan(options.planFile);
-    const step = singlePlanStep(plan);
-    const baseCommit = options.baseCommit ?? (await git(options.repoPath, ['rev-parse', 'HEAD']));
-    const baseBranch =
-      options.baseBranch ?? (await git(options.repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']));
-    // One immutable image set for the whole run: every container below is started from it,
-    // and the manifest records this same value rather than a separately resolved one.
-    const images: RuntimeImages = await resolveRuntimeImages();
-
-    // Harness-owned helpers keep the resolved set even where they use the agent role; only
+    // Harness-owned helpers keep the approved set even where they use the agent role; only
     // the agent invocation itself is substitutable, and only by a test.
     const agentImages: RuntimeImages = {
       ...images,
@@ -188,10 +242,10 @@ export async function runStep(options: RunOptions): Promise<RunReport> {
 
     // Recorded now rather than on the success path: a failure manifest without the run's
     // identity cannot be used as evidence of anything.
-    manifest.repository = { base_branch: baseBranch, base_commit: baseCommit };
+    manifest.repository = { base_branch: options.baseBranch, base_commit: baseCommit };
     manifest.runtime = runtimeSection(agentImages);
     const inputs: Record<string, unknown> = {
-      plan_hash: planHash,
+      plan_hash: options.planHash,
       export_hash: exportHash,
       ...networkPolicySection(),
     };
@@ -663,24 +717,21 @@ export async function runStep(options: RunOptions): Promise<RunReport> {
     }
 
     await phase('commit');
-    // The single-step bridge always starts a plan: the branch is created here, never
-    // advanced. The approved manifest identity arrives with the coordinator (Step 7); until
-    // then the plan's own byte hash stands in for it.
+    // Recorded before acceptance begins: a crash between here and the commit leaves a
+    // verified candidate the next run can accept without asking a model for anything.
+    snapshotHashes.candidate = implementation.hash;
+    await options.onEvent?.({ kind: 'candidate', snapshot: implementation.hash });
+    await options.onEvent?.({ kind: 'accepting' });
+
     const accepted = await acceptChanges({
       repoPath: options.repoPath,
       parentCommit: baseCommit,
-      branchExists: false,
-      branch: `ai-harness/${plan.id}`,
-      planId: plan.id,
+      branchExists: options.branchExists,
+      branch: options.branch,
+      planId: options.planId,
       stepId: step.id,
       attempt,
-      idempotencyKey: idempotencyKey({
-        manifestHash: options.manifestHash ?? planHash,
-        planId: plan.id,
-        stepId: step.id,
-        attempt,
-        parentCommit: baseCommit,
-      }),
+      idempotencyKey: options.idempotencyKey,
       verificationStatus: verification.status,
       changes: validated.changes,
     });

@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage, RuntimeImages } from '../../src/docker/images.js';
 import { sweepHarness } from '../../src/run/cleanup.js';
-import { runStep } from '../../src/run/orchestrator.js';
+import { runSinglePlanStep } from '../../src/run/bridge.js';
 import { ATTEMPT_LABEL, ROLE_LABEL } from '../../src/volume/naming.js';
 import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
@@ -18,7 +18,7 @@ import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 /**
  * This suite sweeps every harness-labelled resource on the daemon, so it runs in its own
  * project, alone. Inside the parallel `docker` project it would delete another file's
- * containers mid-run — which is precisely why `runStep` itself never sweeps globally.
+ * containers mid-run — which is precisely why `runSinglePlanStep` itself never sweeps globally.
  */
 
 /** The implementation the fixture's own test suite accepts, so the run reaches a commit. */
@@ -124,7 +124,7 @@ describe('a production restart cleans up after a crashed one', () => {
     const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
     dirs.push(artifacts);
 
-    const report = await runStep({
+    const report = await runSinglePlanStep({
       planFile,
       repoPath: repo.dir,
       artifactDir: artifacts,
@@ -149,7 +149,7 @@ describe('a production restart cleans up after a crashed one', () => {
     await expect(labelled('volume', report.attempt)).resolves.toEqual([]);
     await expect(labelled('network', report.attempt)).resolves.toEqual([]);
 
-    // ...and the resources belonging to another attempt are still there, because `runStep`
+    // ...and the resources belonging to another attempt are still there, because `runSinglePlanStep`
     // owns its attempt and nothing else.
     await expect(labelled('container', foreign)).resolves.not.toEqual([]);
     await expect(labelled('volume', foreign)).resolves.not.toEqual([]);

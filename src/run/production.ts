@@ -1,5 +1,5 @@
 import { sweepHarness } from './cleanup.js';
-import { runStep, type RunOptions, type RunReport } from './orchestrator.js';
+import { runSinglePlanStep, type RunOptions, type RunReport } from './bridge.js';
 
 export interface ProductionDependencies {
   sweep?: () => Promise<void>;
@@ -7,7 +7,7 @@ export interface ProductionDependencies {
 }
 
 /**
- * The production entry point: clean up after a previous process, then run the task.
+ * The production entry point: clean up after a previous process, then run the plan.
  *
  * A V1 harness killed outright — SIGKILL, a closed laptop, a crashed process — leaves labelled
  * containers, volumes and networks behind, and the attempt id that owned them dies with the
@@ -24,7 +24,7 @@ export async function runProduction(
   dependencies: ProductionDependencies = {},
 ): Promise<RunReport> {
   const sweep = dependencies.sweep ?? sweepHarness;
-  const run = dependencies.run ?? runStep;
+  const run = dependencies.run ?? runSinglePlanStep;
 
   await sweep();
 

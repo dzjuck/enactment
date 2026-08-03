@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { CleanupError, sweepHarness } from '../../src/run/cleanup.js';
-import type { RunOptions, RunReport } from '../../src/run/orchestrator.js';
+import type { RunOptions, RunReport } from '../../src/run/bridge.js';
 import { runProduction } from '../../src/run/production.js';
 
 const SRC = fileURLToPath(new URL('../../src', import.meta.url));
@@ -131,16 +131,16 @@ describe('production startup', () => {
     expect(started).toBe(false);
   });
 
-  it('is reached only through the CLI, never from runStep', async () => {
+  it('is reached only through the CLI, never from the executor', async () => {
     const orchestrator = await readFile(join(SRC, 'run/orchestrator.ts'), 'utf8');
     const cli = await readFile(join(SRC, 'cli.ts'), 'utf8');
 
-    // Docker suites drive `runStep` directly and in parallel; a global sweep in there would
-    // delete another test file's containers mid-run.
+    // Docker suites drive the executor directly and in parallel; a global sweep in there
+    // would delete another test file's containers mid-run.
     expect(orchestrator).not.toContain('sweepHarness');
     expect(orchestrator).toContain('sweepAttempt');
 
     expect(cli).toContain('runProduction');
-    expect(cli).not.toContain('runStep');
+    expect(cli).not.toContain('runSinglePlanStep');
   });
 });

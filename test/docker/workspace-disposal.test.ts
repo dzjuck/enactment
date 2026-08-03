@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
-import { runStep, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
+import { runSinglePlanStep, type RunPhase, type RunReport } from '../../src/run/bridge.js';
 import {
   createTargetRepo,
   git,
@@ -102,14 +102,14 @@ function stubEnv(overrides: Record<string, string> = {}): Record<string, string>
 
 async function run(
   env: Record<string, string>,
-  overrides: Partial<Parameters<typeof runStep>[0]> = {},
+  overrides: Partial<Parameters<typeof runSinglePlanStep>[0]> = {},
 ): Promise<{ report: RunReport; manifest: Manifest }> {
   const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
   dirs.push(artifacts);
 
   const injection: RunInjection = { agent: stub, agentEnv: env, ...overrides.injection };
 
-  const report = await runStep({
+  const report = await runSinglePlanStep({
     planFile,
     repoPath: repo.dir,
     artifactDir: artifacts,
