@@ -142,19 +142,6 @@ export async function runPlan(
     stepIds: approved.plan.steps.map((step) => step.id),
   });
 
-  // A finished plan is a no-op: its stored report is the answer, and rerunning it would spend
-  // model tokens reproducing a result that is already recorded.
-  if (plan.state === 'completed') {
-    const stored = await latestReport(planRoot);
-    if (stored !== undefined) return stored;
-  }
-
-  await mkdir(planRoot, { recursive: true });
-  await copyFile(approved.planFile, join(planRoot, 'plan.yml'));
-  if (options.manifestPath !== undefined) {
-    await copyFile(options.manifestPath, join(planRoot, 'execution-manifest.yml'));
-  }
-
   const state = (): PlanRecord => store.planByRow(plan.row) as PlanRecord;
 
   /** The report as it reads right now. Composing and writing are separate so that completion
@@ -183,6 +170,31 @@ export async function runPlan(
     await persist(planRoot, value);
     return value;
   };
+
+  // Cancellation is terminal. Running the manifest again describes what was cancelled and
+  // stops: no reconciliation, no step, no verification, and no write of any kind — reviving a
+  // plan the operator deliberately released is not something a rerun may do silently. A new
+  // manifest is how work resumes, which `cancel` freed the repository for.
+  if (plan.state === 'cancelled') {
+    return compose({
+      failure: {
+        message: `plan "${plan.planId}" was cancelled; prepare and approve a new manifest to continue`,
+      },
+    });
+  }
+
+  // A finished plan is a no-op too: its stored report is the answer, and rerunning it would
+  // spend model tokens reproducing a result that is already recorded.
+  if (plan.state === 'completed') {
+    const stored = await latestReport(planRoot);
+    if (stored !== undefined) return stored;
+  }
+
+  await mkdir(planRoot, { recursive: true });
+  await copyFile(approved.planFile, join(planRoot, 'plan.yml'));
+  if (options.manifestPath !== undefined) {
+    await copyFile(options.manifestPath, join(planRoot, 'execution-manifest.yml'));
+  }
 
   // Startup reconciliation: finish an interrupted acceptance and prove Git and SQLite still
   // agree, before anything is selected to run. A disagreement stops the plan without changing

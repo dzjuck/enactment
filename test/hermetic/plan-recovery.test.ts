@@ -703,3 +703,89 @@ describe('a commit whose teardown failed', () => {
     expect(await git(h.repo.dir, ['rev-list', '--count', BRANCH])).toBe('3');
   });
 });
+
+describe('a cancelled plan', () => {
+  /** Run one step to a real commit, fail the next, then cancel. */
+  async function cancelledAfterOneStep(h: Harness) {
+    const failed = await runPlan(
+      { approved: h.approved, store: h.store, artifactsRoot: h.artifactsRoot },
+      {
+        execute: (options) =>
+          options.step.id === 'second-step'
+            ? Promise.resolve({
+                status: 'failed' as const,
+                attempt: options.attempt,
+                category: 'agent_failed' as const,
+                message: 'injected',
+              })
+            : acceptFor(h.repo, options),
+        verifyFinal: passingFinal,
+      },
+    );
+    expect(failed.state).toBe('failed');
+
+    h.store.cancelPlan(h.repo.dir, h.approved.manifestHash);
+    return failed;
+  }
+
+  it('returns a cancelled result and changes nothing', async () => {
+    const h = await harness();
+    const failed = await cancelledAfterOneStep(h);
+
+    const refsBefore = await git(h.repo.dir, ['for-each-ref', '--format=%(refname) %(objectname)']);
+    const reportsBefore = await readdir(join(h.artifactsRoot, 'demo-plan', 'reports'));
+    const attemptsBefore = h.store
+      .steps(h.store.planForManifest(h.repo.dir, h.approved.manifestHash)?.row ?? 0)
+      .flatMap((step) => h.store.attempts(step.row)).length;
+
+    const store = reopen(h);
+    const report = await runPlan(
+      { approved: h.approved, store, artifactsRoot: h.artifactsRoot },
+      {
+        execute: () => Promise.reject(new Error('should not run')),
+        verifyFinal: () => Promise.reject(new Error('should not run')),
+      },
+    );
+
+    expect(report.state).toBe('cancelled');
+    expect(report.failure?.message).toMatch(/cancel/i);
+    // The accepted step and its commit are still on the record.
+    expect(report.steps[0]).toMatchObject({ status: 'completed', commit: failed.steps[0]?.commit });
+
+    const plan = store.planForManifest(h.repo.dir, h.approved.manifestHash);
+    expect(plan?.state).toBe('cancelled');
+    expect(plan?.headCommit).toBe(failed.steps[0]?.commit);
+
+    expect(await git(h.repo.dir, ['for-each-ref', '--format=%(refname) %(objectname)'])).toBe(
+      refsBefore,
+    );
+    expect(await readdir(join(h.artifactsRoot, 'demo-plan', 'reports'))).toEqual(reportsBefore);
+    expect(
+      store
+        .steps(plan?.row ?? 0)
+        .flatMap((step) => store.attempts(step.row)).length,
+    ).toBe(attemptsBefore);
+  });
+
+  it('does not reconcile, execute or verify', async () => {
+    const h = await harness();
+    await cancelledAfterOneStep(h);
+
+    // A ref that disagrees with the recorded head: reconciliation would fail closed on it, so
+    // a cancelled result here is proof that reconciliation never ran.
+    await git(h.repo.dir, ['update-ref', `refs/heads/${BRANCH}`, h.approved.baseCommit]);
+
+    const store = reopen(h);
+    const report = await runPlan(
+      { approved: h.approved, store, artifactsRoot: h.artifactsRoot },
+      {
+        execute: () => Promise.reject(new Error('should not run')),
+        verifyFinal: () => Promise.reject(new Error('should not run')),
+      },
+    );
+
+    expect(report.state).toBe('cancelled');
+    expect(report.failure?.message).not.toMatch(/diverg|refusing to move/i);
+    expect(await git(h.repo.dir, ['rev-parse', BRANCH])).toBe(h.approved.baseCommit);
+  });
+});
