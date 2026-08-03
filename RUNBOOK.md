@@ -38,8 +38,9 @@ starts and names this command.
 ## 2. Declare a plan
 
 Work is declared as a plan: an ordered step list plus the commands that verify the finished
-branch. This build executes plans of exactly one step; a longer plan is rejected rather than
-truncated.
+branch. One invocation executes every step in the order they are written — step N starts at the
+commit step N-1 produced — and then verifies the finished branch. The authored order *is* the
+dependency chain; there is no separate `depends_on`.
 
 For a tests-first behavior change:
 
@@ -161,10 +162,14 @@ One invocation executes every remaining step in plan order, without asking again
 starts at the previous step's accepted commit, never at your checked-out `HEAD`. After the last
 step, the plan's `final_verification.commands` run offline against the finished branch head.
 
-Exit code 0 means the plan completed, including final verification. The JSON report on stdout
-carries the plan state, the branch and head, each step with its attempt and commit, the final
-verification result, and the failure when there is one. The same report is stored under
-`<artifacts>/<plan-id>/reports/invocation-<n>.json`, and earlier reports are never replaced.
+Exit code 0 means the plan completed, including final verification. A run that verified the
+branch but could not release its containers or volumes exits non-zero and reports those
+`cleanupErrors`: the branch is good, but the run cannot account for what it left behind.
+
+The JSON report on stdout carries the plan state, the branch and head, each step with its attempt
+and commit, the final verification result, and the failure when there is one. The same report is
+stored under `<artifacts>/<plan-id>/reports/invocation-<n>.json`, and earlier reports are never
+replaced.
 
 Commits land on `ai-harness/<plan-id>` — one stable branch per plan, advanced linearly — with
 hooks disabled and the `AI-Harness-Plan`, `AI-Harness-Step`, `AI-Harness-Attempt` and
@@ -188,6 +193,7 @@ database records:
 | --- | --- |
 | Plan completed | Returns the stored report. No agent, no verifier, no Git write, no new attempt. |
 | Step failed | Starts a **new** attempt for that step from the last accepted commit. Completed steps are untouched. |
+| Step committed, then teardown failed | The commit is already visible, so the step counts as accepted and the head has moved; the rerun continues with the **next** step. |
 | Attempt still `running` (the process was killed) | Reuses that attempt id and reruns the whole step from its stored parent. The killed run's evidence is kept; the rerun writes to `run-2`. |
 | Attempt `accepting`, commit already on the branch | Finishes the database transition only — no agent, no verifier. |
 | Attempt `accepting`, no commit | Retries Git acceptance alone, from the verified snapshot, under the same idempotency key. |
@@ -206,6 +212,10 @@ One live plan may own a repository at a time; cancelling releases it so a differ
 register. It changes SQLite only — the branch, its commits, the attempt history and the artifacts
 all survive, because they are evidence of work that really happened. It is idempotent, and it
 refuses a repository the given manifest does not own.
+
+**Cancellation is terminal.** Running the cancelled manifest again returns a `cancelled` report
+and a non-zero exit without reconciling, running a step, or verifying anything. To carry the work
+further, prepare and approve a new manifest — that is what cancelling freed the repository for.
 
 Optional environment (state locations only; nothing here reaches the container contract):
 
