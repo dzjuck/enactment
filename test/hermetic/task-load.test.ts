@@ -25,6 +25,7 @@ describe('loadTask', () => {
     const { task } = await loadTask(fixture('valid.yml'));
 
     expect(task).toEqual({
+      type: 'task',
       id: 'add-slugify',
       prompt:
         'Implement the slugify function in src/slugify.js so that it converts a title\ninto a URL-safe slug.\n',
@@ -39,6 +40,84 @@ describe('loadTask', () => {
         termination_grace_seconds: 5,
       },
     });
+  });
+
+  it('loads a valid code_behavior task with contract defaults', async () => {
+    const { task } = await loadTask(fixture('code-behavior.yml'));
+
+    expect(task).toEqual({
+      type: 'code_behavior',
+      id: 'add-slugify-tests-first',
+      prompt: 'Add slugify behavior.\n',
+      implementation_paths: ['src/slugify.js'],
+      test_paths: ['test/slugify.test.js'],
+      expected_test_ids: ['slugify lowercases and hyphenates'],
+      allowed_red_categories: [
+        'assertion_failure',
+        'missing_implementation',
+        'expected_type_failure',
+      ],
+      verification: {
+        commands: [['npm', 'run', 'typecheck']],
+        test_command: ['npx', '--no-install', 'vitest', 'run'],
+        closure_paths: [
+          'package.json',
+          'package-lock.json',
+          'npm-shrinkwrap.json',
+          'yarn.lock',
+          'pnpm-lock.yaml',
+          'bun.lockb',
+          'vitest.config.*',
+          'jest.config.*',
+          'tsconfig*.json',
+          'test/setup.*',
+        ],
+      },
+      baseline: {
+        retry_failures: 1,
+        known_flaky_tests: [],
+      },
+      timeouts: {
+        connectivity_smoke_seconds: 60,
+        setup_seconds: 600,
+        agent_seconds: 1200,
+        termination_grace_seconds: 10,
+      },
+    });
+  });
+
+  it.each([
+    ['code-behavior-missing-test-paths.yml', 'test_paths'],
+    ['code-behavior-missing-expected-test-ids.yml', 'expected_test_ids'],
+    ['code-behavior-missing-test-command.yml', 'verification.test_command'],
+  ])('rejects %s, naming the missing contract field', async (name, field) => {
+    const error = await loadError(name);
+    expect(error.message).toContain(field);
+  });
+
+  it('rejects overlapping test and implementation paths', async () => {
+    const error = await loadError('code-behavior-overlapping-paths.yml');
+    expect(error.message).toMatch(/test_paths.*implementation_paths|overlap/i);
+  });
+
+  it.each([
+    ['code-behavior-absolute-test-path.yml', /absolute/i],
+    ['code-behavior-traversal-test-path.yml', /\.\./],
+    ['code-behavior-manifest-test-path.yml', /dependenc/i],
+  ])('applies repository path rules to test paths in %s', async (name, message) => {
+    const error = await loadError(name);
+    expect(error.message).toContain('test_paths');
+    expect(error.message).toMatch(message);
+  });
+
+  it('rejects empty expected_test_ids', async () => {
+    const error = await loadError('code-behavior-empty-expected-test-ids.yml');
+    expect(error.message).toContain('expected_test_ids');
+  });
+
+  it('rejects an unknown RED category', async () => {
+    const error = await loadError('code-behavior-invalid-red-category.yml');
+    expect(error.message).toContain('allowed_red_categories');
   });
 
   it.each([
