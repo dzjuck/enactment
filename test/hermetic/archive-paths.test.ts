@@ -267,9 +267,11 @@ describe('archive path fidelity', () => {
 
     const accepted = await acceptChanges({
       repoPath: before.dir,
-      baseCommit: before.commit,
+      parentCommit: before.commit,
+      branchExists: false,
       branch: 'ai-harness/archive-matrix',
-      taskId: 'archive-matrix',
+      planId: 'archive-matrix',
+      stepId: 'archive-matrix',
       attempt: 'attempt-1',
       idempotencyKey: 'sha256:archive-matrix',
       verificationStatus: 'pass',

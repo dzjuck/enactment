@@ -9,7 +9,13 @@ import { AUTH_FILE } from '../../src/auth/store.js';
 import { resolveRuntimeImages, type RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
 import { runStep, RUN_PHASES, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
-import { createTargetRepo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import {
+  createTargetRepo,
+  git,
+  removePlanBranches,
+  removeRepo,
+  type TargetRepo,
+} from '../helpers/repo.js';
 import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
@@ -118,6 +124,7 @@ afterAll(async () => {
 });
 
 afterEach(async () => {
+  await removePlanBranches(repo.dir);
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -194,7 +201,8 @@ describe('orchestrator', () => {
     expect(report.commit).toMatch(/^[0-9a-f]{40}$/);
 
     const message = await git(repo.dir, ['log', '-1', '--format=%B', report.commit ?? '']);
-    expect(message).toContain('AI-Harness-Task: add-slugify');
+    expect(message).toContain('AI-Harness-Plan: harness-test-plan');
+    expect(message).toContain('AI-Harness-Step: add-slugify');
 
     const files = (await walk(artifacts)).map((path) => path.replace(`${artifacts}/`, ''));
     expect(files).toEqual(

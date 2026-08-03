@@ -14,9 +14,10 @@ export class AcceptError extends Error {
   }
 }
 
-/** DESIGN.md §14. `AI-Harness-Plan` and `AI-Harness-Step` arrive with Milestone 3. */
+/** DESIGN.md §14. */
 export const TRAILERS = {
-  task: 'AI-Harness-Task',
+  plan: 'AI-Harness-Plan',
+  step: 'AI-Harness-Step',
   attempt: 'AI-Harness-Attempt',
   idempotencyKey: 'AI-Harness-Idempotency-Key',
 };
@@ -28,11 +29,19 @@ const COMMIT_ENV = {
   GIT_COMMITTER_EMAIL: 'harness@localhost',
 };
 
+/** `git update-ref` reads an empty old value as "the ref must not exist". */
+const MUST_NOT_EXIST = '';
+
 export interface AcceptOptions {
   repoPath: string;
-  baseCommit: string;
+  /** The commit this step's work is built on, and where the plan branch must already be. */
+  parentCommit: string;
+  /** False for a plan's first acceptance, where the branch must not exist yet. */
+  branchExists: boolean;
+  /** `ai-harness/<plan-id>`: one stable branch per plan. */
   branch: string;
-  taskId: string;
+  planId: string;
+  stepId: string;
   attempt: string;
   idempotencyKey: string;
   verificationStatus: 'pass' | 'fail' | 'timeout';
@@ -50,6 +59,16 @@ export interface AcceptResult {
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await execa('git', ['-C', cwd, ...args], { env: COMMIT_ENV });
   return stdout;
+}
+
+async function refCommit(repoPath: string, branch: string): Promise<string | undefined> {
+  const { stdout, exitCode } = await execa(
+    'git',
+    ['-C', repoPath, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`],
+    { reject: false },
+  );
+
+  return exitCode === 0 && stdout.trim() !== '' ? stdout.trim() : undefined;
 }
 
 async function applyChange(worktree: string, change: Change): Promise<void> {
@@ -78,12 +97,17 @@ async function applyChange(worktree: string, change: Change): Promise<void> {
 }
 
 /**
- * Apply exactly the validated files to a private worktree and commit them (§14).
+ * Apply exactly the validated files to a private worktree, commit them, and advance the plan
+ * branch to that commit (§14).
  *
  * The user's checked-out branch and working tree are never touched: the worktree is created
- * detached at the base commit, so an unrelated dirty file cannot be swept into the commit.
+ * detached at the parent commit, so an unrelated dirty file cannot be swept into the commit.
  * Hooks are disabled two ways — `--no-verify` and `core.hooksPath=/dev/null` — because the
  * repository is allowed to configure a hook path the harness has never seen.
+ *
+ * The branch moves through `git update-ref` with an expected old value, so the harness only
+ * ever advances a ref it still recognises. A plan branch someone moved, deleted or created
+ * behind its back fails the step; it is never forced back into line.
  */
 export async function acceptChanges(options: AcceptOptions): Promise<AcceptResult> {
   if (options.verificationStatus !== 'pass') {
@@ -92,13 +116,52 @@ export async function acceptChanges(options: AcceptOptions): Promise<AcceptResul
     );
   }
 
-  const existing = await findCommitByKey(
-    options.repoPath,
-    TRAILERS.idempotencyKey,
-    options.idempotencyKey,
-  );
-  if (existing !== undefined) {
-    return { commit: existing, branch: options.branch, created: false };
+  const current = await refCommit(options.repoPath, options.branch);
+
+  // Checked before the ref expectations: a repeated acceptance of an already committed
+  // attempt is the recovery path, and there the branch is legitimately past this parent.
+  if (current !== undefined) {
+    const existing = await findCommitByKey(
+      options.repoPath,
+      options.branch,
+      TRAILERS.idempotencyKey,
+      options.idempotencyKey,
+    );
+
+    if (existing !== undefined) {
+      const message = await git(options.repoPath, ['log', '-1', '--format=%B', existing]);
+      if (!message.includes(`${TRAILERS.step}: ${options.stepId}`)) {
+        throw new AcceptError(
+          `commit ${existing} carries this idempotency key but not step "${options.stepId}"`,
+        );
+      }
+
+      const parent = await git(options.repoPath, ['rev-parse', `${existing}^`]);
+      if (parent !== options.parentCommit) {
+        throw new AcceptError(
+          `commit ${existing} carries this idempotency key but its parent is ${parent}, not ${options.parentCommit}`,
+        );
+      }
+
+      return { commit: existing, branch: options.branch, created: false };
+    }
+  }
+
+  if (options.branchExists) {
+    if (current === undefined) {
+      throw new AcceptError(
+        `plan branch ${options.branch} is missing; it should be at ${options.parentCommit}`,
+      );
+    }
+    if (current !== options.parentCommit) {
+      throw new AcceptError(
+        `plan branch ${options.branch} is at ${current}, not the expected ${options.parentCommit}`,
+      );
+    }
+  } else if (current !== undefined) {
+    throw new AcceptError(
+      `plan branch ${options.branch} already exists at ${current}; the harness never adopts a ref it did not create`,
+    );
   }
 
   if (options.changes.length === 0) {
@@ -109,7 +172,7 @@ export async function acceptChanges(options: AcceptOptions): Promise<AcceptResul
   const worktree = join(parent, 'tree');
 
   try {
-    await git(options.repoPath, ['worktree', 'add', '--detach', worktree, options.baseCommit]);
+    await git(options.repoPath, ['worktree', 'add', '--detach', worktree, options.parentCommit]);
 
     for (const change of options.changes) {
       await applyChange(worktree, change);
@@ -123,9 +186,11 @@ export async function acceptChanges(options: AcceptOptions): Promise<AcceptResul
       'commit',
       '--no-verify',
       '--message',
-      options.message ?? `${options.taskId}: apply harness-verified changes`,
+      options.message ?? `${options.stepId}: apply harness-verified changes`,
       '--trailer',
-      `${TRAILERS.task}: ${options.taskId}`,
+      `${TRAILERS.plan}: ${options.planId}`,
+      '--trailer',
+      `${TRAILERS.step}: ${options.stepId}`,
       '--trailer',
       `${TRAILERS.attempt}: ${options.attempt}`,
       '--trailer',
@@ -134,13 +199,16 @@ export async function acceptChanges(options: AcceptOptions): Promise<AcceptResul
 
     const commit = await git(worktree, ['rev-parse', 'HEAD']);
 
-    // Creating the branch fails loudly if it already exists: the harness never moves a ref
-    // it did not create in this run.
     try {
-      await git(options.repoPath, ['branch', options.branch, commit]);
+      await git(options.repoPath, [
+        'update-ref',
+        `refs/heads/${options.branch}`,
+        commit,
+        options.branchExists ? options.parentCommit : MUST_NOT_EXIST,
+      ]);
     } catch (error) {
       throw new AcceptError(
-        `cannot create branch ${options.branch}: ${error instanceof Error ? error.message : String(error)}`,
+        `cannot advance ${options.branch} to ${commit}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 

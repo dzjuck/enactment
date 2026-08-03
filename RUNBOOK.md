@@ -126,8 +126,9 @@ node dist/cli.js run plan.yml --repo /path/to/repo --artifacts ./artifacts
 Exit code 0 means verified and committed. The report is printed as JSON on stdout, and the same
 outcome is recorded under `result` in `run-manifest.json`.
 
-The commit is made on a harness-owned branch `ai-harness/<task-id>-<attempt>`, with hooks
-disabled and the `AI-Harness-Task`, `AI-Harness-Attempt` and `AI-Harness-Idempotency-Key`
+The commit is made on a harness-owned branch `ai-harness/<plan-id>`, with hooks
+disabled and the `AI-Harness-Plan`, `AI-Harness-Step`, `AI-Harness-Attempt` and
+`AI-Harness-Idempotency-Key`
 trailers. Nothing is merged and nothing is pushed — review the branch yourself.
 
 Optional environment (state locations only; nothing here reaches the container contract):

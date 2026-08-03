@@ -3,36 +3,48 @@ import { createHash } from 'node:crypto';
 import { execa } from 'execa';
 
 export interface IdempotencyInputs {
-  taskId: string;
-  taskHash: string;
-  baseCommit: string;
+  /** Identity of the approved execution manifest. */
+  manifestHash: string;
+  planId: string;
+  stepId: string;
+  /** The stable attempt id; a crashed attempt keeps it, an explicit retry gets a new one. */
   attempt: string;
+  /** The commit this step's work is built on. */
+  parentCommit: string;
 }
 
 /**
- * Keys an accepted commit to its inputs, so acceptance cannot produce two commits for one
- * attempt.
+ * Keys an accepted commit to the exact work that produced it.
  *
- * The key is attempt-scoped on purpose, and that bounds what it can do. §31's recovery
- * property — a re-run picking up an accepted commit instead of making a second one — needs a
- * *stable* attempt id to key on, which means the persistent state Milestone 3 introduces. In
- * M1 every run mints a fresh attempt id, so a repeated run is a genuinely new attempt and gets
- * its own commit. Keying across runs would be worse than useless here anyway: nothing checks
- * the key until acceptance, so the model call would already have been paid for.
+ * The key is stable across processes, which is what makes recovery possible: a run that
+ * crashed after committing but before recording it finds its own commit by this key instead
+ * of making a second one. Every element is load-bearing — the parent because the same step
+ * retried from a different head is different work, and the attempt because an explicit retry
+ * after a recorded failure is a new attempt and gets its own commit.
  */
 export function idempotencyKey(inputs: IdempotencyInputs): string {
   const canonical = JSON.stringify({
-    taskId: inputs.taskId,
-    taskHash: inputs.taskHash,
-    baseCommit: inputs.baseCommit,
+    manifestHash: inputs.manifestHash,
+    planId: inputs.planId,
+    stepId: inputs.stepId,
     attempt: inputs.attempt,
+    parentCommit: inputs.parentCommit,
   });
 
   return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
 }
 
+/**
+ * Find a commit carrying `key`, searching only the plan branch.
+ *
+ * Scoped to the branch rather than `--all` on purpose: a commit with a matching trailer that
+ * the plan branch cannot reach is not the plan's accepted work — it is a leftover from a
+ * deleted branch, or something a user copied — and treating it as accepted would report a
+ * commit the branch does not contain.
+ */
 export async function findCommitByKey(
   repoPath: string,
+  branch: string,
   trailer: string,
   key: string,
 ): Promise<string | undefined> {
@@ -42,7 +54,7 @@ export async function findCommitByKey(
       '-C',
       repoPath,
       'log',
-      '--all',
+      branch,
       '--format=%H',
       '--fixed-strings',
       `--grep=${trailer}: ${key}`,

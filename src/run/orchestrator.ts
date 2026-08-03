@@ -80,6 +80,8 @@ export interface RunOptions {
   artifactDir: string;
   baseCommit?: string;
   baseBranch?: string;
+  /** Identity of the approved manifest, once one exists. */
+  manifestHash?: string;
   sourceCodexHome?: string;
   storeDirectory?: string;
   dependencyCacheDirectory?: string;
@@ -661,13 +663,24 @@ export async function runStep(options: RunOptions): Promise<RunReport> {
     }
 
     await phase('commit');
+    // The single-step bridge always starts a plan: the branch is created here, never
+    // advanced. The approved manifest identity arrives with the coordinator (Step 7); until
+    // then the plan's own byte hash stands in for it.
     const accepted = await acceptChanges({
       repoPath: options.repoPath,
-      baseCommit,
-      branch: `ai-harness/${step.id}-${attempt}`,
-      taskId: step.id,
+      parentCommit: baseCommit,
+      branchExists: false,
+      branch: `ai-harness/${plan.id}`,
+      planId: plan.id,
+      stepId: step.id,
       attempt,
-      idempotencyKey: idempotencyKey({ taskId: step.id, taskHash: planHash, baseCommit, attempt }),
+      idempotencyKey: idempotencyKey({
+        manifestHash: options.manifestHash ?? planHash,
+        planId: plan.id,
+        stepId: step.id,
+        attempt,
+        parentCommit: baseCommit,
+      }),
       verificationStatus: verification.status,
       changes: validated.changes,
     });

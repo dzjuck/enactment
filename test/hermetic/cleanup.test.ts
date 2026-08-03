@@ -7,7 +7,7 @@ const SUCCEEDED: RunReport = {
   status: 'succeeded',
   attempt: 'attempt-1',
   commit: '0'.repeat(40),
-  branch: 'ai-harness/add-slugify-attempt-1',
+  branch: 'ai-harness/slugify-plan',
 };
 
 const FAILED: RunReport = {

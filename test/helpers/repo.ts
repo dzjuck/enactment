@@ -55,3 +55,22 @@ export async function commitAll(dir: string, message: string): Promise<string> {
 export async function removeRepo(dir: string): Promise<void> {
   await rm(dir, { recursive: true, force: true });
 }
+
+/**
+ * Delete every `ai-harness/*` branch in a repository.
+ *
+ * A plan branch is stable per plan id and the harness refuses to adopt one it did not
+ * create, so a fixture repository shared by several runs of the same plan needs the previous
+ * run's branch cleared — the same thing an operator does between plans.
+ */
+export async function removePlanBranches(dir: string): Promise<void> {
+  const refs = await git(dir, [
+    'for-each-ref',
+    '--format=%(refname)',
+    'refs/heads/ai-harness/',
+  ]);
+
+  for (const ref of refs.split('\n').filter((line) => line !== '')) {
+    await git(dir, ['update-ref', '-d', ref]);
+  }
+}

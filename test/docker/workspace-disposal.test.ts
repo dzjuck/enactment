@@ -9,7 +9,13 @@ import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
 import { runStep, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
-import { createTargetRepo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import {
+  createTargetRepo,
+  git,
+  removePlanBranches,
+  removeRepo,
+  type TargetRepo,
+} from '../helpers/repo.js';
 import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
@@ -80,6 +86,7 @@ afterAll(async () => {
 });
 
 afterEach(async () => {
+  await removePlanBranches(repo.dir);
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 

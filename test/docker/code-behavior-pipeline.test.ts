@@ -14,7 +14,14 @@ import {
   type RunPhase,
   type RunReport,
 } from '../../src/run/orchestrator.js';
-import { commitAll, createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import {
+  commitAll,
+  createM2Repo,
+  git,
+  removePlanBranches,
+  removeRepo,
+  type TargetRepo,
+} from '../helpers/repo.js';
 import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
@@ -115,6 +122,7 @@ afterAll(async () => {
 });
 
 afterEach(async () => {
+  await removePlanBranches(repo.dir);
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
