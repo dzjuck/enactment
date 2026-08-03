@@ -14,6 +14,16 @@ import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 const CANARY = 'sk-orchestrator-canary-77d3f19a';
 const LABEL = 'ai-harness.attempt';
+const M1_PHASES = [
+  'export',
+  'setup',
+  'workspace',
+  'connectivity',
+  'agent',
+  'diff',
+  'verify',
+  'commit',
+] as const satisfies readonly RunPhase[];
 
 const SLUGIFY = `export function slugify(title) {
   return String(title)
@@ -216,7 +226,7 @@ describe('orchestrator', () => {
    * dirty the workspace live in `workspace-disposal.test.ts`; what this matrix pins is that
    * every phase reports its own failure, commits nothing, and leaks nothing.
    */
-  it.each(RUN_PHASES.filter((phase) => phase !== 'commit'))(
+  it.each(M1_PHASES.filter((phase) => phase !== 'commit'))(
     'reports a failure injected in the %s phase, commits nothing, and leaves no resources',
     async (phase) => {
       const before = await git(repo.dir, ['rev-list', '--all', '--count']);

@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,7 +8,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
-import { runTask, type RunPhase, type RunReport } from '../../src/run/orchestrator.js';
+import {
+  runTask,
+  RUN_PHASES,
+  type RunPhase,
+  type RunReport,
+} from '../../src/run/orchestrator.js';
 import { commitAll, createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
@@ -27,6 +32,8 @@ const IMPLEMENTATION_SOURCE = `export function slugify(title) {
 `;
 
 const DISPUTE_PATH = '.harness/test-contract-dispute.md';
+const CANARY = 'm2-canary';
+const ATTEMPT_LABEL = 'ai-harness.attempt';
 
 let repo: TargetRepo;
 let root: string;
@@ -55,7 +62,7 @@ beforeAll(async () => {
 
   const source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
-  await writeFile(join(source, AUTH_FILE), JSON.stringify({ tokens: { access_token: 'm2-canary' } }));
+  await writeFile(join(source, AUTH_FILE), JSON.stringify({ tokens: { access_token: CANARY } }));
 
   taskFile = await writeTask(join(root, 'task.yml'));
 }, 900_000);
@@ -129,6 +136,35 @@ async function run(
   });
 
   return { report, artifacts };
+}
+
+async function walk(dir: string): Promise<string[]> {
+  const files: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...(await walk(path)));
+    else files.push(path);
+  }
+  return files;
+}
+
+async function labelledResources(
+  kind: 'container' | 'volume' | 'network',
+  attempt: string,
+): Promise<string[]> {
+  const filter = `label=${ATTEMPT_LABEL}=${attempt}`;
+  const args =
+    kind === 'container'
+      ? ['ps', '-aq', '--filter', filter]
+      : [kind, 'ls', '-q', '--filter', filter];
+  const { stdout } = await execa('docker', args);
+  return stdout.split('\n').filter((line) => line !== '');
+}
+
+async function expectNoResources(attempt: string): Promise<void> {
+  await expect(labelledResources('container', attempt)).resolves.toEqual([]);
+  await expect(labelledResources('volume', attempt)).resolves.toEqual([]);
+  await expect(labelledResources('network', attempt)).resolves.toEqual([]);
 }
 
 describe('code_behavior pipeline', () => {
@@ -498,6 +534,85 @@ describe('code_behavior pipeline', () => {
     ) as { frozen: { digest: string } };
     expect(manifest.frozen.digest).toMatch(/^[a-f0-9]{64}$/);
   }, 900_000);
+
+  it('records the complete code-behavior evidence chain with phase-scoped artifacts', async () => {
+    const { report, artifacts } = await run();
+
+    expect(report.status).toBe('succeeded');
+    expect(RUN_PHASES).toEqual(
+      expect.arrayContaining(['baseline', 'tests', 'red', 'implementation', 'green']),
+    );
+    const manifest = JSON.parse(
+      await readFile(join(artifacts, 'run-manifest.json'), 'utf8'),
+    ) as {
+      baseline: { digest: string; quarantined: string[] };
+      frozen: { digest: string };
+      red: { valid: boolean; category: string };
+      green: { valid: boolean };
+      usage: {
+        tests: { input_tokens: number };
+        implementation: { input_tokens: number };
+      };
+      snapshots: { pre_agent: string; tests: string; implementation: string };
+    };
+    expect(manifest.baseline.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(manifest.baseline.quarantined).toEqual([]);
+    expect(manifest.frozen.digest).toMatch(/^[a-f0-9]{64}$/);
+    expect(manifest.red).toMatchObject({ valid: true, category: 'missing_implementation' });
+    expect(manifest.green.valid).toBe(true);
+    expect(manifest.usage.tests.input_tokens).toBeGreaterThan(0);
+    expect(manifest.usage.implementation.input_tokens).toBeGreaterThan(0);
+    expect(manifest.snapshots.pre_agent).toMatch(/^sha256:/);
+    expect(manifest.snapshots.tests).toMatch(/^sha256:/);
+    expect(manifest.snapshots.implementation).toMatch(/^sha256:/);
+
+    const files = (await walk(artifacts)).map((path) => path.replace(`${artifacts}/`, ''));
+    expect(files).toEqual(
+      expect.arrayContaining([
+        'baseline/baseline.json',
+        'red/results.json',
+        'red/verdict.json',
+        'green/results.json',
+        'green/verdict.json',
+        'tests/prompt.txt',
+        'tests/agent-events.jsonl',
+        'implementation/prompt.txt',
+        'implementation/agent-events.jsonl',
+        'tests/source-diff.json',
+        'implementation/source-diff.json',
+      ]),
+    );
+    for (const file of await walk(artifacts)) {
+      expect(await readFile(file, 'utf8')).not.toContain(CANARY);
+    }
+    await expectNoResources(report.attempt);
+  }, 900_000);
+
+  it.each([
+    ['baseline', 'baseline_failed'],
+    ['tests', 'agent_failed'],
+    ['red', 'red_invalid'],
+    ['implementation', 'agent_failed'],
+    ['green', 'verification_failed'],
+  ] as const)(
+    'fails cleanly when %s is injected',
+    async (injectedPhase, category) => {
+      const before = await git(repo.dir, ['rev-list', '--all', '--count']);
+      const { report } = await run(phaseEnv(), {
+        onPhase: (phase) => {
+          if (phase === injectedPhase) throw new Error(`injected ${injectedPhase} failure`);
+        },
+      });
+
+      expect(report.status).toBe('failed');
+      expect(report.failedPhase).toBe(injectedPhase);
+      expect(report.category).toBe(category);
+      expect(report.commit).toBeUndefined();
+      expect(await git(repo.dir, ['rev-list', '--all', '--count'])).toBe(before);
+      await expectNoResources(report.attempt);
+    },
+    900_000,
+  );
 
   it('rejects implementation written during the tests phase', async () => {
     const before = await git(repo.dir, ['rev-list', '--all', '--count']);

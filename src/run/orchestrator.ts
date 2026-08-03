@@ -45,30 +45,33 @@ import { CleanupError, describeError, releaseAll, sweepAttempt, withCleanupOutco
 import { PhaseFailure, type FailureCategory } from './failure.js';
 import type { RunInjection } from './inject.js';
 import { OwnershipError } from './ownership.js';
-import { networkPolicySection, runtimeSection, usageSection } from './manifest.js';
+import {
+  baselineSection,
+  networkPolicySection,
+  runtimeSection,
+  usageSection,
+} from './manifest.js';
 import { resolveTimeouts } from './timeout.js';
 
-/** The Milestone 1 phase order. §21's richer step types arrive with Milestone 2. */
 export const RUN_PHASES = [
   'export',
   'setup',
   'workspace',
+  'baseline',
   'connectivity',
   'agent',
+  'tests',
   'diff',
+  'tests_diff',
+  'red',
+  'implementation',
+  'implementation_diff',
+  'green',
   'verify',
   'commit',
 ] as const;
 
-export type RunPhase =
-  | 'baseline'
-  | 'red'
-  | 'green'
-  | (typeof RUN_PHASES)[number]
-  | 'tests'
-  | 'tests_diff'
-  | 'implementation'
-  | 'implementation_diff';
+export type RunPhase = (typeof RUN_PHASES)[number];
 
 export interface RunOptions {
   taskFile: string;
@@ -317,7 +320,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       });
       const artifact = baselineArtifact(baseline);
       baselineResults = baseline.results;
-      manifest.baseline = artifact;
+      manifest.baseline = baselineSection(artifact);
       await mkdir(baselineDir, { recursive: true });
       await writeFile(
         join(baselineDir, 'baseline.json'),
@@ -421,7 +424,14 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
         ),
       );
 
-      manifest.usage = usageSection(agentRun.usage);
+      const agentUsage = usageSection(agentRun.usage);
+      if (task.type === 'code_behavior') {
+        const phaseUsage = (manifest.usage ?? {}) as Record<string, unknown>;
+        phaseUsage[agentPhase] = agentUsage;
+        manifest.usage = phaseUsage;
+      } else {
+        manifest.usage = agentUsage;
+      }
 
       // §32: container logs are artifacts, and they pass through redaction like everything else.
       await writeLog(phaseArtifacts, 'agent.log', redact(agentRun.stdout + agentRun.stderr));

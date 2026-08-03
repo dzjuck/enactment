@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 
 import { CODEX_VERSION, HARNESS_VERSION, PROVIDER_ALLOWLIST } from '../config/pins.js';
 import type { RuntimeImages } from '../docker/images.js';
+import type { BaselineArtifact } from '../verify/baseline.js';
+import type { GreenVerdict } from '../verify/green.js';
+import type { RedVerdict } from '../verify/red.js';
 
 /** The `runtime` block of the DESIGN.md §20 execution manifest. */
 export interface RuntimeSection {
@@ -18,6 +21,33 @@ export interface UsageSection {
   input_tokens: number;
   output_tokens: number;
   cached_input_tokens: number;
+}
+
+export interface CodeBehaviorUsageSection {
+  tests: UsageSection;
+  implementation: UsageSection;
+}
+
+export interface BaselineManifestSection extends BaselineArtifact {
+  digest: string;
+}
+
+export interface FrozenSetManifestSection {
+  digest: string;
+  paths: string[];
+}
+
+export interface CodeBehaviorEvidence {
+  baseline: BaselineManifestSection;
+  frozen: FrozenSetManifestSection;
+  red: RedVerdict;
+  green: GreenVerdict;
+  usage: CodeBehaviorUsageSection;
+}
+
+export function baselineSection(baseline: BaselineArtifact): BaselineManifestSection {
+  const digest = createHash('sha256').update(JSON.stringify(baseline)).digest('hex');
+  return { ...baseline, digest: `sha256:${digest}` };
 }
 
 export function usageSection(usage: UsageSection): UsageSection {
