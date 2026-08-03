@@ -32,6 +32,11 @@ import type { TestRunResults } from '../verify/results.js';
 import { TestRunError } from '../verify/test-run.js';
 import { frozenPathsForPhase, frozenSetEvidence } from '../verify/frozen.js';
 import { classifyGreen, greenResultsArtifact } from '../verify/green.js';
+import {
+  captureTestContractDispute,
+  excludeDispute,
+  implementationScopeWithDispute,
+} from '../verify/dispute.js';
 import { attemptLabels, newAttemptId } from '../volume/naming.js';
 import { snapshotWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
@@ -535,13 +540,26 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       const implementationRun = await runAgentAndValidate(
         'implementation',
         implementationPrompt(task),
-        task.implementation_paths,
+        implementationScopeWithDispute(task.implementation_paths),
         testsRun.snapshotTar,
         implementationFrozenPaths,
       );
       const diffs = await codeBehaviorDiffs(tar, testsRun.snapshotTar, implementationRun.snapshotTar);
+      const dispute = captureTestContractDispute(implementationRun.validated.changes);
+      if (dispute !== undefined) {
+        manifest.dispute = dispute;
+        await writeFile(
+          join(options.artifactDir, 'implementation', 'test-contract-dispute.md'),
+          redact(`${dispute.reason}\n`),
+        );
+        throw new PhaseFailure(
+          'implementation',
+          'test_contract_disputed',
+          `test contract disputed: ${dispute.reason}`,
+        );
+      }
       implementation = implementationRun.snapshot;
-      validated = { changes: diffs.acceptance };
+      validated = { changes: excludeDispute(diffs.acceptance) };
     } else {
       const run = await runAgentAndValidate(
         'agent',

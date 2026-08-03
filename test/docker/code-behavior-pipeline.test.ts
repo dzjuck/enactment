@@ -26,6 +26,8 @@ const IMPLEMENTATION_SOURCE = `export function slugify(title) {
 }
 `;
 
+const DISPUTE_PATH = '.harness/test-contract-dispute.md';
+
 let repo: TargetRepo;
 let root: string;
 let taskFile: string;
@@ -404,6 +406,43 @@ describe('code_behavior pipeline', () => {
     expect(await git(repo.dir, ['show', `${report.commit ?? ''}:src/slugify.js`])).toBe(
       IMPLEMENTATION_SOURCE.trimEnd(),
     );
+  }, 900_000);
+
+  it('records a test-contract dispute and stops without a commit', async () => {
+    const reason = 'The expected slug format contradicts the requested behavior.';
+    const { report, artifacts } = await run(
+      phaseEnv({
+        STUB_WRITE_PATH_IMPLEMENTATION: DISPUTE_PATH,
+        STUB_WRITE_CONTENT_IMPLEMENTATION: reason,
+      }),
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.category).toBe('test_contract_disputed');
+    expect(report.category).not.toBe('verification_failed');
+    expect(report.commit).toBeUndefined();
+    expect(
+      await readFile(join(artifacts, 'implementation/test-contract-dispute.md'), 'utf8'),
+    ).toContain(reason);
+    expect(
+      await readFile(join(artifacts, 'implementation/prompt.txt'), 'utf8'),
+    ).toContain(DISPUTE_PATH);
+    await expect(access(join(repo.dir, 'test/slugify.test.js'))).rejects.toThrow();
+  }, 900_000);
+
+  it('reports closure_violation when a dispute also changes a frozen path', async () => {
+    const { report } = await run(
+      phaseEnv({
+        STUB_WRITE_PATH_IMPLEMENTATION: DISPUTE_PATH,
+        STUB_WRITE_CONTENT_IMPLEMENTATION: 'The test is wrong.',
+        STUB_SYMLINK_PATH_IMPLEMENTATION: 'test/slugify.test.js',
+        STUB_SYMLINK_TARGET_IMPLEMENTATION: '../src/slugify.js',
+      }),
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.category).toBe('closure_violation');
+    expect(report.commit).toBeUndefined();
   }, 900_000);
 
   it('rejects a phase-two edit to a frozen test file as closure_violation', async () => {

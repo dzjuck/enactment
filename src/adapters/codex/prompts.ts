@@ -1,4 +1,5 @@
 import type { CodeBehaviorTask } from '../../task/schema.js';
+import { DISPUTE_PATH } from '../../verify/dispute.js';
 
 export function testWritingPrompt(task: CodeBehaviorTask): string {
   return [
@@ -22,5 +23,8 @@ export function implementationPrompt(task: CodeBehaviorTask): string {
     '',
     'Write only these implementation paths:',
     ...task.implementation_paths.map((path) => `- ${path}`),
+    '',
+    'If the tests are wrong, do not edit them. Write the reason here and stop:',
+    `- ${DISPUTE_PATH}`,
   ].join('\n');
 }
