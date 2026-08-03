@@ -414,8 +414,11 @@ export async function runPlan(
   const completed = compose({ ...outcome, state: 'completed' });
   await persist(planRoot, completed);
 
-  store.setPlanState(plan.row, 'completed');
+  // Completion also promises bounded snapshot retention. Keep the plan retryable until the
+  // final export has been pruned, so a crash here cannot leave a completed plan whose early
+  // return makes that snapshot permanent.
   await pruneSnapshots(store, plan.row, snapshots);
+  store.setPlanState(plan.row, 'completed');
 
   return completed;
 }

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ArtifactStore } from '../../src/artifacts/store.js';
 import type { RuntimeImages } from '../../src/docker/images.js';
@@ -31,6 +31,7 @@ const repos: string[] = [];
 const stores: StateStore[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const store of stores.splice(0)) store.close();
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   await Promise.all(repos.splice(0).map((dir) => removeRepo(dir)));
@@ -590,6 +591,36 @@ describe('completed report durability', () => {
     expect(finalRuns).toBe(1);
     expect(second.state).toBe('completed');
     expect(store.planForManifest(repo.dir, approved.manifestHash)?.state).toBe('completed');
+  });
+
+  it('prunes final snapshots before marking the plan completed', async () => {
+    const { repo, approved, store, artifactsRoot } = await harness(['first-step']);
+    const seen: StepExecutionOptions[] = [];
+    const remove = ArtifactStore.prototype.remove;
+    let stateDuringPrune: string | undefined;
+
+    vi.spyOn(ArtifactStore.prototype, 'remove').mockImplementation(async function (
+      this: ArtifactStore,
+      artifact,
+    ) {
+      stateDuringPrune = store.planForManifest(repo.dir, approved.manifestHash)?.state;
+      await remove.call(this, artifact);
+    });
+
+    const report = await runPlan(
+      { approved, store, artifactsRoot },
+      {
+        execute: committingExecutor(repo, seen),
+        verifyFinal: async (options) => {
+          await options.snapshots.put(Buffer.from('final export'), '.tar');
+          return { ...(await passingFinal()), head: options.head };
+        },
+      },
+    );
+
+    expect(report.state).toBe('completed');
+    expect(stateDuringPrune).toBe('running');
+    await expect(readdir(join(artifactsRoot, 'demo-plan/snapshots'))).resolves.toEqual([]);
   });
 
   it('completes once the report is durable, and later runs return it unchanged', async () => {
