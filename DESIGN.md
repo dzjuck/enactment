@@ -542,9 +542,17 @@ leaves the workspace untouched rather than half-written.
 
 ### Retention
 
-Snapshots are per-attempt tars of a whole workspace, so storage grows without bound. Milestone 1
-keeps every snapshot — one task per run, so the volume is small — and defers a retention policy.
-Any milestone that runs multi-step plans needs one before it ships.
+Snapshots are per-attempt tars of a whole workspace, so keeping them all makes storage grow
+without bound. Milestone 3 bounds it with a *termination* rule rather than a live invariant.
+
+While an attempt runs, every snapshot it takes stays in the plan-scoped store, because the
+verifier reads those tars during baseline, RED and GREEN. When an attempt reaches a terminal
+state, every blob it owns is deleted — except one still referenced by an `accepting` attempt as
+its verified acceptance candidate, which goes once its commit is recorded. Startup prunes any
+blob no live SQLite row references, which is also what clears a killed process's leftovers.
+
+The hashes remain in the attempt's evidence either way, so a run stays reproducible without
+storing every tree forever.
 
 ---
 
@@ -658,6 +666,17 @@ implementation snapshot
 → commit with hooks disabled
 ```
 
+Accepted work lands on one stable branch per plan:
+
+```text
+ai-harness/<plan-id>
+```
+
+It is created at the approved base by the first acceptance and advanced linearly by each later
+step. The ref moves only through `git update-ref` with an expected old value — absent for the
+first acceptance, the step's parent commit for every later one — so a branch that was moved,
+deleted or created behind the harness's back fails the step instead of being adopted or forced.
+
 Commit trailers:
 
 ```text
@@ -666,6 +685,10 @@ AI-Harness-Step: persist-runs
 AI-Harness-Attempt: 2
 AI-Harness-Idempotency-Key: ...
 ```
+
+The idempotency key covers the manifest hash, plan ID, step ID, attempt ID and expected parent,
+and reconciliation searches only the plan branch: a commit carrying a matching trailer that the
+branch cannot reach is a leftover, not accepted work.
 
 No automatic merge.
 
@@ -822,17 +845,21 @@ Each step declares:
 * ID;
 * observable behavior;
 * type;
-* dependencies;
-* complexity;
-* risk;
 * test paths;
 * implementation paths;
 * expected test IDs;
 * allowed RED categories;
-* verification commands;
-* services;
-* network requirements;
-* review requirements.
+* verification commands.
+
+`observable_behavior` is the text sent to the agent; it replaces the earlier `prompt`. Plan and
+step IDs are Git-safe lowercase slugs, because they name a branch and an artifact directory.
+
+The authored order **is** the dependency chain: step N depends on step N-1. Milestone 3 runs one
+step at a time, so an explicit `depends_on` and a DAG scheduler would add a second description of
+the same fact. `final_verification.commands` is required.
+
+Complexity, risk, services, network requirements and review metadata are rejected rather than
+stored inert, and arrive with the milestones that execute them.
 
 ---
 
@@ -848,14 +875,7 @@ execution_manifest:
 
   inputs:
     plan_hash: sha256:...
-    project_config_hash: sha256:...
-    commands_hash: sha256:...
-    services_hash: sha256:...
-    documentation_hash: sha256:...
-    routing_hash: sha256:...
-    network_policy_hash: sha256:...
-    dependency_policy_hash: sha256:...
-    quarantine_hash: sha256:...
+    policy_hash: sha256:...
 
   runtime:
     harness_version: 0.1.0
@@ -864,6 +884,11 @@ execution_manifest:
     setup_image_id: sha256:...
     proxy_image_id: sha256:...
 ```
+
+Only inputs a milestone actually implements are present. Milestone 3 records two: the plan's raw
+byte hash, which already covers commands, scopes, verification closure and quarantine, and one
+hash over the fixed network and dependency policies. Later-milestone fields are absent rather than
+filled with placeholder hashes that would attest to nothing.
 
 Approval required for:
 
@@ -883,6 +908,11 @@ Retries and recovery do not require approval.
 ---
 
 ## 21. Step types
+
+Milestone 3 executes `task` and `code_behavior`. `task` is the Milestone 1 single-agent pipeline,
+now nested inside a plan. `operational` and `mixed` are rejected by the loader until the startup
+and behavioral checks below exist, so a plan cannot declare a step the harness would silently
+under-execute.
 
 ### `code_behavior`
 
@@ -1345,19 +1375,32 @@ failed
 cancelled
 ```
 
-Attempt states:
+Milestone 3 persists the subset it can reach:
 
 ```text
-preparing
-baseline_verified
-writing_tests
-red_verified
-implementing
-verified
-reviewing
-accepting
-completed
+approved → running → completed
+                   ↘ failed → running   # explicit retry, no new approval
+approved/running/failed → cancelled
 ```
+
+A failed plan stays active — the same approved manifest may retry it — so one non-completed,
+non-cancelled plan owns a canonical repository path at a time. That ownership is a uniqueness
+constraint, not a process lock: concurrent production runs remain unsupported because the startup
+sweep is global.
+
+Attempt states are only those recovery has to tell apart:
+
+```text
+running → accepting → completed
+running/accepting → failed
+```
+
+`failed` is terminal for that attempt; an explicit retry is a new attempt with a new ID and
+ordinal. A `running` row found at startup belongs to a process that died, so its ID is reused and
+the whole step reruns from its stored parent.
+
+The execution phase — `preparing`, `baseline`, `tests`, `red`, `implementation`, `green`,
+`verify` — is a diagnostic column recording where an attempt was, not a second state machine.
 
 Recovery reconciles:
 
@@ -1392,6 +1435,9 @@ Store:
 * dependency cache keys;
 * plan revisions;
 * usage metadata.
+
+Snapshots are the exception to "store": §11 makes them bounded, so what is permanently retained
+is their hashes in the attempt evidence, not the trees themselves.
 
 Never store:
 
@@ -1489,11 +1535,13 @@ Adds:
 * full plan;
 * execution manifest;
 * SQLite;
-* dependencies between steps;
+* implicit linear dependencies between steps;
 * automatic progression;
-* recovery;
+* recovery and reconciliation;
 * idempotent acceptance;
-* final verification.
+* offline final verification;
+* bounded snapshot retention;
+* `prepare` / `run` / `cancel`.
 
 Working result:
 
@@ -1647,6 +1695,32 @@ Established while building against `codex-cli 0.146.0`; each changed a decision.
 * **Network teardown must account for attached containers.** `docker network rm` fails while a
   container is still attached, and a tolerant remove hides that as a silent leak. Containers must
   be destroyed before the networks they sit on.
+
+### Findings from the Milestone 3 implementation
+
+Established while building autonomous plans; each changed a decision.
+
+* **Reconciliation must precede the branch-collision guard.** An acceptance interrupted between
+  the commit and the database write legitimately leaves a commit on the plan branch that SQLite
+  has not recorded. Checking "this plan has accepted nothing, so the branch must not exist" first
+  reports the plan's own work as somebody else's ref.
+* **Claiming an artifact ordinal has to create the directory.** An executor that dies before
+  writing anything otherwise leaves `run-2` unclaimed, and the next recovery run writes over the
+  evidence of the one before it.
+* **A returned failure and a killed process are different states, and only one is recoverable.**
+  An attempt that *reports* a failure has had its own error handling run and is terminal. An
+  attempt left `running` or `accepting` is one whose process died, and is the only case where
+  reusing an ID or finishing an acceptance is sound.
+* **Content-addressed stores need paths, not hashes, to delete by.** Workspace snapshots are
+  stored bare and exported trees as `.tar`, so a prune that reconstructs a filename from a hash
+  plus a guessed extension silently deletes nothing.
+* **`node:sqlite` needs no opt-in flag from Node 22.13.** Measured: 22.12 raises
+  `ERR_UNKNOWN_BUILTIN_MODULE` without `--experimental-sqlite`; 23.7 works unflagged. Its
+  experimental warning goes to stderr, so stdout stays valid JSON.
+* **A stable plan branch changes what a shared fixture repository means.** With one branch per
+  plan rather than one per attempt, a second run against the same repository correctly refuses to
+  adopt the first run's branch — so suites that reuse a fixture must clear it, exactly as an
+  operator does between plans.
 
 ### Conclusion
 
