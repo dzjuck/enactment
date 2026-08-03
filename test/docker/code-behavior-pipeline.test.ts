@@ -325,6 +325,60 @@ describe('code_behavior pipeline', () => {
     );
   }, 900_000);
 
+  it('rejects a phase-two edit to a frozen test file as closure_violation', async () => {
+    const before = await git(repo.dir, ['rev-list', '--all', '--count']);
+    const { report } = await run(
+      phaseEnv({
+        STUB_WRITE_PATH_IMPLEMENTATION: 'test/slugify.test.js',
+        STUB_WRITE_CONTENT_IMPLEMENTATION: `${TEST_SOURCE}\n// weakened by implementation phase\n`,
+      }),
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.category).toBe('closure_violation');
+    expect(report.message).toContain('test/slugify.test.js');
+    expect(report.commit).toBeUndefined();
+    expect(await git(repo.dir, ['rev-list', '--all', '--count'])).toBe(before);
+  }, 900_000);
+
+  it('rejects a phase-two runner config change as closure_violation', async () => {
+    const { report } = await run(
+      phaseEnv({
+        STUB_WRITE_PATH_IMPLEMENTATION: 'vitest.config.js',
+        STUB_WRITE_CONTENT_IMPLEMENTATION: 'export default {};\n',
+      }),
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.category).toBe('closure_violation');
+    expect(report.message).toContain('vitest.config.js');
+    expect(report.commit).toBeUndefined();
+  }, 900_000);
+
+  it('rejects a phase-one closure change while allowing declared test writes', async () => {
+    const { report } = await run(
+      phaseEnv({
+        STUB_WRITE_PATH_TESTS: 'vitest.config.js',
+        STUB_WRITE_CONTENT_TESTS: 'export default {};\n',
+      }),
+    );
+
+    expect(report.status).toBe('failed');
+    expect(report.category).toBe('closure_violation');
+    expect(report.message).toContain('vitest.config.js');
+    await expect(access(join(repo.dir, 'test/slugify.test.js'))).rejects.toThrow();
+  }, 900_000);
+
+  it('records the frozen-set digest in the run manifest', async () => {
+    const { report, artifacts } = await run();
+
+    expect(report.status).toBe('succeeded');
+    const manifest = JSON.parse(
+      await readFile(join(artifacts, 'run-manifest.json'), 'utf8'),
+    ) as { frozen: { digest: string } };
+    expect(manifest.frozen.digest).toMatch(/^[a-f0-9]{64}$/);
+  }, 900_000);
+
   it('rejects implementation written during the tests phase', async () => {
     const before = await git(repo.dir, ['rev-list', '--all', '--count']);
     const { report } = await run(

@@ -1,10 +1,12 @@
 import picomatch from 'picomatch';
 
 import { escapesTree } from '../util/paths.js';
+import { frozenChange } from '../verify/frozen.js';
 import type { Change } from './source-diff.js';
 
 export type DiffViolation =
   | 'no_changes'
+  | 'closure_violation'
   | 'out_of_scope'
   | 'dependency_change'
   | 'unsafe_symlink';
@@ -52,9 +54,19 @@ export function validateChanges(
   changes: Change[],
   scope: readonly string[],
   phase = 'agent',
+  frozenPaths: readonly string[] = [],
 ): ValidatedChangeSet {
   if (changes.length === 0) {
     throw new DiffValidationError('no_changes', `the ${phase} phase made no changes to the workspace`);
+  }
+
+  const changedFrozenFile = frozenChange(changes, frozenPaths);
+  if (changedFrozenFile !== undefined) {
+    throw new DiffValidationError(
+      'closure_violation',
+      `"${changedFrozenFile.path}" is frozen during the ${phase} phase`,
+      changedFrozenFile.path,
+    );
   }
 
   for (const change of changes) {

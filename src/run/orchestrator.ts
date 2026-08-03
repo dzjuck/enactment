@@ -16,7 +16,7 @@ import { PROVIDER_ALLOWLIST } from '../config/pins.js';
 import { dependencyCacheKey, installCommand, lockfileHash } from '../deps/cache-key.js';
 import { DependencyCache, ensureDependencySnapshot } from '../deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
-import { codeBehaviorDiffs, sourceDiff } from '../diff/source-diff.js';
+import { codeBehaviorDiffs, manifestFromTar, sourceDiff } from '../diff/source-diff.js';
 import { DiffValidationError, validateChanges } from '../diff/validate.js';
 import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
 import { acceptChanges } from '../git/accept.js';
@@ -30,6 +30,7 @@ import { baselineArtifact, captureBaseline } from '../verify/baseline.js';
 import { classifyRed, redResultsArtifact } from '../verify/red.js';
 import type { TestRunResults } from '../verify/results.js';
 import { TestRunError } from '../verify/test-run.js';
+import { frozenPathsForPhase, frozenSetEvidence } from '../verify/frozen.js';
 import { attemptLabels, newAttemptId } from '../volume/naming.js';
 import { snapshotWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
@@ -120,7 +121,9 @@ function classify(phase: RunPhase, error: unknown): FailureCategory {
   const primary = error instanceof OwnershipError ? error.cause : error;
 
   if (primary instanceof PhaseFailure) return primary.category;
-  if (primary instanceof DiffValidationError) return 'invalid_change';
+  if (primary instanceof DiffValidationError) {
+    return primary.violation === 'closure_violation' ? 'closure_violation' : 'invalid_change';
+  }
   return PHASE_CATEGORY[phase];
 }
 
@@ -323,7 +326,13 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
 
     type AgentPhase = 'agent' | 'tests' | 'implementation';
 
-    const runAgentAndValidate = async (agentPhase: AgentPhase, prompt: string, scope: string[], beforeTar: Buffer) => {
+    const runAgentAndValidate = async (
+      agentPhase: AgentPhase,
+      prompt: string,
+      scope: string[],
+      beforeTar: Buffer,
+      frozenPaths: readonly string[] = [],
+    ) => {
       const phaseArtifacts =
         agentPhase === 'agent' ? options.artifactDir : join(options.artifactDir, agentPhase);
       const agentPolicy =
@@ -433,7 +442,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       snapshotHashes[agentPhase === 'tests' ? 'tests' : 'implementation'] = snapshot.hash;
       const snapshotTar = await snapshots.read(snapshot.hash);
       const changes = await sourceDiff(beforeTar, snapshotTar);
-      const validated = validateChanges(changes, scope, agentPhase);
+      const validated = validateChanges(changes, scope, agentPhase, frozenPaths);
       await writeFile(
         join(phaseArtifacts, 'source-diff.json'),
         redact(
@@ -457,6 +466,11 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
         testWritingPrompt(task),
         task.test_paths,
         tar,
+        frozenPathsForPhase(
+          'tests',
+          task.verification.closure_paths,
+          task.test_paths,
+        ),
       );
       await phase('red');
       const redDir = join(options.artifactDir, 'red');
@@ -506,11 +520,21 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
           `invalid RED: ${redVerdict.reasons.map((reason) => reason.category).join(', ')}`,
         );
       }
+      const implementationFrozenPaths = frozenPathsForPhase(
+        'implementation',
+        task.verification.closure_paths,
+        task.test_paths,
+      );
+      manifest.frozen = frozenSetEvidence(
+        await manifestFromTar(testsRun.snapshotTar),
+        implementationFrozenPaths,
+      );
       const implementationRun = await runAgentAndValidate(
         'implementation',
         implementationPrompt(task),
         task.implementation_paths,
         testsRun.snapshotTar,
+        implementationFrozenPaths,
       );
       const diffs = await codeBehaviorDiffs(tar, testsRun.snapshotTar, implementationRun.snapshotTar);
       implementation = implementationRun.snapshot;

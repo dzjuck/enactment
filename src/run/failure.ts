@@ -6,6 +6,7 @@
 export const FAILURE_CATEGORIES = [
   'baseline_failed',
   'red_invalid',
+  'closure_violation',
   'provider_connectivity_timeout',
   'agent_timeout',
   'agent_failed',
