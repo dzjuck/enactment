@@ -1,0 +1,32 @@
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 1,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 1,
+  "numPassedTests": 1,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "startTime": 1750000000000,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["slugify"],
+          "fullName": "slugify lowercases and hyphenates",
+          "status": "passed",
+          "title": "lowercases and hyphenates",
+          "duration": 1,
+          "failureMessages": []
+        }
+      ],
+      "startTime": 1750000000000,
+      "endTime": 1750000000001,
+      "status": "passed",
+      "message": "",
+      "name": "/workspace/test/slugify.test.js"
+    }
+  ]
+}

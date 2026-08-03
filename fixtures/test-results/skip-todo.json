@@ -1,0 +1,38 @@
+{
+  "numTotalTestSuites": 1,
+  "numPassedTestSuites": 1,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 2,
+  "numPassedTests": 0,
+  "numFailedTests": 0,
+  "numPendingTests": 1,
+  "numTodoTests": 1,
+  "startTime": 1750000000000,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["slugify"],
+          "fullName": "slugify skips unsupported input",
+          "status": "skipped",
+          "title": "skips unsupported input",
+          "failureMessages": []
+        },
+        {
+          "ancestorTitles": ["slugify"],
+          "fullName": "slugify supports unicode",
+          "status": "todo",
+          "title": "supports unicode",
+          "failureMessages": []
+        }
+      ],
+      "startTime": 1750000000000,
+      "endTime": 1750000000001,
+      "status": "passed",
+      "message": "",
+      "name": "/workspace/test/slugify.test.js"
+    }
+  ]
+}
