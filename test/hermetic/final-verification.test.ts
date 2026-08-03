@@ -2,10 +2,13 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ArtifactStore } from '../../src/artifacts/store.js';
 import type { RuntimeImages } from '../../src/docker/images.js';
+import * as cleanup from '../../src/run/cleanup.js';
+import { CleanupError } from '../../src/run/cleanup.js';
+import { OwnershipError } from '../../src/run/ownership.js';
 import { FinalVerificationError, verifyPlanHead } from '../../src/verify/final.js';
 import { createM2Repo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
@@ -20,6 +23,7 @@ const dirs: string[] = [];
 const repos: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   await Promise.all(repos.splice(0).map((dir) => removeRepo(dir)));
 });
@@ -83,5 +87,31 @@ describe('final branch verification preconditions', () => {
     expect((error as Error).message).toContain('f'.repeat(40));
     expect(await entries(artifactDir)).toEqual([]);
     expect(await entries(snapshotDir)).toEqual([]);
+  });
+
+  it('preserves both the verifier failure and a cleanup failure', async () => {
+    const repo = await repository();
+    const artifactDir = await scratch();
+    const snapshotDir = await scratch();
+    const controller = new AbortController();
+    controller.abort();
+
+    vi.spyOn(cleanup, 'sweepAttempt').mockRejectedValueOnce(
+      new CleanupError(['volume ai-harness-final still present']),
+    );
+
+    const error = await verifyPlanHead({
+      repoPath: repo.dir,
+      head: repo.commit,
+      commands: [['node', '--version']],
+      artifactDir,
+      snapshots: new ArtifactStore(snapshotDir),
+      images: IMAGES,
+      signal: controller.signal,
+    }).catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(OwnershipError);
+    expect((error as Error).message).toContain('final verification was interrupted');
+    expect((error as Error).message).toContain('volume ai-harness-final still present');
   });
 });

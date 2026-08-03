@@ -10,6 +10,7 @@ import type { RuntimeImages } from '../docker/images.js';
 import { exportCommit } from '../git/export.js';
 import { withPhaseNetworks } from '../net/manage.js';
 import { CleanupError, describeError, sweepAttempt } from '../run/cleanup.js';
+import { OwnershipError } from '../run/ownership.js';
 import { runtimeSection, type RuntimeSection } from '../run/manifest.js';
 import { stateDirectory } from '../state/paths.js';
 import { CONTRACT_TIMEOUTS } from '../run/timeout.js';
@@ -166,7 +167,17 @@ export async function verifyPlanHead(
     cleanupErrors.push(...(error instanceof CleanupError ? error.errors : [describeError(error)]));
   }
 
-  if ('error' in outcome) throw outcome.error;
+  if ('error' in outcome) {
+    if (cleanupErrors.length > 0) {
+      throw new OwnershipError(
+        `final verification ${attempt}`,
+        outcome.error,
+        new CleanupError(cleanupErrors),
+      );
+    }
+
+    throw outcome.error;
+  }
 
   const result: FinalVerificationResult =
     cleanupErrors.length === 0 ? outcome.value : { ...outcome.value, cleanupErrors };
