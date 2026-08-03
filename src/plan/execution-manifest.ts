@@ -164,12 +164,32 @@ export async function buildManifest(options: BuildManifestOptions): Promise<Exec
   };
 }
 
+/**
+ * The approved manifest's own identity.
+ *
+ * Hashed from its content rather than its file bytes, so that reformatting or moving the file
+ * is not mistaken for a different approval, while any approved value changing is.
+ */
+export function manifestHash(manifest: ExecutionManifest): string {
+  const canonical = JSON.stringify({
+    version: manifest.version,
+    plan_file: manifest.plan_file,
+    repository: manifest.repository,
+    inputs: manifest.inputs,
+    runtime: manifest.runtime,
+  });
+
+  return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
+}
+
 export async function writeManifest(path: string, manifest: ExecutionManifest): Promise<void> {
   await writeFile(path, stringify({ execution_manifest: manifest }));
 }
 
 export interface LoadedManifest {
   manifest: ExecutionManifest;
+  /** Canonical identity of the approved manifest; what the state store keys a plan on. */
+  manifestHash: string;
   /** Absolute, resolved against the manifest's own directory. */
   planFile: string;
   plan: Plan;
@@ -206,7 +226,7 @@ export async function loadManifest(path: string): Promise<LoadedManifest> {
     );
   }
 
-  return { manifest, planFile, plan, hash };
+  return { manifest, manifestHash: manifestHash(manifest), planFile, plan, hash };
 }
 
 export interface ApprovedInputs {

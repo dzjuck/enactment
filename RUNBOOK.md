@@ -13,7 +13,9 @@ crash. Nothing here uses the test suites.
 ## Prerequisites
 
 * Docker or OrbStack running (`docker version` must report a server).
-* Node.js ≥ 22.
+* Node.js ≥ 22.13 — the harness stores plan state in `node:sqlite`, which is available
+  without an opt-in flag from that release. Node prints an experimental warning for it on
+  stderr; stdout stays valid JSON.
 * `codex login` run once on the host. The harness reads `~/.codex/auth.json` exactly once to
   seed its own store, then never writes to your Codex home again. Once that store exists it is
   the source of truth for the refresh chain and a later `codex login` does **not** replace it —

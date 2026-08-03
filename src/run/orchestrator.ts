@@ -1,5 +1,4 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { execa } from 'execa';
@@ -41,6 +40,7 @@ import { attemptLabels, newAttemptId } from '../volume/naming.js';
 import { snapshotWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
+import { stateDirectory } from '../state/paths.js';
 import { singlePlanStep } from './bridge.js';
 import { CleanupError, describeError, releaseAll, sweepAttempt, withCleanupOutcome } from './cleanup.js';
 import { PhaseFailure, type FailureCategory } from './failure.js';
@@ -121,11 +121,6 @@ const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
   verify: 'verification_failed',
   commit: 'internal_error',
 };
-
-/** Harness state — credentials and caches — lives outside the artifact directory. */
-export function stateDirectory(): string {
-  return process.env.HARNESS_STATE_DIR ?? join(homedir(), '.local', 'state', 'ai-harness');
-}
 
 function classify(phase: RunPhase, error: unknown): FailureCategory {
   // A cleanup failure wraps the phase failure it happened alongside; the phase failure is
