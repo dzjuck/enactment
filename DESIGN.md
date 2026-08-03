@@ -995,11 +995,17 @@ Structured results required:
 * Jest JSON;
 * Pytest JUnit.
 
-Valid RED requires:
+Valid RED is category-specific:
 
-* expected tests discovered;
-* expected tests failed;
-* approved failure category;
+* `assertion_failure` requires every expected test ID to be discovered and failed;
+* `missing_implementation` accepts collection failure without discovered IDs only when the missing
+  relative specifier resolves under an approved implementation path;
+* `expected_type_failure` accepts an undiscovered expected ID only when the type failure is directly
+  attributable to the declared missing behavior.
+
+Every valid category also requires:
+
+* the category is approved by the task;
 * no new unrelated failures;
 * no unexpected skips;
 * runner completed normally.

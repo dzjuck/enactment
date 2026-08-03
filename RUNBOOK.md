@@ -35,6 +35,38 @@ starts and names this command.
 
 ## 2. Declare a task
 
+For a tests-first behavior change:
+
+```yaml
+type: code_behavior
+id: add-slugify
+prompt: Add URL-safe slugify behavior.
+implementation_paths:
+  - src/slugify.js
+test_paths:
+  - test/slugify.test.js
+expected_test_ids:
+  - slugify lowercases and hyphenates words
+allowed_red_categories:
+  - assertion_failure
+  - missing_implementation
+verification:
+  test_command: ["npx", "--no-install", "vitest", "run", "--globals"]
+  commands:
+    - ["npx", "--no-install", "vitest", "run", "--globals"]
+```
+
+`expected_test_ids` uses Vitest's full test name: ancestor `describe` titles followed by the `it`
+title. For `describe('slugify')` and `it('lowercases and hyphenates words')`, declare
+`slugify lowercases and hyphenates words` exactly.
+
+The harness captures the baseline, asks one agent to write tests, verifies RED, freezes tests and
+runner inputs, asks a second agent for implementation, verifies GREEN offline, runs the opaque
+commands, then commits both changes. Phase artifacts live under `baseline/`, `tests/`, `red/`,
+`implementation/`, and `green/`.
+
+The original single-agent task remains available:
+
 ```yaml
 id: add-slugify
 prompt: |
@@ -140,5 +172,9 @@ refuses to run and names what survived.
 | `setup_timeout` / `setup_failed` | The dependency install overran its budget or failed. No cache entry is published. |
 | `agent_timeout` / `agent_failed` | The agent was killed at its deadline or exited non-zero. The attempt workspace is discarded; no commit. |
 | `invalid_change` | The agent wrote outside `implementation_paths`, touched a dependency manifest, added an unsafe symlink, or changed nothing. |
-| `verification_failed` | The declared commands failed. The output is in `verification.json`. |
+| `baseline_failed` | Existing tests failed, an expected test already existed, or baseline retry policy blocked the run. |
+| `red_invalid` | New tests did not fail for an allowed, behavior-related reason. Read `red/verdict.json`. |
+| `closure_violation` | An agent changed a frozen test, runner configuration, setup file, manifest, or lockfile. |
+| `test_contract_disputed` | The implementation agent reported that the frozen tests are wrong. Read `implementation/test-contract-dispute.md`; no commit was created. |
+| `verification_failed` | GREEN or an opaque verification command failed. Read `green/verdict.json` and `verification.json`. |
 | Report `failed` with a `commit` and a copy-back cleanup error | The work was verified and committed, but the rotated credential could not be saved. Re-authenticate (§5) before the next run. |

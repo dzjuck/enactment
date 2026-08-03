@@ -7,16 +7,20 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PROXY_RECORDS_FILE } from '../../src/proxy/container.js';
 import { runProduction } from '../../src/run/production.js';
 import { runtimeImages } from '../helpers/images.js';
-import { createTargetRepo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
 const PROMPT =
-  'Implement the slugify function in src/slugify.js so that test/slugify.test.js passes. ' +
-  'Lowercase the title, drop punctuation, and join words with single hyphens with no ' +
-  'leading or trailing hyphen. Edit only src/slugify.js.';
+  'Add slugify behavior that lowercases titles, drops punctuation, and joins words with ' +
+  'single hyphens with no leading or trailing hyphen.';
 
 interface Manifest {
   runtime: Record<string, string>;
-  usage?: { output_tokens: number };
+  usage?: {
+    tests: { output_tokens: number };
+    implementation: { output_tokens: number };
+  };
+  red?: { valid: boolean; category: string };
+  green?: { valid: boolean };
   result: { status: string; cleanup_errors?: string[] };
 }
 
@@ -31,7 +35,7 @@ let taskFile: string;
 let artifacts: string;
 
 beforeAll(async () => {
-  repo = await createTargetRepo();
+  repo = await createM2Repo();
   root = await mkdtemp(join(tmpdir(), 'harness-live-'));
   artifacts = join(root, 'artifacts');
 
@@ -39,13 +43,19 @@ beforeAll(async () => {
   await writeFile(
     taskFile,
     [
+      'type: code_behavior',
       'id: live-slugify',
       `prompt: ${JSON.stringify(PROMPT)}`,
       'implementation_paths:',
       '  - src/slugify.js',
+      'test_paths:',
+      '  - test/slugify.test.js',
+      'expected_test_ids:',
+      '  - slugify lowercases and hyphenates words',
       'verification:',
+      '  test_command: ["npx", "--no-install", "vitest", "run", "--globals"]',
       '  commands:',
-      '    - ["npx", "--no-install", "vitest", "run", "--config", "vitest.config.js"]',
+      '    - ["npx", "--no-install", "vitest", "run", "--globals"]',
       '',
     ].join('\n'),
   );
@@ -72,8 +82,8 @@ afterAll(async () => {
  * report as a cleanup error, which fails the run: a live test that discarded a rotated token
  * and still went green is the exact failure this arrangement rules out.
  */
-describe('real Codex agent run', () => {
-  it('drives the production path to a verified, harness-owned commit', async () => {
+describe('real Codex tests-first run', () => {
+  it('uses separate real agents to write tests and implementation, then commits both', async () => {
     const images = await runtimeImages();
 
     // No store or cache overrides: the persistent harness state is deliberately what is used.
@@ -83,14 +93,17 @@ describe('real Codex agent run', () => {
     expect(report.status).toBe('succeeded');
     expect(report.commit).toMatch(/^[0-9a-f]{40}$/);
 
-    // The agent really wrote the implementation, and only it.
+    // Separate agents really wrote the declared test and implementation.
     const committed = await git(repo.dir, [
       'show',
       '--name-only',
       '--pretty=format:',
       report.commit ?? '',
     ]);
-    expect(committed.split('\n').filter((line) => line !== '')).toEqual(['src/slugify.js']);
+    expect(committed.split('\n').filter((line) => line !== '')).toEqual([
+      'src/slugify.js',
+      'test/slugify.test.js',
+    ]);
     expect(await git(repo.dir, ['show', `${report.commit ?? ''}:src/slugify.js`])).not.toContain(
       'not implemented',
     );
@@ -104,12 +117,21 @@ describe('real Codex agent run', () => {
     expect(manifest.runtime.verifier_image_id).toBe(images.verifier.id);
     expect(manifest.runtime.setup_image_id).toBe(images.setup.id);
     expect(manifest.runtime.proxy_image_id).toBe(images.proxy.id);
-    expect(manifest.usage?.output_tokens).toBeGreaterThan(0);
+    expect(manifest.usage?.tests.output_tokens).toBeGreaterThan(0);
+    expect(manifest.usage?.implementation.output_tokens).toBeGreaterThan(0);
+    expect(manifest.red).toMatchObject({ valid: true, category: 'missing_implementation' });
+    expect(manifest.green).toMatchObject({ valid: true });
     expect(manifest.result.cleanup_errors).toBeUndefined();
 
     // §35 regression: the model was reached, and only through the allowlist.
-    const records = (await readFile(join(artifacts, PROXY_RECORDS_FILE), 'utf8'))
-      .split('\n')
+    const records = (
+      await Promise.all(
+        ['tests', 'implementation'].map((phase) =>
+          readFile(join(artifacts, phase, PROXY_RECORDS_FILE), 'utf8'),
+        ),
+      )
+    )
+      .flatMap((content) => content.split('\n'))
       .filter((line) => line !== '')
       .map((line) => JSON.parse(line) as ProxyRecord);
 
