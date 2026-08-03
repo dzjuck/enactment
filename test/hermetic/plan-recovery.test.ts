@@ -610,3 +610,96 @@ describe('startup snapshot reconciliation', () => {
     expect(await readdir(join(h.artifactsRoot, 'demo-plan', 'snapshots'))).toEqual([]);
   });
 });
+
+describe('a commit whose teardown failed', () => {
+  /**
+   * `withCleanupOutcome` turns a verified, committed run into a `failed` report that still
+   * carries its commit — a rotated credential that could not be saved, say. Git has already
+   * made that acceptance visible, so the database has to record it: leaving the step pending
+   * would rerun it from a parent the branch has already moved past, and every later run would
+   * fail closed on divergence.
+   */
+  it('records the acceptance, fails the plan, and starts no later step', async () => {
+    const h = await harness();
+    const seen: StepExecutionOptions[] = [];
+
+    const report = await runPlan(
+      { approved: h.approved, store: h.store, artifactsRoot: h.artifactsRoot },
+      {
+        execute: async (options) => {
+          seen.push(options);
+          const accepted = await acceptFor(h.repo, options);
+          return {
+            ...accepted,
+            status: 'failed' as const,
+            category: 'internal_error' as const,
+            message: 'cleanup failed: run credential could not be saved',
+            cleanupErrors: ['volume ai-harness-auth-x still present'],
+          };
+        },
+        verifyFinal: passingFinal,
+      },
+    );
+
+    // Only the first step ran, and the plan stopped.
+    expect(seen.map((options) => options.step.id)).toEqual(['first-step']);
+    expect(report.state).toBe('failed');
+    expect(report.cleanupErrors).toEqual(['volume ai-harness-auth-x still present']);
+    expect(report.failure?.message).toContain('credential');
+
+    // The acceptance Git made visible is recorded: step completed, head moved to it.
+    const commit = await git(h.repo.dir, ['rev-parse', BRANCH]);
+    expect(report.steps[0]).toMatchObject({ status: 'completed', commit });
+    expect(report.steps[1]?.status).toBe('pending');
+    expect(report.head).toBe(commit);
+
+    const plan = h.store.planForManifest(h.repo.dir, h.approved.manifestHash);
+    expect(plan?.headCommit).toBe(commit);
+    expect(h.store.attempts(h.store.steps(plan?.row ?? 0)[0]?.row ?? 0)[0]?.state).toBe(
+      'completed',
+    );
+  });
+
+  it('continues from the recorded commit on the next run, without duplicating it', async () => {
+    const h = await harness();
+
+    const first = await runPlan(
+      { approved: h.approved, store: h.store, artifactsRoot: h.artifactsRoot },
+      {
+        execute: async (options) => ({
+          ...(await acceptFor(h.repo, options)),
+          status: 'failed' as const,
+          category: 'internal_error' as const,
+          message: 'cleanup failed',
+          cleanupErrors: ['volume still present'],
+        }),
+        verifyFinal: passingFinal,
+      },
+    );
+    expect(first.state).toBe('failed');
+
+    const store = reopen(h);
+    const seen: StepExecutionOptions[] = [];
+
+    const second = await runPlan(
+      { approved: h.approved, store, artifactsRoot: h.artifactsRoot },
+      {
+        execute: (options) => {
+          seen.push(options);
+          return acceptFor(h.repo, options);
+        },
+        verifyFinal: passingFinal,
+      },
+    );
+
+    // The accepted step is not rerun; the next one starts from its commit.
+    expect(seen.map((options) => options.step.id)).toEqual(['second-step']);
+    expect(seen[0]?.parentCommit).toBe(first.steps[0]?.commit);
+    expect(seen[0]?.branchExists).toBe(true);
+
+    expect(second.state).toBe('completed');
+    expect(second.steps[0]?.commit).toBe(first.steps[0]?.commit);
+    // base + two steps: the first commit was never made twice.
+    expect(await git(h.repo.dir, ['rev-list', '--count', BRANCH])).toBe('3');
+  });
+});

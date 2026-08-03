@@ -471,3 +471,151 @@ describe('snapshot retention', () => {
     );
   });
 });
+
+describe('final verification failure boundary', () => {
+  it('fails the plan and reports the error when the verifier throws', async () => {
+    const { repo, approved, store, artifactsRoot } = await harness(['first-step']);
+    const seen: StepExecutionOptions[] = [];
+
+    const report = await runPlan(
+      { approved, store, artifactsRoot },
+      {
+        execute: committingExecutor(repo, seen),
+        verifyFinal: () => Promise.reject(new Error('final head does not resolve')),
+      },
+    );
+
+    expect(report.state).toBe('failed');
+    expect(report.head).toBe(await git(repo.dir, ['rev-parse', 'ai-harness/demo-plan']));
+    expect(report.failure?.message).toContain('final head does not resolve');
+    expect(report.steps[0]?.status).toBe('completed');
+
+    // The report exists on disk: a thrown verifier is not a silent exit.
+    const stored = JSON.parse(
+      await readFile(join(artifactsRoot, 'demo-plan/reports/invocation-1.json'), 'utf8'),
+    ) as PlanReport;
+    expect(stored.state).toBe('failed');
+  });
+
+  it('fails the plan when the verifier passes but could not release its resources', async () => {
+    const { repo, approved, store, artifactsRoot } = await harness(['first-step']);
+    const seen: StepExecutionOptions[] = [];
+
+    const report = await runPlan(
+      { approved, store, artifactsRoot },
+      {
+        execute: committingExecutor(repo, seen),
+        verifyFinal: async (options) => ({
+          ...(await passingFinal()),
+          head: options.head,
+          cleanupErrors: ['volume ai-harness-ws-final still present'],
+        }),
+      },
+    );
+
+    expect(report.state).toBe('failed');
+    expect(report.finalVerification?.status).toBe('pass');
+    expect(report.cleanupErrors).toEqual(['volume ai-harness-ws-final still present']);
+    expect(report.steps[0]?.status).toBe('completed');
+  });
+
+  it('still completes on an ordinary pass', async () => {
+    const { repo, approved, store, artifactsRoot } = await harness(['first-step']);
+    const seen: StepExecutionOptions[] = [];
+
+    const report = await runPlan(
+      { approved, store, artifactsRoot },
+      { execute: committingExecutor(repo, seen), verifyFinal: passingFinal },
+    );
+
+    expect(report.state).toBe('completed');
+    expect(report.cleanupErrors).toBeUndefined();
+  });
+});
+
+describe('completed report durability', () => {
+  /**
+   * The failure surfaces as a rejection rather than a report, and has to: the coordinator
+   * could not write a report, so it has no way to hand back one that also exists on disk.
+   * `execute` in production.ts turns this into a non-zero JSON error for the operator.
+   */
+  it('does not mark the plan completed when its report cannot be written', async () => {
+    const { repo, approved, store, artifactsRoot } = await harness(['first-step']);
+    const seen: StepExecutionOptions[] = [];
+
+    await expect(
+      runPlan(
+        { approved, store, artifactsRoot },
+        {
+          execute: committingExecutor(repo, seen),
+          verifyFinal: passingFinal,
+          writeReport: () => Promise.reject(new Error('artifact volume is full')),
+        },
+      ),
+    ).rejects.toThrow('artifact volume is full');
+
+    expect(store.planForManifest(repo.dir, approved.manifestHash)?.state).not.toBe('completed');
+  });
+
+  it('reruns final verification after a failed report write rather than returning a stale one', async () => {
+    const { repo, approved, store, artifactsRoot } = await harness(['first-step']);
+    const seen: StepExecutionOptions[] = [];
+
+    await expect(
+      runPlan(
+        { approved, store, artifactsRoot },
+        {
+          execute: committingExecutor(repo, seen),
+          verifyFinal: passingFinal,
+          writeReport: () => Promise.reject(new Error('artifact volume is full')),
+        },
+      ),
+    ).rejects.toThrow();
+
+    let finalRuns = 0;
+    const second = await runPlan(
+      { approved, store, artifactsRoot },
+      {
+        execute: committingExecutor(repo, seen),
+        verifyFinal: async (options) => {
+          finalRuns += 1;
+          return { ...(await passingFinal()), head: options.head };
+        },
+      },
+    );
+
+    // The accepted step is not rerun, but the plan is not completed on the strength of a
+    // report nobody could read.
+    expect(seen).toHaveLength(1);
+    expect(finalRuns).toBe(1);
+    expect(second.state).toBe('completed');
+    expect(store.planForManifest(repo.dir, approved.manifestHash)?.state).toBe('completed');
+  });
+
+  it('completes once the report is durable, and later runs return it unchanged', async () => {
+    const { repo, approved, store, artifactsRoot } = await harness(['first-step']);
+    const seen: StepExecutionOptions[] = [];
+
+    const first = await runPlan(
+      { approved, store, artifactsRoot },
+      { execute: committingExecutor(repo, seen), verifyFinal: passingFinal },
+    );
+    expect(first.state).toBe('completed');
+
+    const stored = JSON.parse(
+      await readFile(join(artifactsRoot, 'demo-plan/reports/invocation-1.json'), 'utf8'),
+    ) as PlanReport;
+    expect(stored.state).toBe('completed');
+
+    const second = await runPlan(
+      { approved, store, artifactsRoot },
+      {
+        execute: () => Promise.reject(new Error('should not run')),
+        verifyFinal: () => Promise.reject(new Error('should not run')),
+      },
+    );
+
+    expect(second).toEqual(first);
+    expect(seen).toHaveLength(1);
+  });
+});

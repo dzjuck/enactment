@@ -34,6 +34,12 @@ export interface CoordinatorOptions {
 export interface CoordinatorDependencies {
   execute?: (options: StepExecutionOptions) => Promise<RunReport>;
   verifyFinal?: (options: FinalVerificationOptions) => Promise<FinalVerificationResult>;
+  /**
+   * Narrow seam for the completion-ordering test. Production always uses the real writer; the
+   * only thing substituting it proves is that a report which cannot be persisted does not
+   * leave SQLite claiming the plan finished.
+   */
+  writeReport?: (planRoot: string, report: PlanReport) => Promise<void>;
 }
 
 export interface PlanStepReport {
@@ -119,6 +125,7 @@ export async function runPlan(
 ): Promise<PlanReport> {
   const execute = dependencies.execute ?? runStep;
   const verifyFinal = dependencies.verifyFinal ?? verifyPlanHead;
+  const persist = dependencies.writeReport ?? writeReport;
 
   const { approved, store } = options;
   const branch = `ai-harness/${approved.plan.id}`;
@@ -150,10 +157,12 @@ export async function runPlan(
 
   const state = (): PlanRecord => store.planByRow(plan.row) as PlanRecord;
 
-  const finish = async (extra: Partial<PlanReport> = {}): Promise<PlanReport> => {
+  /** The report as it reads right now. Composing and writing are separate so that completion
+   * can be made durable before SQLite records it. */
+  const compose = (extra: Partial<PlanReport> = {}): PlanReport => {
     const current = state();
 
-    const value: PlanReport = {
+    return {
       plan: current.planId,
       state: current.state,
       branch: current.branch,
@@ -167,8 +176,11 @@ export async function runPlan(
       })),
       ...extra,
     };
+  };
 
-    await writeReport(planRoot, value);
+  const finish = async (extra: Partial<PlanReport> = {}): Promise<PlanReport> => {
+    const value = compose(extra);
+    await persist(planRoot, value);
     return value;
   };
 
@@ -275,7 +287,7 @@ export async function runPlan(
       },
     });
 
-    if (outcome.status !== 'succeeded' || outcome.commit === undefined) {
+    if (outcome.commit === undefined) {
       store.failAttempt(
         attempt.row,
         `${outcome.category ?? 'internal_error'}: ${outcome.message ?? 'step failed'}`,
@@ -294,6 +306,12 @@ export async function runPlan(
       });
     }
 
+    // A commit exists, so Git has already made this acceptance visible — whatever the
+    // executor's final status says. Teardown can fail after a verified commit (a rotated
+    // credential that could not be saved is the known case), and recording the step as
+    // pending then would rerun it from a parent the branch has already moved past, so every
+    // later run would fail closed on divergence instead.
+    //
     // Attempt, step and head in one transaction, finished before the next step is selected.
     store.completeAcceptance({
       planRow: plan.row,
@@ -302,32 +320,92 @@ export async function runPlan(
       commit: outcome.commit,
     });
     await pruneSnapshots(store, plan.row, snapshots);
+
+    // The acceptance stands; the invocation does not. The plan stops here so the operator sees
+    // the cleanup failure, and a rerun continues after this step rather than repeating it.
+    if (outcome.status !== 'succeeded') {
+      store.setPlanState(plan.row, 'failed');
+
+      return await finish({
+        failure: {
+          step: pending.stepId,
+          phase: outcome.failedPhase,
+          category: outcome.category,
+          message: outcome.message ?? 'step failed after its commit was accepted',
+        },
+        ...(outcome.cleanupErrors === undefined ? {} : { cleanupErrors: outcome.cleanupErrors }),
+      });
+    }
   }
 
   const head = state().headCommit;
   if (head === undefined) throw new Error('every step completed but no plan head was recorded');
 
   const finalRoot = join(planRoot, 'final');
-  const finalVerification = await verifyFinal({
-    repoPath: approved.repoPath,
-    head,
-    commands: approved.plan.final_verification.commands,
-    artifactDir: await claimOrdinalDirectory(finalRoot, 'run'),
-    snapshots,
-    images: approved.images,
-    dependencyCacheDirectory: options.dependencyCacheDirectory,
-    signal: options.signal,
-  });
 
-  store.setPlanState(plan.row, finalVerification.status === 'pass' ? 'completed' : 'failed');
+  // One failure boundary for the whole phase. `verifyPlanHead` throws for an unusable input or
+  // an interrupt and returns a status otherwise, and either way the plan owes the operator a
+  // report — an exception escaping here would leave a running plan with no record of why.
+  let finalVerification: FinalVerificationResult;
+  try {
+    finalVerification = await verifyFinal({
+      repoPath: approved.repoPath,
+      head,
+      commands: approved.plan.final_verification.commands,
+      artifactDir: await claimOrdinalDirectory(finalRoot, 'run'),
+      snapshots,
+      images: approved.images,
+      dependencyCacheDirectory: options.dependencyCacheDirectory,
+      signal: options.signal,
+    });
+  } catch (error) {
+    store.setPlanState(plan.row, 'failed');
+    await pruneSnapshots(store, plan.row, snapshots);
+
+    return await finish({
+      failure: { message: error instanceof Error ? error.message : String(error) },
+    });
+  }
+
+  // Passing while leaking a resource is not a pass: the branch was verified, but the run
+  // cannot account for what it left on the daemon, and a green exit code would say it can.
+  const cleanupErrors = finalVerification.cleanupErrors ?? [];
+  const verified = finalVerification.status === 'pass' && cleanupErrors.length === 0;
+
+  const outcome: Partial<PlanReport> = {
+    finalVerification,
+    ...(cleanupErrors.length === 0 ? {} : { cleanupErrors }),
+    ...(verified
+      ? {}
+      : {
+          failure: {
+            message:
+              finalVerification.status === 'pass'
+                ? `final verification passed but could not release: ${cleanupErrors.join('; ')}`
+                : `final verification ${finalVerification.status}`,
+          },
+        }),
+  };
+
+  // Failure keeps the existing ordering: mark the plan, then write its report.
+  if (!verified) {
+    store.setPlanState(plan.row, 'failed');
+    await pruneSnapshots(store, plan.row, snapshots);
+    return await finish(outcome);
+  }
+
+  // Completion inverts it. A completed plan is a no-op that answers with its stored report, so
+  // a database claiming completion without a readable completed report would answer with
+  // nothing — or worse, with an older failed one. The report is therefore made durable first,
+  // and the state written as `completed` even though SQLite still says `running` at this
+  // moment. If the write fails the plan stays retryable and final verification runs again.
+  const completed = compose({ ...outcome, state: 'completed' });
+  await persist(planRoot, completed);
+
+  store.setPlanState(plan.row, 'completed');
   await pruneSnapshots(store, plan.row, snapshots);
 
-  return await finish({
-    finalVerification,
-    ...(finalVerification.status === 'pass'
-      ? {}
-      : { failure: { message: `final verification ${finalVerification.status}` } }),
-  });
+  return completed;
 }
 
 /**
