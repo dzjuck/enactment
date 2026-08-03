@@ -15,6 +15,7 @@ import {
 } from '../verify/final.js';
 import type { RunInjection } from './inject.js';
 import { runStep, type RunReport, type StepExecutionOptions } from './orchestrator.js';
+import { reconcile } from './recovery.js';
 
 export interface CoordinatorOptions {
   approved: ApprovedInputs;
@@ -71,13 +72,23 @@ async function refExists(repoPath: string, branch: string): Promise<boolean> {
 }
 
 /**
- * Next free ordinal for a `<prefix>-<n>` family in one directory.
+ * Claim the next free `<prefix>-<n>` directory, creating it.
+ *
+ * Creating it is what makes the claim real: an executor that dies before writing anything
+ * would otherwise leave the ordinal unused, and the next recovery run would write over the
+ * evidence of the one before it.
  *
  * `run-<n>` under an attempt counts recovery runs, `run-<n>` under `final/` counts final
  * verifications and `invocation-<n>` counts coordinator invocations. They are read from the
  * directory they belong to, because three unrelated counters sharing one variable is how an
  * implementation writes evidence into the wrong place.
  */
+async function claimOrdinalDirectory(dir: string, prefix: string): Promise<string> {
+  const claimed = join(dir, `${prefix}-${String(await nextOrdinal(dir, prefix))}`);
+  await mkdir(claimed, { recursive: true });
+  return claimed;
+}
+
 async function nextOrdinal(dir: string, prefix: string): Promise<number> {
   let entries: string[];
   try {
@@ -161,9 +172,28 @@ export async function runPlan(
     return value;
   };
 
-  // Step 4's acceptance guard catches the same collision, but only after a whole agent run
-  // has been paid for. This one costs nothing.
-  if (plan.headCommit === undefined && (await refExists(approved.repoPath, branch))) {
+  // Startup reconciliation: finish an interrupted acceptance and prove Git and SQLite still
+  // agree, before anything is selected to run. A disagreement stops the plan without changing
+  // either side.
+  try {
+    await reconcile(approved, store, plan, snapshots);
+  } catch (error) {
+    store.setPlanState(plan.row, 'failed');
+    return await finish({
+      failure: { message: error instanceof Error ? error.message : String(error) },
+    });
+  }
+
+  // Crash leftovers: blobs no live row references. A `running` row here belongs to a dead
+  // process, so its snapshots are leftovers too — the step reruns from its stored parent and
+  // takes fresh ones.
+  await pruneSnapshots(store, plan.row, snapshots, { atStartup: true });
+
+  // After reconciliation, not before: an interrupted acceptance legitimately leaves a commit
+  // on the branch that the database has not recorded yet, and checking first would report
+  // the plan's own work as somebody else's ref. Step 4's acceptance guard catches the same
+  // collision, but only once a whole agent run has been paid for; this one costs nothing.
+  if (state().headCommit === undefined && (await refExists(approved.repoPath, branch))) {
     store.setPlanState(plan.row, 'failed');
     return await finish({
       failure: {
@@ -189,9 +219,15 @@ export async function runPlan(
       throw new Error(`plan has no step at position ${String(pending.position)}`);
     }
 
-    const attemptId = options.injection?.attempt ?? newAttemptId();
+    // A `running` row is an attempt whose process died: reuse its id so the whole step reruns
+    // under one identity, and give the rerun its own `run-<n>` directory rather than writing
+    // over the evidence the killed run left. A `failed` row is a recorded outcome and is never
+    // reused — an explicit retry is a new attempt.
+    const crashed = store.attempts(pending.row).find((entry) => entry.state === 'running');
+
+    const attemptId = crashed?.attemptId ?? options.injection?.attempt ?? newAttemptId();
     const attemptRoot = join(planRoot, 'steps', pending.stepId, attemptId);
-    const artifactDir = join(attemptRoot, `run-${String(await nextOrdinal(attemptRoot, 'run'))}`);
+    const artifactDir = await claimOrdinalDirectory(attemptRoot, 'run');
     const key = idempotencyKey({
       manifestHash: approved.manifestHash,
       planId: approved.plan.id,
@@ -200,12 +236,17 @@ export async function runPlan(
       parentCommit,
     });
 
-    const attempt = store.startAttempt({
-      stepRow: pending.row,
-      attemptId,
-      parentCommit,
-      artifactPath: artifactDir,
-    });
+    const attempt =
+      crashed ??
+      store.startAttempt({
+        stepRow: pending.row,
+        attemptId,
+        parentCommit,
+        artifactPath: artifactDir,
+      });
+
+    // Persisted before execution, so a second crash allocates `run-3` rather than reusing 2.
+    if (crashed !== undefined) store.recordRecoveryRun(attempt.row, artifactDir);
 
     const outcome = await execute({
       step,
@@ -271,7 +312,7 @@ export async function runPlan(
     repoPath: approved.repoPath,
     head,
     commands: approved.plan.final_verification.commands,
-    artifactDir: join(finalRoot, `run-${String(await nextOrdinal(finalRoot, 'run'))}`),
+    artifactDir: await claimOrdinalDirectory(finalRoot, 'run'),
     snapshots,
     images: approved.images,
     dependencyCacheDirectory: options.dependencyCacheDirectory,
@@ -302,12 +343,15 @@ export async function pruneSnapshots(
   store: StateStore,
   planRow: number,
   snapshots: ArtifactStore,
+  options: { atStartup?: boolean } = {},
 ): Promise<void> {
   const keep = new Set<string>();
 
   for (const step of store.steps(planRow)) {
     for (const attempt of store.attempts(step.row)) {
-      if (attempt.state === 'running') return;
+      // Mid-run, a `running` attempt is live and still reading its own tars. At startup the
+      // same row means a process that died, and its blobs are leftovers.
+      if (attempt.state === 'running' && options.atStartup !== true) return;
       if (attempt.state === 'accepting' && attempt.candidateSnapshot !== undefined) {
         keep.add(attempt.candidateSnapshot);
       }
