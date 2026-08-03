@@ -160,3 +160,4 @@ export const taskSchema = z.preprocess(
 );
 
 export type Task = z.infer<typeof taskSchema>;
+export type CodeBehaviorTask = Extract<Task, { type: 'code_behavior' }>;

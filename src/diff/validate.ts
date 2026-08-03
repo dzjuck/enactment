@@ -50,10 +50,11 @@ function inScope(path: string, patterns: readonly string[]): boolean {
  */
 export function validateChanges(
   changes: Change[],
-  implementationPaths: readonly string[],
+  scope: readonly string[],
+  phase = 'agent',
 ): ValidatedChangeSet {
   if (changes.length === 0) {
-    throw new DiffValidationError('no_changes', 'the agent made no changes to the workspace');
+    throw new DiffValidationError('no_changes', `the ${phase} phase made no changes to the workspace`);
   }
 
   for (const change of changes) {
@@ -76,11 +77,10 @@ export function validateChanges(
       );
     }
 
-    if (!inScope(change.path, implementationPaths)) {
+    if (!inScope(change.path, scope)) {
       throw new DiffValidationError(
         'out_of_scope',
-        `"${change.path}" is outside the declared implementation paths ` +
-          `(${implementationPaths.join(', ')})`,
+        `"${change.path}" is outside the declared ${phase} scope (${scope.join(', ')})`,
         change.path,
       );
     }

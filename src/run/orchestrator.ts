@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { execa } from 'execa';
 
 import { compileCodexPolicy } from '../adapters/codex/policy.js';
+import { implementationPrompt, testWritingPrompt } from '../adapters/codex/prompts.js';
 import { runCodexAgent, type AgentRunResult } from '../adapters/codex/run.js';
 import { providerSmokeTest } from '../adapters/codex/smoke.js';
 import { ArtifactStore } from '../artifacts/store.js';
@@ -15,7 +16,7 @@ import { PROVIDER_ALLOWLIST } from '../config/pins.js';
 import { dependencyCacheKey, installCommand, lockfileHash } from '../deps/cache-key.js';
 import { DependencyCache, ensureDependencySnapshot } from '../deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
-import { sourceDiff } from '../diff/source-diff.js';
+import { codeBehaviorDiffs, sourceDiff } from '../diff/source-diff.js';
 import { DiffValidationError, validateChanges } from '../diff/validate.js';
 import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
 import { acceptChanges } from '../git/accept.js';
@@ -48,7 +49,12 @@ export const RUN_PHASES = [
   'commit',
 ] as const;
 
-export type RunPhase = (typeof RUN_PHASES)[number];
+export type RunPhase =
+  | (typeof RUN_PHASES)[number]
+  | 'tests'
+  | 'tests_diff'
+  | 'implementation'
+  | 'implementation_diff';
 
 export interface RunOptions {
   taskFile: string;
@@ -87,6 +93,10 @@ const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
   connectivity: 'internal_error',
   agent: 'agent_failed',
   diff: 'invalid_change',
+  tests: 'agent_failed',
+  tests_diff: 'invalid_change',
+  implementation: 'agent_failed',
+  implementation_diff: 'invalid_change',
   verify: 'verification_failed',
   commit: 'internal_error',
 };
@@ -254,8 +264,16 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
     );
     snapshotHashes.pre_agent = preAgent.hash;
 
-    // The agent invocation and the validation of what it produced.
-    const runAgentAndValidate = async () => {
+    type AgentPhase = 'agent' | 'tests' | 'implementation';
+
+    const runAgentAndValidate = async (agentPhase: AgentPhase, prompt: string, scope: string[], beforeTar: Buffer) => {
+      const phaseArtifacts =
+        agentPhase === 'agent' ? options.artifactDir : join(options.artifactDir, agentPhase);
+      const agentPolicy =
+        agentPhase === 'agent'
+          ? policy
+          : compileCodexPolicy({ prompt, workdir: '/workspace' });
+
       // Outside the topology, so that a network or proxy that fails to come up is attributed
       // to this phase rather than to the workspace phase that happened to precede it.
       await phase('connectivity');
@@ -284,15 +302,19 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
                 labels: attemptLabels(attempt, 'connectivity'),
               });
 
-              await phase('agent');
+              await phase(agentPhase);
               outcome = {
                 value: await runCodexAgent({
-                  prompt: task.prompt,
-                  policy,
+                  prompt,
+                  policy: agentPolicy,
                   network: networks.egress ?? '',
                   // The harness's own proxy configuration is last: an injected environment
                   // may add to the container, never redirect its egress.
-                  env: { ...options.injection?.agentEnv, ...proxied },
+                  env: {
+                    ...options.injection?.agentEnv,
+                    HARNESS_PHASE: agentPhase,
+                    ...proxied,
+                  },
                   mounts: [
                     workspaceMount(workspace),
                     dependencyMount(agentDependencies),
@@ -300,10 +322,10 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
                   ],
                   timeoutSeconds: timeouts.agent_seconds,
                   graceSeconds: timeouts.termination_grace_seconds,
-                  artifactDir: options.artifactDir,
+                  artifactDir: phaseArtifacts,
                   secrets: collectSecrets(stored),
                   images: agentImages,
-                  labels: attemptLabels(attempt, 'agent'),
+                  labels: attemptLabels(attempt, agentPhase),
                 }),
               };
             } catch (error) {
@@ -314,7 +336,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
             // contacted, so failing to write them fails a run that otherwise succeeded — but
             // it must never displace a failure that was already in flight.
             try {
-              await writeProxyRecords(handle, options.artifactDir);
+              await writeProxyRecords(handle, phaseArtifacts);
             } catch (error) {
               if (!('error' in outcome)) throw error;
             }
@@ -328,28 +350,35 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
       manifest.usage = usageSection(agentRun.usage);
 
       // §32: container logs are artifacts, and they pass through redaction like everything else.
-      await writeLog(options.artifactDir, 'agent.log', redact(agentRun.stdout + agentRun.stderr));
+      await writeLog(phaseArtifacts, 'agent.log', redact(agentRun.stdout + agentRun.stderr));
 
       if (agentRun.status !== 'completed') {
         throw new PhaseFailure(
-          'agent',
+          agentPhase,
           agentRun.status === 'timeout' ? 'agent_timeout' : 'agent_failed',
           `agent run ${agentRun.status} (exit ${String(agentRun.exitCode)})`,
         );
       }
 
-      await phase('diff');
-      const implementation = await snapshotWorkspace(
+      const diffPhase =
+        agentPhase === 'agent'
+          ? 'diff'
+          : agentPhase === 'tests'
+            ? 'tests_diff'
+            : 'implementation_diff';
+      await phase(diffPhase);
+      const snapshot = await snapshotWorkspace(
         workspace,
         snapshots,
         images,
         attemptLabels(attempt, 'snapshot'),
       );
-      snapshotHashes.implementation = implementation.hash;
-      const changes = await sourceDiff(tar, await snapshots.read(implementation.hash));
-      const validated = validateChanges(changes, task.implementation_paths);
+      snapshotHashes[agentPhase === 'tests' ? 'tests' : 'implementation'] = snapshot.hash;
+      const snapshotTar = await snapshots.read(snapshot.hash);
+      const changes = await sourceDiff(beforeTar, snapshotTar);
+      const validated = validateChanges(changes, scope, agentPhase);
       await writeFile(
-        join(options.artifactDir, 'source-diff.json'),
+        join(phaseArtifacts, 'source-diff.json'),
         redact(
           `${JSON.stringify(
             validated.changes.map((change) => ({ kind: change.kind, path: change.path })),
@@ -359,10 +388,38 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
         ),
       );
 
-      return { implementation, validated };
+      return { snapshot, snapshotTar, validated };
     };
 
-    const { implementation, validated } = await runAgentAndValidate();
+    let implementation;
+    let validated;
+
+    if (task.type === 'code_behavior') {
+      const testsRun = await runAgentAndValidate(
+        'tests',
+        testWritingPrompt(task),
+        task.test_paths,
+        tar,
+      );
+      const implementationRun = await runAgentAndValidate(
+        'implementation',
+        implementationPrompt(task),
+        task.implementation_paths,
+        testsRun.snapshotTar,
+      );
+      const diffs = await codeBehaviorDiffs(tar, testsRun.snapshotTar, implementationRun.snapshotTar);
+      implementation = implementationRun.snapshot;
+      validated = { changes: diffs.acceptance };
+    } else {
+      const run = await runAgentAndValidate(
+        'agent',
+        task.prompt,
+        task.implementation_paths,
+        tar,
+      );
+      implementation = run.snapshot;
+      validated = run.validated;
+    }
 
     await phase('verify');
     const verification = await runVerification({

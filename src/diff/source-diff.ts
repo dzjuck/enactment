@@ -92,3 +92,14 @@ export function diffManifests(before: FileManifest, after: FileManifest): Change
 export async function sourceDiff(exportTar: Buffer, snapshotTar: Buffer): Promise<Change[]> {
   return diffManifests(await manifestFromTar(exportTar), await manifestFromTar(snapshotTar));
 }
+
+export async function codeBehaviorDiffs(
+  exportTar: Buffer,
+  testsSnapshotTar: Buffer,
+  implementationSnapshotTar: Buffer,
+): Promise<{ implementation: Change[]; acceptance: Change[] }> {
+  return {
+    implementation: await sourceDiff(testsSnapshotTar, implementationSnapshotTar),
+    acceptance: await sourceDiff(exportTar, implementationSnapshotTar),
+  };
+}

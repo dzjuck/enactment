@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  codeBehaviorDiffs,
   diffManifests,
   manifestFromTar,
   sourceDiff,
@@ -113,6 +114,23 @@ describe('source diff', () => {
     const carried = validated.changes.find((entry) => entry.path === 'src/slugify.js');
     expect(carried?.entry?.content.toString()).toContain('accepted');
     expect(carried?.entry?.content.toString()).not.toContain('later');
+  });
+
+  it('uses the tests snapshot for implementation scope and the export for acceptance', async () => {
+    const testsSnapshot = await after(async () => {
+      await writeFile(join(repo.dir, 'test/slugify.test.js'), '// tests phase\n');
+    });
+    const implementationSnapshot = await after(async () => {
+      await writeFile(join(repo.dir, 'src/slugify.js'), '// implementation phase\n');
+    });
+
+    const diffs = await codeBehaviorDiffs(before, testsSnapshot, implementationSnapshot);
+
+    expect(diffs.implementation.map((entry) => entry.path)).toEqual(['src/slugify.js']);
+    expect(diffs.acceptance.map((entry) => entry.path)).toEqual([
+      'src/slugify.js',
+      'test/slugify.test.js',
+    ]);
   });
 
   it('reads a tar into a manifest with content, mode and symlink targets', async () => {

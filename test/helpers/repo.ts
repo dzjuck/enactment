@@ -42,6 +42,10 @@ export function createTargetRepo(): Promise<TargetRepo> {
   return createRepo('target-repo');
 }
 
+export function createM2Repo(): Promise<TargetRepo> {
+  return createRepo('m2-repo');
+}
+
 export async function commitAll(dir: string, message: string): Promise<string> {
   await git(dir, ['add', '-A']);
   await git(dir, ['commit', '-q', '--no-verify', '-m', message]);
