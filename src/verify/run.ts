@@ -199,7 +199,9 @@ export async function runVerification(
   await mkdir(options.artifactDir, { recursive: true });
   await writeFile(
     join(options.artifactDir, VERIFICATION_ARTIFACT),
-    redact(`${JSON.stringify(outcome.value, null, 2)}\n`),
+    // The parsed results are deliberately dropped: `tests` is a Map, which stringifies to `{}`
+    // and would read as "no tests ran". The runner's own document is stored beside this file.
+    redact(`${JSON.stringify({ ...outcome.value, testResults: undefined }, null, 2)}\n`),
   );
 
   return outcome.value;

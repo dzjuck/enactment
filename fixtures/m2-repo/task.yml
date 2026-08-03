@@ -11,5 +11,3 @@ expected_test_ids:
   - slugify lowercases and hyphenates words
 verification:
   test_command: ["npx", "--no-install", "vitest", "run", "--globals"]
-  commands:
-    - ["npx", "--no-install", "vitest", "run", "--globals"]

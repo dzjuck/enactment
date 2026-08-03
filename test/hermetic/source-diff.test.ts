@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  codeBehaviorDiffs,
   diffManifests,
   manifestFromTar,
   sourceDiff,
@@ -124,10 +123,14 @@ describe('source diff', () => {
       await writeFile(join(repo.dir, 'src/slugify.js'), '// implementation phase\n');
     });
 
-    const diffs = await codeBehaviorDiffs(before, testsSnapshot, implementationSnapshot);
+    // The two pairings the code_behavior branch takes: the implementation phase is validated
+    // against the tests snapshot, or agent #1's test files read as agent #2's out-of-scope
+    // changes; acceptance runs from the export, or the commit is missing the tests.
+    const implementationPhase = await sourceDiff(testsSnapshot, implementationSnapshot);
+    const acceptance = await sourceDiff(before, implementationSnapshot);
 
-    expect(diffs.implementation.map((entry) => entry.path)).toEqual(['src/slugify.js']);
-    expect(diffs.acceptance.map((entry) => entry.path)).toEqual([
+    expect(implementationPhase.map((entry) => entry.path)).toEqual(['src/slugify.js']);
+    expect(acceptance.map((entry) => entry.path)).toEqual([
       'src/slugify.js',
       'test/slugify.test.js',
     ]);

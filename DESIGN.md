@@ -999,9 +999,10 @@ Valid RED is category-specific:
 
 * `assertion_failure` requires every expected test ID to be discovered and failed;
 * `missing_implementation` accepts collection failure without discovered IDs only when the missing
-  relative specifier resolves under an approved implementation path;
-* `expected_type_failure` accepts an undiscovered expected ID only when the type failure is directly
-  attributable to the declared missing behavior.
+  relative specifier resolves under an approved implementation path.
+
+`expected_type_failure` is described here but not implemented: nothing concludes it yet, so it is
+not a category a task may declare.
 
 Every valid category also requires:
 

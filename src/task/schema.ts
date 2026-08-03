@@ -29,11 +29,9 @@ export const DEFAULT_VERIFICATION_CLOSURE = [
   'test/setup.*',
 ];
 
-export const RED_CATEGORIES = [
-  'assertion_failure',
-  'missing_implementation',
-  'expected_type_failure',
-] as const;
+// Only the categories the RED classifier can actually conclude. DESIGN.md §23 also lists
+// `expected_type_failure`; it is left out until something produces it.
+export const RED_CATEGORIES = ['assertion_failure', 'missing_implementation'] as const;
 
 function coversDependencyManifest(pattern: string): boolean {
   if (DEPENDENCY_MANIFESTS.includes(basename(pattern))) return true;
@@ -118,7 +116,9 @@ const codeBehaviorTask = z
     expected_test_ids: z.array(z.string().min(1)).min(1, 'must declare at least one test ID'),
     allowed_red_categories: z.array(z.enum(RED_CATEGORIES)).default([...RED_CATEGORIES]),
     verification: z.strictObject({
-      commands: z.array(command).min(1, 'must declare at least one command'),
+      // Optional here, unlike `type: task`: `test_command` is already a verification, and
+      // repeating it under `commands` runs the same suite a fourth time.
+      commands: z.array(command).default([]),
       test_command: command,
       closure_paths: z
         .array(repositoryPath('closure paths', true))

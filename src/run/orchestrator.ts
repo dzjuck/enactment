@@ -16,7 +16,7 @@ import { PROVIDER_ALLOWLIST } from '../config/pins.js';
 import { dependencyCacheKey, installCommand, lockfileHash } from '../deps/cache-key.js';
 import { DependencyCache, ensureDependencySnapshot } from '../deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
-import { codeBehaviorDiffs, manifestFromTar, sourceDiff } from '../diff/source-diff.js';
+import { manifestFromTar, sourceDiff } from '../diff/source-diff.js';
 import { DiffValidationError, validateChanges } from '../diff/validate.js';
 import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
 import { acceptChanges } from '../git/accept.js';
@@ -554,7 +554,10 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
         testsRun.snapshotTar,
         implementationFrozenPaths,
       );
-      const diffs = await codeBehaviorDiffs(tar, testsRun.snapshotTar, implementationRun.snapshotTar);
+      // Acceptance is cumulative — export → implementation — so the commit carries the tests
+      // as well. Each phase was already validated against its own diff, which is a different
+      // pairing: validating this one against either phase's scope would reject every run.
+      const acceptance = await sourceDiff(tar, implementationRun.snapshotTar);
       const dispute = captureTestContractDispute(implementationRun.validated.changes);
       if (dispute !== undefined) {
         manifest.dispute = dispute;
@@ -569,7 +572,7 @@ export async function runTask(options: RunOptions): Promise<RunReport> {
         );
       }
       implementation = implementationRun.snapshot;
-      validated = { changes: excludeDispute(diffs.acceptance) };
+      validated = { changes: excludeDispute(acceptance) };
     } else {
       const run = await runAgentAndValidate(
         'agent',

@@ -4,10 +4,7 @@ import picomatch from 'picomatch';
 
 import type { TestRunResults } from './results.js';
 
-export type ValidRedCategory =
-  | 'assertion_failure'
-  | 'missing_implementation'
-  | 'expected_type_failure';
+export type ValidRedCategory = 'assertion_failure' | 'missing_implementation';
 
 export interface RedReason {
   category:

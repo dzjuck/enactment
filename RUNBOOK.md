@@ -52,9 +52,10 @@ allowed_red_categories:
   - missing_implementation
 verification:
   test_command: ["npx", "--no-install", "vitest", "run", "--globals"]
-  commands:
-    - ["npx", "--no-install", "vitest", "run", "--globals"]
 ```
+
+`test_command` is the verification. `commands` is optional here and is for anything the test run
+does not cover — a type check, a linter — not a repeat of the suite.
 
 `expected_test_ids` uses Vitest's full test name: ancestor `describe` titles followed by the `it`
 title. For `describe('slugify')` and `it('lowercases and hyphenates words')`, declare

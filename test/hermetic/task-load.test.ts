@@ -52,11 +52,7 @@ describe('loadTask', () => {
       implementation_paths: ['src/slugify.js'],
       test_paths: ['test/slugify.test.js'],
       expected_test_ids: ['slugify lowercases and hyphenates'],
-      allowed_red_categories: [
-        'assertion_failure',
-        'missing_implementation',
-        'expected_type_failure',
-      ],
+      allowed_red_categories: ['assertion_failure', 'missing_implementation'],
       verification: {
         commands: [['npm', 'run', 'typecheck']],
         test_command: ['npx', '--no-install', 'vitest', 'run'],
@@ -84,6 +80,14 @@ describe('loadTask', () => {
         termination_grace_seconds: 10,
       },
     });
+  });
+
+  it('defaults verification.commands to none, since test_command is the verification', async () => {
+    const { task } = await loadTask(
+      fileURLToPath(new URL('../../fixtures/m2-repo/task.yml', import.meta.url)),
+    );
+
+    expect(task.verification.commands).toEqual([]);
   });
 
   it.each([

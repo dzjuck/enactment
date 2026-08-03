@@ -9,11 +9,7 @@ import type {
 
 const contract = {
   expectedTestIds: ['slugify lowercases and hyphenates words'],
-  allowedRedCategories: [
-    'assertion_failure',
-    'missing_implementation',
-    'expected_type_failure',
-  ],
+  allowedRedCategories: ['assertion_failure', 'missing_implementation'],
   implementationPaths: ['src/slugify.js'],
 };
 

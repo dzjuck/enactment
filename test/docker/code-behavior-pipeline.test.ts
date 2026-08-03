@@ -70,9 +70,7 @@ beforeAll(async () => {
 async function writeTask(
   path: string,
   knownFlakyTests: string[] = [],
-  verificationCommands: string[][] = [
-    ['npx', '--no-install', 'vitest', 'run', '--globals'],
-  ],
+  verificationCommands: string[][] = [],
 ): Promise<string> {
   await writeFile(
     path,
@@ -88,8 +86,12 @@ async function writeTask(
       '  - slugify lowercases and hyphenates words',
       'verification:',
       '  test_command: ["npx", "--no-install", "vitest", "run", "--globals"]',
-      '  commands:',
-      ...verificationCommands.map((command) => `    - ${JSON.stringify(command)}`),
+      ...(verificationCommands.length === 0
+        ? []
+        : [
+            '  commands:',
+            ...verificationCommands.map((command) => `    - ${JSON.stringify(command)}`),
+          ]),
       ...(knownFlakyTests.length === 0
         ? []
         : [

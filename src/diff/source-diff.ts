@@ -88,18 +88,7 @@ export function diffManifests(before: FileManifest, after: FileManifest): Change
   return changes.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-/** Compare the canonical export against the immutable implementation snapshot. */
+/** Compare two immutable trees — an export or an earlier snapshot against a later one. */
 export async function sourceDiff(exportTar: Buffer, snapshotTar: Buffer): Promise<Change[]> {
   return diffManifests(await manifestFromTar(exportTar), await manifestFromTar(snapshotTar));
-}
-
-export async function codeBehaviorDiffs(
-  exportTar: Buffer,
-  testsSnapshotTar: Buffer,
-  implementationSnapshotTar: Buffer,
-): Promise<{ implementation: Change[]; acceptance: Change[] }> {
-  return {
-    implementation: await sourceDiff(testsSnapshotTar, implementationSnapshotTar),
-    acceptance: await sourceDiff(exportTar, implementationSnapshotTar),
-  };
 }
