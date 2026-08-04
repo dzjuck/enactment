@@ -46,6 +46,7 @@ async function scratch(): Promise<string> {
 function step(id: string): string[] {
   return [
     `  - type: task`,
+    `    complexity: low`,
     `    id: ${id}`,
     `    observable_behavior: Do ${id}.`,
     `    implementation_paths:`,

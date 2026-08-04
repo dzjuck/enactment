@@ -13,7 +13,7 @@ export const CLAUDE_VERSION = '2.1.221';
  * DESIGN.md §7: exactly this, exact-match, no wildcards. Measured, not guessed —
  * `ab.chatgpt.com` appears but is not required, and denying it costs nothing.
  */
-export const PROVIDER_ALLOWLIST: readonly string[] = ['chatgpt.com'];
+export const CODEX_PROVIDER_ALLOWLIST: readonly string[] = ['chatgpt.com'];
 
 /**
  * The Codex version domain discovery was actually run against. Kept as its own literal so

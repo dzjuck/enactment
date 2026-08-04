@@ -4,6 +4,15 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import {
+  CLAUDE_BASE_ARGS,
+  CLAUDE_CODING_PERMISSION_ARGS,
+  CLAUDE_CODING_TOOLS,
+  CLAUDE_DIAGNOSIS_TOOLS,
+  CLAUDE_LAUNCHER,
+  CLAUDE_PRINT_FLAG,
+} from '../../src/adapters/claude/policy.js';
+import { compileCodexPolicy } from '../../src/adapters/codex/policy.js';
 import type { RuntimeImages } from '../../src/docker/images.js';
 import {
   ApprovalError,
@@ -16,6 +25,12 @@ import {
   writeManifest,
   type ExecutionManifest,
 } from '../../src/plan/execution-manifest.js';
+import {
+  NORMAL_ROUTES,
+  PROFILE_IDS,
+  PROFILES,
+  STRONGER_PROFILE_ID,
+} from '../../src/routing/profiles.js';
 import { createRepo, createTargetRepo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { planDocument } from '../helpers/plan.js';
 
@@ -30,6 +45,7 @@ const BASE = { branch: 'main', commit: 'f'.repeat(40) };
 
 const STEP = [
   'type: code_behavior',
+  'complexity: low',
   'id: add-slugify',
   'observable_behavior: Add slugify behavior.',
   'implementation_paths:',
@@ -137,29 +153,111 @@ describe('candidate execution manifest', () => {
     expect(changed.inputs.plan_hash).not.toBe(baseline.inputs.plan_hash);
   });
 
-  it('changes the policy hash for a network or dependency policy change', async () => {
-    const policy = activePolicy();
+  it('changes the plan hash when step complexity changes', async () => {
+    const dir = await workspace();
+    const manifestPath = join(dir, 'execution-manifest.yml');
+    const low = await build(await writePlan(dir, STEP, 'low.yml'), manifestPath);
+    const high = await build(
+      await writePlan(
+        dir,
+        STEP.map((line) => (line === 'complexity: low' ? 'complexity: high' : line)),
+        'high.yml',
+      ),
+      manifestPath,
+    );
 
-    expect(policyHash({ ...policy, network: { ...policy.network, allowed_hosts: ['example.com'] } }))
-      .not.toBe(policyHash(policy));
-    expect(
-      policyHash({
-        ...policy,
-        network: { ...policy.network, codex_version: '0.0.0' },
+    expect(high.inputs.plan_hash).not.toBe(low.inputs.plan_hash);
+  });
+
+  it('contains the complete fixed provider and routing contract', () => {
+    const policy = activePolicy();
+    const codex = compileCodexPolicy({
+      prompt: '<prompt>',
+      workdir: '/workspace',
+      model: '<profile-model>',
+      reasoningEffort: '<profile-effort>',
+    });
+
+    expect(policy.providers).toEqual({
+      codex: {
+        version: '0.146.0',
+        allowed_hosts: ['chatgpt.com'],
+        authentication_mode: 'rotating_subscription_json',
+        policy: {
+          files: codex.files,
+          args: codex.args,
+          env: codex.env,
+          stdin: codex.stdin,
+        },
+      },
+      claude: {
+        version: '2.1.221',
+        allowed_hosts: ['api.anthropic.com'],
+        authentication_mode: 'static_subscription_token',
+        policy: {
+          launcher: CLAUDE_LAUNCHER,
+          print_flag: CLAUDE_PRINT_FLAG,
+          base_args: [...CLAUDE_BASE_ARGS],
+          coding_tools: [...CLAUDE_CODING_TOOLS],
+          coding_permission_args: [...CLAUDE_CODING_PERMISSION_ARGS],
+          diagnosis_tools: CLAUDE_DIAGNOSIS_TOOLS,
+        },
+      },
+    });
+    expect(policy.routing).toEqual({
+      profiles: PROFILE_IDS.map((id) => PROFILES[id]),
+      normal_routes: NORMAL_ROUTES,
+      stronger_profile: STRONGER_PROFILE_ID,
+    });
+  });
+
+  it('changes the policy hash for every provider, profile, route, and dependency change', () => {
+    const baseline = policyHash(activePolicy());
+    const changed = (mutate: (policy: ReturnType<typeof activePolicy>) => void): string => {
+      const policy = structuredClone(activePolicy());
+      mutate(policy);
+      return policyHash(policy);
+    };
+
+    const mutations = [
+      changed((policy) => {
+        policy.providers.codex.version = '0.0.0';
       }),
-    ).not.toBe(policyHash(policy));
-    expect(
-      policyHash({
-        ...policy,
-        dependencies: { ...policy.dependencies, lifecycle_scripts: 'allowed' },
+      changed((policy) => {
+        policy.providers.claude.version = '0.0.0';
       }),
-    ).not.toBe(policyHash(policy));
-    expect(
-      policyHash({
-        ...policy,
-        dependencies: { ...policy.dependencies, install_command: ['npm', 'install'] },
+      changed((policy) => {
+        policy.providers.codex.allowed_hosts = ['example.com'];
       }),
-    ).not.toBe(policyHash(policy));
+      changed((policy) => {
+        policy.providers.claude.allowed_hosts = ['example.com'];
+      }),
+      changed((policy) => {
+        policy.providers.codex.policy = { changed: true };
+      }),
+      changed((policy) => {
+        policy.providers.claude.policy = { changed: true };
+      }),
+      changed((policy) => {
+        const first = policy.routing.profiles[0];
+        if (first === undefined) throw new Error('active policy has no profiles');
+        first.model = 'changed-model';
+      }),
+      changed((policy) => {
+        policy.routing.normal_routes.low = 'codex-deep';
+      }),
+      changed((policy) => {
+        policy.routing.stronger_profile = 'codex-fast';
+      }),
+      changed((policy) => {
+        policy.dependencies.lifecycle_scripts = 'allowed';
+      }),
+      changed((policy) => {
+        policy.dependencies.install_command = ['npm', 'install'];
+      }),
+    ];
+
+    expect(mutations.every((hash) => hash !== baseline)).toBe(true);
   });
 
   it('does not touch Git', async () => {

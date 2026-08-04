@@ -7,15 +7,34 @@ import { stringify, parse } from 'yaml';
 import { z } from 'zod';
 
 import {
+  CLAUDE_BASE_ARGS,
+  CLAUDE_CODING_PERMISSION_ARGS,
+  CLAUDE_CODING_TOOLS,
+  CLAUDE_DIAGNOSIS_TOOLS,
+  CLAUDE_LAUNCHER,
+  CLAUDE_PRINT_FLAG,
+} from '../adapters/claude/policy.js';
+import { compileCodexPolicy } from '../adapters/codex/policy.js';
+import {
+  CLAUDE_PROVIDER_ALLOWLIST,
+  CLAUDE_VERSION,
+  CODEX_PROVIDER_ALLOWLIST,
   CODEX_VERSION,
   HARNESS_VERSION,
   IMAGE_ROLES,
-  PROVIDER_ALLOWLIST,
 } from '../config/pins.js';
 import { installCommand, type LifecycleScriptPolicy } from '../deps/cache-key.js';
 import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
+import {
+  NORMAL_ROUTES,
+  PROFILE_IDS,
+  PROFILES,
+  STRONGER_PROFILE_ID,
+  type AgentProfile,
+  type ProfileId,
+} from '../routing/profiles.js';
 import { loadPlan } from './load.js';
-import type { Plan } from './schema.js';
+import type { Plan, StepComplexity } from './schema.js';
 
 /** The manifest file itself is malformed: bad YAML, unknown field, unknown version. */
 export class ManifestConfigError extends Error {
@@ -81,33 +100,65 @@ export type ExecutionManifest = z.infer<typeof manifestSchema>['execution_manife
  * They are constants in source rather than task input, so the hash exists to detect that the
  * harness changed under an approval, not to carry a user choice.
  */
+interface ProviderContract {
+  version: string;
+  allowed_hosts: string[];
+  authentication_mode: string;
+  policy: unknown;
+}
+
 export interface Policy {
-  network: { allowed_hosts: string[]; codex_version: string };
+  providers: { codex: ProviderContract; claude: ProviderContract };
+  routing: {
+    profiles: AgentProfile[];
+    normal_routes: Record<StepComplexity, ProfileId>;
+    stronger_profile: ProfileId;
+  };
   dependencies: { lifecycle_scripts: LifecycleScriptPolicy; install_command: string[] };
 }
 
 export function activePolicy(): Policy {
   const lifecycle: LifecycleScriptPolicy = 'denied';
+  const codex = compileCodexPolicy({
+    prompt: '<prompt>',
+    workdir: '/workspace',
+    model: '<profile-model>',
+    reasoningEffort: '<profile-effort>',
+  });
 
   return {
-    network: { allowed_hosts: [...PROVIDER_ALLOWLIST], codex_version: CODEX_VERSION },
+    providers: {
+      codex: {
+        version: CODEX_VERSION,
+        allowed_hosts: [...CODEX_PROVIDER_ALLOWLIST],
+        authentication_mode: 'rotating_subscription_json',
+        policy: { files: codex.files, args: codex.args, env: codex.env, stdin: codex.stdin },
+      },
+      claude: {
+        version: CLAUDE_VERSION,
+        allowed_hosts: [...CLAUDE_PROVIDER_ALLOWLIST],
+        authentication_mode: 'static_subscription_token',
+        policy: {
+          launcher: CLAUDE_LAUNCHER,
+          print_flag: CLAUDE_PRINT_FLAG,
+          base_args: [...CLAUDE_BASE_ARGS],
+          coding_tools: [...CLAUDE_CODING_TOOLS],
+          coding_permission_args: [...CLAUDE_CODING_PERMISSION_ARGS],
+          diagnosis_tools: CLAUDE_DIAGNOSIS_TOOLS,
+        },
+      },
+    },
+    routing: {
+      profiles: PROFILE_IDS.map((id) => ({ ...PROFILES[id] })),
+      normal_routes: { ...NORMAL_ROUTES },
+      stronger_profile: STRONGER_PROFILE_ID,
+    },
     dependencies: { lifecycle_scripts: lifecycle, install_command: installCommand(lifecycle) },
   };
 }
 
 export function policyHash(policy: Policy): string {
-  const canonical = JSON.stringify({
-    network: {
-      allowed_hosts: policy.network.allowed_hosts,
-      codex_version: policy.network.codex_version,
-    },
-    dependencies: {
-      lifecycle_scripts: policy.dependencies.lifecycle_scripts,
-      install_command: policy.dependencies.install_command,
-    },
-  });
-
-  return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
+  return `sha256:${createHash('sha256').update(JSON.stringify(policy)).digest('hex')}`;
 }
 
 async function git(repoPath: string, args: string[]): Promise<string> {

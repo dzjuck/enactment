@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { CODEX_VERSION, HARNESS_VERSION, PROVIDER_ALLOWLIST } from '../config/pins.js';
+import { CODEX_PROVIDER_ALLOWLIST, CODEX_VERSION, HARNESS_VERSION } from '../config/pins.js';
 import type { RuntimeImages } from '../docker/images.js';
 import type { BaselineArtifact } from '../verify/baseline.js';
 import type { GreenVerdict } from '../verify/green.js';
@@ -67,7 +67,7 @@ export interface NetworkPolicySection {
 }
 
 export function networkPolicySection(
-  hosts: readonly string[] = PROVIDER_ALLOWLIST,
+  hosts: readonly string[] = CODEX_PROVIDER_ALLOWLIST,
   codexVersion: string = CODEX_VERSION,
 ): NetworkPolicySection {
   const allowed_hosts = [...hosts];

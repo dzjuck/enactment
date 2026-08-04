@@ -2,6 +2,7 @@ version: 1
 id: slugify-plan
 steps:
   - type: task
+    complexity: low
     id: add-slugify
     observable_behavior: |
       Implement the slugify function in src/slugify.js so that it converts a title
@@ -18,6 +19,7 @@ steps:
       agent_seconds: 600
       termination_grace_seconds: 5
   - type: code_behavior
+    complexity: medium
     id: add-slugify-tests-first
     observable_behavior: |
       Add slugify behavior.

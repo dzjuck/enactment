@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { providerSmokeTest } from '../../src/adapters/codex/smoke.js';
-import { IMAGE_PINS, PROVIDER_ALLOWLIST } from '../../src/config/pins.js';
+import { CODEX_PROVIDER_ALLOWLIST, IMAGE_PINS } from '../../src/config/pins.js';
 import { runContainer } from '../../src/docker/run.js';
 import { withPhaseNetworks } from '../../src/net/manage.js';
 import { proxyEnvironment, withProxy } from '../../src/proxy/container.js';
@@ -28,7 +28,7 @@ describe('real provider egress', () => {
           attempt,
           egressNetwork: network,
           outwardNetwork: networks['proxy-egress'] ?? '',
-          allowlist: PROVIDER_ALLOWLIST,
+          allowlist: CODEX_PROVIDER_ALLOWLIST,
           ports: [443],
           images,
         },

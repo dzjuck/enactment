@@ -2,6 +2,7 @@ version: 1
 id: slugify-plan
 steps:
   - type: task
+    complexity: low
     id: add-slugify
     implementation_paths:
       - src/slugify.js

@@ -10,7 +10,7 @@ import type { ArtifactStore } from '../artifacts/store.js';
 import { collectSecrets, createRedactor } from '../artifacts/redact.js';
 import { readAuthStore, seedAuthStore } from '../auth/store.js';
 import { authMount, copyBackAuth, createAuthVolume } from '../auth/volume.js';
-import { PROVIDER_ALLOWLIST } from '../config/pins.js';
+import { CODEX_PROVIDER_ALLOWLIST } from '../config/pins.js';
 import { dependencyCacheKey, installCommand, lockfileHash } from '../deps/cache-key.js';
 import { DependencyCache, ensureDependencySnapshot } from '../deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
@@ -414,7 +414,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
             attempt,
             egressNetwork: networks.egress ?? '',
             outwardNetwork: networks['proxy-egress'] ?? '',
-            allowlist: PROVIDER_ALLOWLIST,
+            allowlist: CODEX_PROVIDER_ALLOWLIST,
             ports: [443],
             images,
           },
@@ -424,7 +424,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
 
             try {
               await providerSmokeTest({
-                url: `https://${PROVIDER_ALLOWLIST[0] ?? 'chatgpt.com'}/`,
+                url: `https://${CODEX_PROVIDER_ALLOWLIST[0] ?? 'chatgpt.com'}/`,
                 network: networks.egress ?? '',
                 env: proxied,
                 timeoutSeconds: timeouts.connectivity_smoke_seconds,

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+import { stringify } from 'yaml';
 
 import { PlanConfigError, loadPlan } from '../../src/plan/load.js';
 
@@ -20,6 +21,52 @@ async function loadError(name: string): Promise<PlanConfigError> {
   throw new Error(`expected ${name} to be rejected, but it loaded`);
 }
 
+function planDocument(complexity: string): Record<string, unknown> {
+  return {
+    version: 1,
+    id: 'complexity-plan',
+    steps: [
+      {
+        type: 'task',
+        complexity,
+        id: 'task-step',
+        observable_behavior: 'Run a task.',
+        implementation_paths: ['src/task.ts'],
+        verification: { commands: [['npm', 'test']] },
+      },
+      {
+        type: 'code_behavior',
+        complexity,
+        id: 'code-step',
+        observable_behavior: 'Add behavior.',
+        implementation_paths: ['src/code.ts'],
+        test_paths: ['test/code.test.ts'],
+        expected_test_ids: ['code works'],
+        verification: { test_command: ['npm', 'test'] },
+      },
+    ],
+    final_verification: { commands: [['npm', 'test']] },
+  };
+}
+
+async function writeDocument(document: unknown): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'harness-plan-document-'));
+  const path = join(dir, 'plan.yml');
+  await writeFile(path, stringify(document));
+  return path;
+}
+
+async function loadDocumentError(document: unknown): Promise<PlanConfigError> {
+  const path = await writeDocument(document);
+  try {
+    await loadPlan(path);
+  } catch (error) {
+    expect(error).toBeInstanceOf(PlanConfigError);
+    return error as PlanConfigError;
+  }
+  throw new Error('expected generated plan to be rejected, but it loaded');
+}
+
 describe('loadPlan', () => {
   it('loads an ordered plan of task and code_behavior steps with M2 defaults', async () => {
     const { plan } = await loadPlan(fixture('valid.yml'));
@@ -30,6 +77,7 @@ describe('loadPlan', () => {
       steps: [
         {
           type: 'task',
+          complexity: 'low',
           id: 'add-slugify',
           observable_behavior:
             'Implement the slugify function in src/slugify.js so that it converts a title\ninto a URL-safe slug.\n',
@@ -46,6 +94,7 @@ describe('loadPlan', () => {
         },
         {
           type: 'code_behavior',
+          complexity: 'medium',
           id: 'add-slugify-tests-first',
           observable_behavior: 'Add slugify behavior.\n',
           implementation_paths: ['src/slugify.js'],
@@ -102,6 +151,20 @@ describe('loadPlan', () => {
   });
 
   describe('plan structure', () => {
+    it.each(['low', 'medium', 'high'])('loads %s complexity on both step types', async (complexity) => {
+      const { plan } = await loadPlan(await writeDocument(planDocument(complexity)));
+
+      expect(plan.steps.map((step) => step.complexity)).toEqual([complexity, complexity]);
+    });
+
+    it.each([
+      ['missing-complexity.yml', 'steps[0].complexity'],
+      ['unknown-complexity.yml', 'steps[0].complexity'],
+    ])('rejects %s at %s', async (name, path) => {
+      const error = await loadError(name);
+      expect(error.message).toContain(path);
+    });
+
     it('rejects duplicate step IDs, naming the offending step', async () => {
       const error = await loadError('duplicate-step-ids.yml');
       expect(error.message).toContain('steps[1].id');
@@ -134,6 +197,29 @@ describe('loadPlan', () => {
       expect(error.message).toContain('steps[0]');
       expect(error.message).toContain('test_paths');
     });
+
+    it.each(['provider', 'model', 'effort', 'routing'])(
+      'rejects plan-level %s overrides',
+      async (field) => {
+        const document = { ...planDocument('low'), [field]: field === 'routing' ? {} : 'override' };
+        const error = await loadDocumentError(document);
+        expect(error.message).toContain(field);
+      },
+    );
+
+    it.each(['provider', 'model', 'effort', 'routing'])(
+      'rejects step-level %s overrides',
+      async (field) => {
+        const document = planDocument('low');
+        const first = (document.steps as Array<Record<string, unknown>>)[0];
+        if (first === undefined) throw new Error('generated plan has no first step');
+        first[field] = field === 'routing' ? {} : 'override';
+
+        const error = await loadDocumentError(document);
+        expect(error.message).toContain('steps[0]');
+        expect(error.message).toContain(field);
+      },
+    );
 
     it('rejects the old standalone task document, naming what is missing and unknown', async () => {
       const error = await loadError('standalone-task.yml');

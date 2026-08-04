@@ -2,6 +2,7 @@ version: 1
 id: slugify-plan
 steps:
   - type: code_behavior
+    complexity: low
     id: add-slugify-tests-first
     observable_behavior: Add slugify behavior.
     implementation_paths: [src/slugify.js]

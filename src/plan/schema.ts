@@ -35,6 +35,8 @@ export const RED_CATEGORIES = ['assertion_failure', 'missing_implementation'] as
 
 /** M3 executes `task` and `code_behavior`. DESIGN.md §21's other types wait for their milestone. */
 export const STEP_TYPES = ['task', 'code_behavior'] as const;
+export const STEP_COMPLEXITIES = ['low', 'medium', 'high'] as const;
+export type StepComplexity = (typeof STEP_COMPLEXITIES)[number];
 
 const LATER_MILESTONE_TYPES = ['operational', 'mixed'];
 
@@ -106,6 +108,7 @@ const timeouts = z
 
 const commonFields = {
   id: slug,
+  complexity: z.enum(STEP_COMPLEXITIES),
   observable_behavior: z.string().min(1),
   implementation_paths: z.array(implementationPath).min(1, 'must declare at least one path'),
   timeouts,

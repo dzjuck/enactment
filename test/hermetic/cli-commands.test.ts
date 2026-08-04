@@ -28,6 +28,7 @@ const PLAN = [
   'id: demo-plan',
   'steps:',
   '  - type: task',
+  '    complexity: low',
   '    id: only-step',
   '    observable_behavior: Do the thing.',
   '    implementation_paths:',

@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CLAUDE_PROVIDER_ALLOWLIST,
+  CLAUDE_VERSION,
+  CODEX_PROVIDER_ALLOWLIST,
   CODEX_VERSION,
-  PROVIDER_ALLOWLIST,
+  PROVIDER_ALLOWLIST_CLAUDE_VERSION,
   PROVIDER_ALLOWLIST_CODEX_VERSION,
 } from '../../src/config/pins.js';
 import { networkPolicySection } from '../../src/run/manifest.js';
 
 describe('provider allowlist', () => {
-  it('is exactly chatgpt.com', () => {
-    expect([...PROVIDER_ALLOWLIST]).toEqual(['chatgpt.com']);
+  it('keeps exact, provider-specific allowlists', () => {
+    expect([...CODEX_PROVIDER_ALLOWLIST]).toEqual(['chatgpt.com']);
+    expect([...CLAUDE_PROVIDER_ALLOWLIST]).toEqual(['api.anthropic.com']);
   });
 
   it('is hashed into the run manifest', () => {
@@ -28,5 +32,6 @@ describe('provider allowlist', () => {
     // §7 makes the list version-specific: bumping Codex without re-running domain discovery
     // must be detectable, so the discovery marker is its own literal.
     expect(PROVIDER_ALLOWLIST_CODEX_VERSION).toBe(CODEX_VERSION);
+    expect(PROVIDER_ALLOWLIST_CLAUDE_VERSION).toBe(CLAUDE_VERSION);
   });
 });

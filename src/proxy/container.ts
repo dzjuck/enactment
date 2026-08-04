@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { execa } from 'execa';
 
-import { PROVIDER_ALLOWLIST } from '../config/pins.js';
+import { CODEX_PROVIDER_ALLOWLIST } from '../config/pins.js';
 import type { RuntimeImages } from '../docker/images.js';
 import { containerLogs, startContainer, stopContainer } from '../docker/run.js';
 import { withOwnedResource } from '../run/ownership.js';
@@ -81,7 +81,7 @@ async function connectNetwork(network: string, container: string): Promise<void>
  */
 export async function startProxyContainer(options: ProxyContainerOptions): Promise<ProxyHandle> {
   const name = `ai-harness-proxy-${options.attempt}`;
-  const hosts = options.allowlist ?? PROVIDER_ALLOWLIST;
+  const hosts = options.allowlist ?? CODEX_PROVIDER_ALLOWLIST;
   const ports = options.ports ?? DEFAULT_PORTS;
 
   const connect = options.connect ?? connectNetwork;
