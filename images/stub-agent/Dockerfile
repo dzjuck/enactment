@@ -9,7 +9,9 @@ RUN groupadd -g "${AGENT_GID}" agent \
  && useradd -u "${AGENT_UID}" -g agent -m -d /home/agent -s /bin/bash agent
 
 COPY codex /usr/local/bin/codex
-RUN chmod 0755 /usr/local/bin/codex
+COPY claude /usr/local/bin/claude
+RUN chmod 0755 /usr/local/bin/codex /usr/local/bin/claude \
+ && ln -s /usr/local/bin/claude /usr/local/bin/claude-from-token
 
 ENV CI=1
 

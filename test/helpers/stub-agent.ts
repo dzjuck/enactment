@@ -13,6 +13,10 @@ export async function stubAgentImage(): Promise<RuntimeImage> {
   return { role: 'codex', id: await resolveImageId(STUB_AGENT_IMAGE) };
 }
 
+export async function stubClaudeImage(): Promise<RuntimeImage> {
+  return { role: 'claude', id: await resolveImageId(STUB_AGENT_IMAGE) };
+}
+
 export async function buildStubAgent(): Promise<string> {
   await execa('docker', [
     'build',
@@ -44,6 +48,28 @@ export function cannedEvents(extra: Record<string, unknown>[] = []): string {
       type: 'turn.completed',
       model: 'gpt-5.6-luna',
       usage: { input_tokens: 1234, output_tokens: 567, cached_input_tokens: 89 },
+    },
+  ]
+    .map((event) => JSON.stringify(event))
+    .join('\n');
+}
+
+export function cannedClaudeEvents(canary = ''): string {
+  return [
+    { type: 'system', subtype: 'init', model: 'claude-sonnet-5' },
+    { type: 'future_event', detail: canary },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: `Implemented slugify. ${canary}`,
+      duration_ms: 25,
+      usage: {
+        input_tokens: 10,
+        output_tokens: 4,
+        cache_read_input_tokens: 2,
+        cache_creation_input_tokens: 1,
+      },
     },
   ]
     .map((event) => JSON.stringify(event))

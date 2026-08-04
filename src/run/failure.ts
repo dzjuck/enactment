@@ -9,6 +9,7 @@ export const FAILURE_CATEGORIES = [
   'closure_violation',
   'test_contract_disputed',
   'provider_connectivity_timeout',
+  'provider_error',
   'agent_timeout',
   'agent_failed',
   'setup_timeout',

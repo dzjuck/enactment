@@ -1,20 +1,12 @@
+import type { AgentEvent, UsageMetadata } from '../types.js';
+
+export type { AgentEvent, UsageMetadata } from '../types.js';
+
 export class EventParseError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'EventParseError';
   }
-}
-
-export interface AgentEvent {
-  type: string;
-  raw: Record<string, unknown>;
-}
-
-export interface UsageMetadata {
-  model?: string;
-  input_tokens: number;
-  output_tokens: number;
-  cached_input_tokens: number;
 }
 
 /**
