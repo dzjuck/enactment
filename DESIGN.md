@@ -1648,7 +1648,8 @@ Validate before implementation planning:
 ### Status
 
 Gates 1, 2, 5–13 executed and passed against `codex-cli 0.146.0` on OrbStack `linux/arm64`.
-Gate 14 is selected. Gate 3 belongs to Milestone 4. Gate 4 is a human decision and remains open.
+Gate 3 executed and passed against Claude Code `2.1.221` on the same runtime. Gate 4 was accepted by
+the operator for this local, trusted-repository deployment. Gate 14 is selected.
 
 The gates are now regression tests, not one-time checks. Each runs with a paired positive control;
 an unattempted operation is not evidence of enforcement, so a missing control makes the result
@@ -1721,6 +1722,46 @@ Established while building autonomous plans; each changed a decision.
   plan rather than one per attempt, a second run against the same repository correctly refuses to
   adopt the first run's branch — so suites that reuse a fixture must clear it, exactly as an
   operator does between plans.
+
+### Findings from the Milestone 4 Claude feasibility gate
+
+Established against Claude Code `2.1.221` on OrbStack `linux/arm64` before routing implementation.
+
+* **Subscription automation is an explicit human decision.** The operator accepted this local,
+  trusted-repository, bounded use as ordinary individual Claude Code usage after reviewing
+  Anthropic's published Consumer Terms, Claude Code legal page and authentication documentation.
+* **The setup token is manually provisioned, not imported.** `claude setup-token` produces a static,
+  inference-only token. The operator writes it once to the private harness state file (`0700`
+  directory, `0600` file) before a Claude-backed run. The harness reads it, streams it into an
+  attempt-scoped volume and never writes or rotates the host file. `--bare` is not used because it
+  does not read `CLAUDE_CODE_OAUTH_TOKEN`.
+* **The minimal invocation is flag-driven.** Coding uses `-p`, stream JSON, verbose mode,
+  no session persistence, `--safe-mode`, no Chrome, exactly `Read,Glob,Grep,Edit,Write,Bash`, one
+  `bypassPermissions` control, and pinned model/effort. Diagnosis uses the same base with no tools,
+  no permission mode and no workspace.
+* **`--safe-mode` suppresses repository rules but not all metadata.** A workspace `CLAUDE.md` canary
+  did not reach the model. The init event still advertised built-in command, skill and agent
+  metadata; those capabilities were not callable because `Skill` and `Agent` were absent from the
+  exact tool set. MCP servers and plugins were empty.
+* **One host is sufficient.** Authenticated coding and diagnosis completed through a CONNECT proxy
+  allowing only `api.anthropic.com`; a non-allowlisted host was denied and the agent had no direct
+  egress.
+* **JSONL has a provider-owned terminal error signal.** Provider refusal exits non-zero with a
+  terminal `result` carrying `is_error=true`, `terminal_reason=api_error` and numeric
+  `api_error_status`. `provider_error` is concluded from those fields, never wording. A wrong model
+  returned that signal with `404` and zero usage rather than silently falling back.
+* **Requested and reported model evidence is direct.** The init event reports the requested pinned
+  model. Successful terminal results contain non-empty text and usage; coding reported
+  `claude-sonnet-5` and diagnosis reported `claude-opus-5`.
+* **The credential stays out of Docker metadata and artifacts.** The token enters an offline helper
+  on stdin, the fixed launcher exports it only inside the provider process, and canary scans found it
+  in neither inspect data, stdout/stderr nor proxy records.
+* **Claude needs the same timeout ladder.** Against a blackholed CONNECT tunnel it did not exit during
+  the full 1,200-second agent budget. The harness's SIGTERM/grace/SIGKILL ladder terminated it, and
+  final inspection found no gate container, volume or network. The complete Docker/stub/global
+  regression suite also passed without a Claude-specific hardening exception; substituting the
+  pinned Claude image into production `runContainer` passed identity, filesystem, capability,
+  offline-network, timeout and cleanup controls.
 
 ### Conclusion
 

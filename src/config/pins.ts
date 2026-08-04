@@ -6,6 +6,9 @@ export const HARNESS_VERSION = '0.1.0';
  */
 export const CODEX_VERSION = '0.146.0';
 
+/** Measured by the Milestone 4 Linux ARM64 feasibility gate. */
+export const CLAUDE_VERSION = '2.1.221';
+
 /**
  * DESIGN.md §7: exactly this, exact-match, no wildcards. Measured, not guessed —
  * `ab.chatgpt.com` appears but is not required, and denying it costs nothing.
@@ -18,6 +21,12 @@ export const PROVIDER_ALLOWLIST: readonly string[] = ['chatgpt.com'];
  * silently stale allowlist.
  */
 export const PROVIDER_ALLOWLIST_CODEX_VERSION = '0.146.0';
+
+/** Claude Code 2.1.221 completes coding and diagnosis with this host alone. */
+export const CLAUDE_PROVIDER_ALLOWLIST: readonly string[] = ['api.anthropic.com'];
+
+/** Prevents a CLI bump from silently keeping stale domain-discovery evidence. */
+export const PROVIDER_ALLOWLIST_CLAUDE_VERSION = '2.1.221';
 
 export const TYPESCRIPT_VERSION = '5.9.3';
 export const TYPES_NODE_VERSION = '24.10.1';
