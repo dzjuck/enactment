@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { providerSmokeTest } from '../../src/adapters/codex/smoke.js';
-import { CODEX_PROVIDER_ALLOWLIST, IMAGE_PINS } from '../../src/config/pins.js';
+import {
+  CLAUDE_PROVIDER_ALLOWLIST,
+  CODEX_PROVIDER_ALLOWLIST,
+  IMAGE_PINS,
+} from '../../src/config/pins.js';
 import { runContainer } from '../../src/docker/run.js';
 import { withPhaseNetworks } from '../../src/net/manage.js';
 import { proxyEnvironment, withProxy } from '../../src/proxy/container.js';
@@ -10,6 +14,8 @@ import { runtimeImages } from '../helpers/images.js';
 
 const PROVIDER = 'chatgpt.com';
 const DENIED = 'ab.chatgpt.com';
+const CLAUDE_PROVIDER = 'api.anthropic.com';
+const CLAUDE_DENIED = 'platform.claude.com';
 
 /**
  * §35 regression against the real provider. The hermetic proxy suite proves the mechanism;
@@ -90,6 +96,79 @@ describe('real provider egress', () => {
           expect(records.some((r) => r.hostname === PROVIDER && r.allowed)).toBe(true);
           expect(records.some((r) => r.hostname === DENIED && !r.allowed)).toBe(true);
           expect(records.filter((r) => r.allowed).every((r) => r.hostname === PROVIDER)).toBe(true);
+        },
+      );
+    });
+  }, 600_000);
+
+  it('reaches only api.anthropic.com for Claude and has no direct egress', async () => {
+    const attempt = newAttemptId();
+    const images = await runtimeImages();
+
+    await withPhaseNetworks(attempt, 'agent', async (networks) => {
+      const network = networks.egress ?? '';
+      await withProxy(
+        {
+          attempt,
+          egressNetwork: network,
+          outwardNetwork: networks['proxy-egress'] ?? '',
+          allowlist: CLAUDE_PROVIDER_ALLOWLIST,
+          ports: [443],
+          images,
+        },
+        async (handle) => {
+          const env = proxyEnvironment(handle);
+          const smoke = await providerSmokeTest({
+            url: `https://${CLAUDE_PROVIDER}/`,
+            network,
+            env,
+            timeoutSeconds: 30,
+            images,
+            provider: 'claude',
+          });
+          expect(smoke.ok).toBe(true);
+
+          const denied = await runContainer({
+            image: IMAGE_PINS.claude.tag,
+            argv: [
+              'curl',
+              '-sS',
+              '--max-time',
+              '20',
+              '-o',
+              '/dev/null',
+              `https://${CLAUDE_DENIED}/`,
+            ],
+            network,
+            env,
+          });
+          expect(denied.exitCode).not.toBe(0);
+
+          const direct = await runContainer({
+            image: IMAGE_PINS.claude.tag,
+            argv: [
+              'curl',
+              '-sS',
+              '--max-time',
+              '20',
+              '-o',
+              '/dev/null',
+              `https://${CLAUDE_PROVIDER}/`,
+            ],
+            network,
+          });
+          expect(direct.exitCode).not.toBe(0);
+
+          const records = await handle.records();
+          expect(records.some((record) => record.hostname === CLAUDE_PROVIDER && record.allowed)).toBe(
+            true,
+          );
+          expect(
+            records.some((record) => record.hostname === CLAUDE_DENIED && !record.allowed),
+          ).toBe(true);
+          expect(
+            records.filter((record) => record.allowed).every((record) => record.hostname === CLAUDE_PROVIDER),
+          ).toBe(true);
         },
       );
     });

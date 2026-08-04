@@ -845,6 +845,7 @@ Each step declares:
 * ID;
 * observable behavior;
 * type;
+* complexity (`low | medium | high`);
 * test paths;
 * implementation paths;
 * expected test IDs;
@@ -858,8 +859,8 @@ The authored order **is** the dependency chain: step N depends on step N-1. Mile
 step at a time, so an explicit `depends_on` and a DAG scheduler would add a second description of
 the same fact. `final_verification.commands` is required.
 
-Complexity, risk, services, network requirements and review metadata are rejected rather than
-stored inert, and arrive with the milestones that execute them.
+Risk, services, network requirements and review metadata are rejected rather than stored inert,
+and arrive with the milestones that execute them.
 
 ---
 
@@ -879,16 +880,17 @@ execution_manifest:
 
   runtime:
     harness_version: 0.1.0
-    agent_image_id: sha256:...
+    codex_image_id: sha256:...
+    claude_image_id: sha256:...
     verifier_image_id: sha256:...
     setup_image_id: sha256:...
     proxy_image_id: sha256:...
 ```
 
-Only inputs a milestone actually implements are present. Milestone 3 records two: the plan's raw
-byte hash, which already covers commands, scopes, verification closure and quarantine, and one
-hash over the fixed network and dependency policies. Later-milestone fields are absent rather than
-filled with placeholder hashes that would attest to nothing.
+Only implemented inputs are present. The plan's raw-byte hash covers complexity, commands, scopes,
+verification closure and quarantine. The policy hash covers fixed provider profiles, routing,
+provider policies, network and dependency policy. Both provider image IDs are approved even when a
+normal route uses only one, because a retry may use Claude.
 
 Approval required for:
 
@@ -1241,63 +1243,77 @@ from a broken invocation.
 
 ### Claude
 
-* pinned CLI version;
-* explicit model;
-* non-interactive;
-* controlled local tools;
-* no WebFetch;
-* no WebSearch;
-* no MCP;
-* no auto-update;
-* no nested-sandbox dependency.
+Claude Code is pinned at `2.1.221`. Coding uses non-interactive stream JSON, explicit model and
+effort, `--safe-mode`, no session persistence, no Chrome, exactly
+`Read,Glob,Grep,Edit,Write,Bash`, and one `bypassPermissions` control. `--safe-mode` suppresses
+workspace `CLAUDE.md`, plugins, hooks, MCP and other customizations; WebFetch and WebSearch are not
+in the tool set. Diagnosis uses the same base policy with `--tools ""`, no permission bypass and no
+workspace mount. Both policies use the shared hardened container, exact proxy and timeout ladder.
+
+Subscription auth comes from a manually provisioned `claude setup-token` file. It enters an
+attempt-scoped volume, is exported only inside the fixed launcher, and is never rotated or copied
+back. `--bare` is not used because it does not read `CLAUDE_CODE_OAUTH_TOKEN`.
 
 ---
 
 ## 28. Model routing
 
-Profiles:
+Profiles are fixed harness policy:
 
 ```yaml
 codex-fast:
   adapter: codex
+  model: gpt-5.6-luna
   effort: medium
 
 codex-deep:
   adapter: codex
+  model: gpt-5.6-luna
   effort: high
 
 claude-balanced:
   adapter: claude
+  model: claude-sonnet-5
+  effort: medium
 
 claude-deep:
   adapter: claude
+  model: claude-opus-5
+  effort: high
 ```
 
 Each step declares:
 
 ```yaml
 complexity: low | medium | high
-risk: normal | high
 ```
 
-Typical routing:
+Normal routing:
 
 ```text
-planning          strong model
-test writing      fast model
-implementation    complexity-based
-diagnosis         stronger model
-review            independent model
+low    → codex-fast
+medium → claude-balanced
+high   → codex-deep
 ```
+
+One profile owns every model phase in an attempt. No normal route uses `claude-deep`; reserving it
+for diagnosis and retry guarantees the stronger attempt differs from the failed normal attempt.
+Plans cannot override profiles, models, effort or routing.
 
 Retry policy:
 
 ```text
-normal attempt
-→ diagnosis
-→ one stronger retry
+retryable normal failure
+→ one evidence-only claude-deep diagnosis
+→ one fresh claude-deep attempt from the same accepted parent
 → stop
 ```
+
+Diagnosis reads bounded redacted excerpts from the failed attempt's evidence and has no workspace
+or tools. Its text is advisory only; scope and verification remain harness-owned. Diagnosis
+failure does not block the retry and never replaces the original failure. `provider_error`,
+connectivity/timeouts, setup/baseline failures, test-contract disputes, stronger failures and
+commit-plus-cleanup failures are not diagnosed or retried.
 
 ---
 
@@ -1762,6 +1778,30 @@ Established against Claude Code `2.1.221` on OrbStack `linux/arm64` before routi
   regression suite also passed without a Claude-specific hardening exception; substituting the
   pinned Claude image into production `runContainer` passed identity, filesystem, capability,
   offline-network, timeout and cleanup controls.
+
+### Findings from the Milestone 4 implementation
+
+* **A profile must own the whole attempt.** Switching providers between tests and implementation
+  would multiply auth, recovery and evidence states. V1 persists one profile before execution and
+  reuses it after a crash.
+* **The stronger profile cannot be a normal route.** `claude-deep` is reserved for diagnosis and
+  retry; otherwise a high-complexity failure could only receive an identical re-roll.
+* **Provider refusal is not a repair signal.** Structured Claude API errors and the equivalent Codex
+  refusal are `provider_error`. They stop without diagnosis or retry. Quota is never deliberately
+  exhausted to distinguish its wording; the structured provider category is sufficient.
+* **Diagnosis is evidence, not authority.** It receives bounded redacted artifact excerpts, no
+  workspace and no tools. Its result is non-overwriting advisory text; plan scope, commands and
+  verification cannot be changed by it. A failed diagnosis still permits the one stronger retry.
+* **Terminal failure is one database write.** Attempt failure, failure detail and plan failure commit
+  in one SQLite transaction. A process killed before report writing therefore resumes the pending
+  stronger child or reports the durable terminal cycle; it cannot observe a terminal attempt beside
+  a running plan.
+* **Schema version 2 needs only retry identity.** Attempts add `profile_id` and nullable
+  `retry_of_attempt_row`. Attempt kind is derived from that relationship rather than stored twice.
+  There is deliberately no migration framework; old state fails clearly and operators start fresh.
+* **Subscription credit is operational state.** Since 2026-06-15, Claude Code subscription calls use
+  the plan's separate Agent SDK credit. The harness neither measures nor routes around that balance;
+  operators check it before enabling medium routes, diagnosis or stronger retry.
 
 ### Conclusion
 

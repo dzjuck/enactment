@@ -20,14 +20,20 @@ crash. Nothing here uses the test suites.
   seed its own store, then never writes to your Codex home again. Once that store exists it is
   the source of truth for the refresh chain and a later `codex login` does **not** replace it —
   see "Re-authenticating".
+* A Claude Pro, Max, Team or Enterprise subscription when any medium-complexity step may run.
+  Run `claude setup-token` once, then store the printed token as described below. Claude Code
+  subscription calls consume the plan's separate Agent SDK credit; inspect that allowance before
+  enabling Claude routing.
 * A Git repository to work on, committed clean. The harness works from a commit, never from
   your working tree, and never touches your checked-out branch.
+* A fresh Milestone 4 `state.db`. Schema version 2 intentionally has no migration from earlier
+  milestones. Preserve any needed evidence, then move the old database aside before the first run.
 
 ## 1. Build
 
 ```sh
 npm ci
-npm run images:build     # builds agent, verifier, setup, proxy; prints the resolved image IDs
+npm run images:build     # builds Codex, Claude, verifier, setup and proxy images
 npm run build            # compiles the harness into dist/
 ```
 
@@ -49,6 +55,7 @@ version: 1
 id: slugify-plan
 steps:
   - type: code_behavior
+    complexity: low
     id: add-slugify
     observable_behavior: Add URL-safe slugify behavior.
     implementation_paths:
@@ -90,6 +97,7 @@ version: 1
 id: slugify-plan
 steps:
   - type: task
+    complexity: medium
     id: add-slugify
     observable_behavior: |
       Implement the slugify function in src/slugify.js.
@@ -108,8 +116,20 @@ final_verification:
     - ["npx", "--no-install", "vitest", "run"]
 ```
 
-`operational` and `mixed` steps are rejected until their milestone, as are service, routing and
-review fields.
+`complexity` is required. Routing is fixed and covered by the policy hash:
+
+| Complexity | Normal profile | Provider/model effort |
+| --- | --- | --- |
+| `low` | `codex-fast` | Codex, medium |
+| `medium` | `claude-balanced` | Claude, medium |
+| `high` | `codex-deep` | Codex, high |
+
+The table is deterministic, not a ranking. No normal route uses `claude-deep`; it is reserved for
+the one stronger retry, so a retry always differs from the normal profile. One profile owns every
+model phase in an attempt. Plans cannot override provider, model or effort.
+
+`operational` and `mixed` steps are rejected until their milestone, as are service and review
+fields.
 
 Rules the loader enforces: no unknown fields; verification commands are argv arrays, never shell
 strings; `implementation_paths` are relative, free of `..`, and may not name `package.json` or a
@@ -121,7 +141,7 @@ lockfile. `timeouts` may lower the defaults above, never raise them.
 ## 3. Prepare and approve
 
 Preparation resolves everything an approval covers — the plan's exact bytes, the repository's
-current head, the fixed network and dependency policies, and the four runtime image IDs — into
+current head, fixed network/routing/dependency policies, and the five runtime image IDs — into
 one candidate manifest. It is read-only apart from the file it writes:
 
 ```sh
@@ -140,7 +160,8 @@ execution_manifest:
     policy_hash: sha256:...    # the fixed network and dependency policies
   runtime:
     harness_version: 0.1.0
-    agent_image_id: sha256:...
+    codex_image_id: sha256:...
+    claude_image_id: sha256:...
     verifier_image_id: sha256:...
     setup_image_id: sha256:...
     proxy_image_id: sha256:...
@@ -166,8 +187,9 @@ Exit code 0 means the plan completed, including final verification. A run that v
 branch but could not release its containers or volumes exits non-zero and reports those
 `cleanupErrors`: the branch is good, but the run cannot account for what it left behind.
 
-The JSON report on stdout carries the plan state, the branch and head, each step with its attempt
-and commit, the final verification result, and the failure when there is one. The same report is
+The JSON report on stdout carries the plan state, branch and head, each step's `attempts` list and
+commit, final verification, and any failure. Each attempt lists `id`, `kind` (`normal` or
+`stronger`), `profile`, `state`, optional commit, and diagnosis. The same report is
 stored under `<artifacts>/<plan-id>/reports/invocation-<n>.json`, and earlier reports are never
 replaced.
 
@@ -192,7 +214,9 @@ database records:
 | Recorded state | What the rerun does |
 | --- | --- |
 | Plan completed | Returns the stored report. No agent, no verifier, no Git write, no new attempt. |
-| Step failed | Starts a **new** attempt for that step from the last accepted commit. Completed steps are untouched. |
+| Retryable normal attempt failed | Runs one workspace-free `claude-deep` diagnosis, then one stronger attempt from the same accepted parent. |
+| Diagnosis failed or timed out | Still runs the stronger attempt; the original failure remains primary. |
+| Stronger or non-retryable attempt failed | Stops. A later explicit rerun starts a new normal cycle from the last accepted commit. |
 | Step committed, then teardown failed | The commit is already visible, so the step counts as accepted and the head has moved; the rerun continues with the **next** step. |
 | Attempt still `running` (the process was killed) | Reuses that attempt id and reruns the whole step from its stored parent. The killed run's evidence is kept; the rerun writes to `run-2`. |
 | Attempt `accepting`, commit already on the branch | Finishes the database transition only — no agent, no verifier. |
@@ -201,6 +225,10 @@ database records:
 
 A commit can never be duplicated: acceptance is keyed on the manifest, plan, step, attempt and
 parent commit, and a repeated key returns the existing commit instead of making a second one.
+
+One invocation can make at most one normal attempt, one diagnosis and one stronger attempt.
+`provider_error` is deliberately non-retryable: it is a provider refusal such as invalid auth,
+quota or an unavailable model, not evidence that a stronger model can repair the workspace.
 
 ### Cancelling
 
@@ -239,6 +267,7 @@ Everything a plan produces lives under `<artifacts>/<plan-id>/`:
   plan.yml                        the exact plan bytes it was approved for
   reports/invocation-<n>.json     one per state-changing invocation, never replaced
   steps/<step-id>/<attempt>/run-<n>/
+    diagnosis/                    evidence-only diagnosis for a failed normal attempt
   final/run-<n>/final-verification.json
   snapshots/                      see retention below
 ```
@@ -247,13 +276,14 @@ Inside one `run-<n>` directory:
 
 | File | What it holds |
 | --- | --- |
-| `run-manifest.json` | Base branch and commit, input hashes, the four executed image IDs, snapshot hashes, usage, result, cleanup errors. |
+| `run-manifest.json` | Base commit, input hashes, five executed image IDs, selected profile, requested/reported model, usage, snapshots, result and cleanup errors. |
 | `prompt.txt` | Exactly what the agent was sent. |
-| `agent-events.jsonl` | Redacted agent event stream. |
+| `agent-events.jsonl` / `claude-events.jsonl` | Redacted provider event stream. |
 | `logs/agent.log`, `logs/verification.log` | Redacted container output. |
 | `proxy-records.jsonl` | One record per connection: hostname, allowed/denied, bytes, duration, result. |
 | `verification.json` | Per-command exit codes and output. |
 | `source-diff.json` | The validated change set that was committed. |
+| `diagnosis/diagnosis.json` | Redacted status and advisory text for a retryable failed normal attempt. |
 
 A `code_behavior` step adds `baseline/`, `tests/`, `red/`, `implementation/` and `green/`
 beneath its run directory.
@@ -289,6 +319,8 @@ valid JSON.
 
 ## 6. Re-authenticating
 
+### Codex
+
 The harness store, once seeded, is deliberately never re-seeded: Codex rotates the refresh token
 in place, so overwriting the store from a stale `~/.codex/auth.json` would hand back a spent
 token. The consequence is that `codex login` alone does not give the harness a new credential —
@@ -301,6 +333,26 @@ rm -f "${HARNESS_STORE_DIR:-${HARNESS_STATE_DIR:-$HOME/.local/state/ai-harness}/
 
 The next run re-seeds the store from `~/.codex/auth.json`. Do this after any failure that says
 the credential could not be read, parsed, or saved.
+
+### Claude
+
+Claude auth is a private static token file, not the Codex store. Provision it once:
+
+```sh
+claude setup-token
+install -d -m 0700 "${HARNESS_STATE_DIR:-$HOME/.local/state/ai-harness}/auth/claude"
+chmod 0700 "${HARNESS_STATE_DIR:-$HOME/.local/state/ai-harness}/auth/claude"
+umask 077
+read -r -s CLAUDE_SETUP_TOKEN
+printf '%s\n' "$CLAUDE_SETUP_TOKEN" > \
+  "${HARNESS_STATE_DIR:-$HOME/.local/state/ai-harness}/auth/claude/token"
+unset CLAUDE_SETUP_TOKEN
+```
+
+The harness reads that file, streams it into an attempt-scoped volume, and never rotates it or
+copies it into Docker metadata. Re-authenticate by replacing only this file with a new
+`claude setup-token` value and mode `0600`; Codex auth remains untouched. Do not pass the token as
+a command argument or Docker environment variable.
 
 ## 7. Recovery
 
@@ -330,6 +382,7 @@ parent — stops the plan without changing either side.
 | `provider_connectivity_timeout` | The provider was unreachable through the proxy allowlist. Nothing was spent on the agent phase. |
 | `setup_timeout` / `setup_failed` | The dependency install overran its budget or failed. No cache entry is published. |
 | `agent_timeout` / `agent_failed` | The agent was killed at its deadline or exited non-zero. The attempt workspace is discarded; no commit. |
+| `provider_error` | The provider refused the request. It is recorded from structured provider output and is not diagnosed or retried; check auth, plan/Agent SDK credit and pinned model availability. |
 | `invalid_change` | The agent wrote outside `implementation_paths`, touched a dependency manifest, added an unsafe symlink, or changed nothing. |
 | `baseline_failed` | Existing tests failed, an expected test already existed, or baseline retry policy blocked the run. |
 | `red_invalid` | New tests did not fail for an allowed, behavior-related reason. Read `red/verdict.json`. |
