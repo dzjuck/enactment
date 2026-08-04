@@ -9,6 +9,7 @@ import { ArtifactStore } from '../../src/artifacts/store.js';
 import type { RuntimeImages } from '../../src/docker/images.js';
 import { idempotencyKey } from '../../src/git/idempotency.js';
 import { loadPlan } from '../../src/plan/load.js';
+import { PROFILES } from '../../src/routing/profiles.js';
 import { runSinglePlanStep } from '../../src/run/bridge.js';
 import type { StepExecutionOptions } from '../../src/run/orchestrator.js';
 import { createTargetRepo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
@@ -107,6 +108,7 @@ describe('step executor inputs', () => {
     const options = seen as StepExecutionOptions;
 
     expect(options.step).toEqual(plan.steps[0]);
+    expect(options.profile).toBe(PROFILES['codex-fast']);
     expect(options.planId).toBe('slugify-plan');
     expect(options.planHash).toBe(planHash);
     expect(options.images).toBe(IMAGES);
@@ -133,6 +135,7 @@ describe('step executor inputs', () => {
 
     expect(orchestrator).not.toContain('loadPlan');
     expect(orchestrator).not.toContain('resolveRuntimeImages');
+    expect(orchestrator).not.toContain('resolveNormalProfile');
     expect(orchestrator).not.toContain('rev-parse');
   });
 

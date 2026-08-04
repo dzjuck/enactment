@@ -15,6 +15,7 @@ import {
 } from '../../src/plan/execution-manifest.js';
 import { pruneSnapshots, runPlan, type PlanReport } from '../../src/run/coordinator.js';
 import type { StepExecutionOptions, RunReport } from '../../src/run/orchestrator.js';
+import { PROFILES } from '../../src/routing/profiles.js';
 import { StateStore } from '../../src/state/store.js';
 import type { FinalVerificationResult } from '../../src/verify/final.js';
 import { commitAll, createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
@@ -44,10 +45,10 @@ async function scratch(): Promise<string> {
   return dir;
 }
 
-function step(id: string): string[] {
+function step(id: string, complexity = 'low'): string[] {
   return [
     `  - type: task`,
-    `    complexity: low`,
+    `    complexity: ${complexity}`,
     `    id: ${id}`,
     `    observable_behavior: Do ${id}.`,
     `    implementation_paths:`,
@@ -58,12 +59,15 @@ function step(id: string): string[] {
   ];
 }
 
-function planDocumentFor(stepIds: string[]): string {
+function planDocumentFor(
+  stepIds: string[],
+  complexities: Record<string, string> = {},
+): string {
   return [
     'version: 1',
     'id: demo-plan',
     'steps:',
-    ...stepIds.flatMap(step),
+    ...stepIds.flatMap((id) => step(id, complexities[id])),
     'final_verification:',
     '  commands:',
     '    - ["node", "--version"]',
@@ -78,13 +82,16 @@ interface Harness {
   artifactsRoot: string;
 }
 
-async function harness(stepIds = ['first-step', 'second-step']): Promise<Harness> {
+async function harness(
+  stepIds = ['first-step', 'second-step'],
+  complexities: Record<string, string> = {},
+): Promise<Harness> {
   const repo = await createM2Repo();
   repos.push(repo.dir);
 
   const dir = await scratch();
   const planFile = join(dir, 'plan.yml');
-  await writeFile(planFile, planDocumentFor(stepIds));
+  await writeFile(planFile, planDocumentFor(stepIds, complexities));
 
   const manifestPath = join(dir, 'execution-manifest.yml');
   await writeManifest(
@@ -151,6 +158,27 @@ const passingFinal = (): Promise<FinalVerificationResult> =>
   });
 
 describe('plan progression', () => {
+  it('resolves each complexity once and hands the selected profile to the executor', async () => {
+    const ids = ['low-step', 'medium-step', 'high-step'];
+    const { repo, approved, store, artifactsRoot } = await harness(ids, {
+      'low-step': 'low',
+      'medium-step': 'medium',
+      'high-step': 'high',
+    });
+    const seen: StepExecutionOptions[] = [];
+
+    await runPlan(
+      { approved, store, artifactsRoot },
+      { execute: committingExecutor(repo, seen), verifyFinal: passingFinal },
+    );
+
+    expect(seen.map((options) => options.profile)).toEqual([
+      PROFILES['codex-fast'],
+      PROFILES['claude-balanced'],
+      PROFILES['codex-deep'],
+    ]);
+  });
+
   it('registers the manifest, runs every step in order, and completes the plan', async () => {
     const { repo, approved, store, artifactsRoot } = await harness();
     const seen: StepExecutionOptions[] = [];

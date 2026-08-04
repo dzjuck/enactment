@@ -2,15 +2,14 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { PlanStep } from '../plan/schema.js';
-import { compileCodexPolicy } from '../adapters/codex/policy.js';
 import { implementationPrompt, testWritingPrompt } from '../adapters/codex/prompts.js';
-import { runCodexAgent, type AgentRunResult } from '../adapters/codex/run.js';
+import { providerDescriptor } from '../adapters/provider.js';
 import { providerSmokeTest } from '../adapters/codex/smoke.js';
 import type { ArtifactStore } from '../artifacts/store.js';
 import { collectSecrets, createRedactor } from '../artifacts/redact.js';
 import { readAuthStore, seedAuthStore } from '../auth/store.js';
 import { authMount, copyBackAuth, createAuthVolume } from '../auth/volume.js';
-import { CODEX_PROVIDER_ALLOWLIST } from '../config/pins.js';
+import { claudeTokenSecrets, loadClaudeToken } from '../auth/claude-token.js';
 import { dependencyCacheKey, installCommand, lockfileHash } from '../deps/cache-key.js';
 import { DependencyCache, ensureDependencySnapshot } from '../deps/setup.js';
 import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
@@ -38,6 +37,7 @@ import { snapshotWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
 import type { AttemptPhase } from '../state/store.js';
+import type { AgentProfile } from '../routing/profiles.js';
 import { stateDirectory } from '../state/paths.js';
 import { CleanupError, describeError, releaseAll, sweepAttempt, withCleanupOutcome } from './cleanup.js';
 import { PhaseFailure, type FailureCategory } from './failure.js';
@@ -94,6 +94,7 @@ export type OnStepEvent = (event: StepEvent) => void | Promise<void>;
  */
 export interface StepExecutionOptions {
   step: PlanStep;
+  profile: AgentProfile;
   planId: string;
   /** Identity of the approval this step is executing under. */
   planHash: string;
@@ -116,6 +117,7 @@ export interface StepExecutionOptions {
   snapshots: ArtifactStore;
 
   sourceCodexHome?: string;
+  claudeTokenFile?: string;
   storeDirectory?: string;
   dependencyCacheDirectory?: string;
   /** Test-only substitution of runtime images and agent environment. See `RunInjection`. */
@@ -201,7 +203,7 @@ const ATTEMPT_PHASE: Record<RunPhase, AttemptPhase> = {
  * attempt-scoped container, volume or network behind.
  */
 export async function runStep(options: StepExecutionOptions): Promise<RunReport> {
-  const { attempt, step, images, snapshots } = options;
+  const { attempt, step, profile, images, snapshots } = options;
   const baseCommit = options.parentCommit;
   const teardown: (() => Promise<void>)[] = [];
 
@@ -233,9 +235,12 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     await phase('export');
     // Harness-owned helpers keep the approved set even where they use the Codex image; only
     // the model invocation itself is substitutable, and only by a test.
+    const descriptor = providerDescriptor(profile);
+    const injectedImage =
+      descriptor.provider === 'codex' ? options.injection?.codex : options.injection?.claude;
     const agentImages: RuntimeImages = {
       ...images,
-      codex: options.injection?.codex ?? images.codex,
+      [descriptor.provider]: injectedImage ?? descriptor.image(images),
     };
     const { tar, hash: exportHash } = await exportCommit(options.repoPath, baseCommit);
     const timeouts = resolveTimeouts(step.timeouts);
@@ -247,7 +252,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     const inputs: Record<string, unknown> = {
       plan_hash: options.planHash,
       export_hash: exportHash,
-      ...networkPolicySection(),
+      ...networkPolicySection(descriptor.allowlist, descriptor.cliVersion),
     };
     manifest.inputs = inputs;
     const snapshotHashes: Record<string, string> = {};
@@ -298,39 +303,43 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     );
     teardown.push(() => removeVolume(agentDependencies));
 
-    const authStore = await seedAuthStore(
-      options.storeDirectory ?? join(stateDirectory(), 'auth'),
-      options.sourceCodexHome,
-    );
-    const stored = await readAuthStore(authStore);
-    redact = createRedactor(collectSecrets(stored));
-
-    const policy = compileCodexPolicy({ prompt: step.observable_behavior, workdir: '/workspace' });
+    const policy = descriptor.compile(step.observable_behavior);
     inputs.policy_hash = policy.hash;
-
-    // CODEX_HOME is a per-attempt volume, not a bind of the host store: no host directory is
-    // ever mounted into a container, so no host uid mapping is part of the contract.
-    const runAuth = await createAuthVolume(
-      attempt,
-      { provider: 'codex', auth: stored, policy: policy.files },
-      images,
-    );
-    teardown.push(() => removeVolume(runAuth));
-
-    // Pushed *after* the removal so that teardown's reverse order runs it *first*: the volume
-    // is deleted only once a rotated credential is safely in the store, or the failure to save
-    // it has been recorded. Registered only now, because there is nothing to copy back until
-    // seeding has succeeded.
-    //
-    // In teardown rather than inline because the agent block has several exits — a timeout, a
-    // non-zero exit, an unparseable event stream, a failure writing the proxy artifacts — and
-    // an inline call covers only the ones that return normally. Codex rotates the refresh
-    // token in place, so a rotation dropped here fails some later run with no attributable
-    // cause. `releaseAll` collects the error rather than throwing, and a run that could not
-    // save a rotated credential does not get to report success.
-    teardown.push(async () => {
-      await copyBackAuth(runAuth, authStore, images, {}, attemptLabels(attempt, 'auth-read'));
-    });
+    let runAuth: string;
+    let secrets: string[];
+    if (descriptor.provider === 'codex') {
+      const authStore = await seedAuthStore(
+        options.storeDirectory ?? join(stateDirectory(), 'auth'),
+        options.sourceCodexHome,
+      );
+      const stored = await readAuthStore(authStore);
+      secrets = collectSecrets(stored);
+      runAuth = await createAuthVolume(
+        attempt,
+        { provider: 'codex', auth: stored, policy: policy.files },
+        images,
+      );
+      teardown.push(() => removeVolume(runAuth));
+      teardown.push(async () => {
+        await copyBackAuth(
+          runAuth,
+          authStore,
+          images,
+          {},
+          attemptLabels(attempt, 'auth-read'),
+        );
+      });
+    } else {
+      const token = await loadClaudeToken(options.claudeTokenFile);
+      secrets = claudeTokenSecrets(token);
+      runAuth = await createAuthVolume(
+        attempt,
+        { provider: 'claude', token },
+        images,
+      );
+      teardown.push(() => removeVolume(runAuth));
+    }
+    redact = createRedactor(secrets);
 
     // Evidence, not a rollback point: the exact workspace the agent was handed, so a run can
     // be reproduced later. A failed attempt's workspace is disposable — it is deleted with
@@ -406,7 +415,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
       const agentPolicy =
         agentPhase === 'agent'
           ? policy
-          : compileCodexPolicy({ prompt, workdir: '/workspace' });
+          : descriptor.compile(prompt);
 
       // Outside the topology, so that a network or proxy that fails to come up is attributed
       // to this phase rather than to the workspace phase that happened to precede it.
@@ -418,27 +427,28 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
             attempt,
             egressNetwork: networks.egress ?? '',
             outwardNetwork: networks['proxy-egress'] ?? '',
-            allowlist: CODEX_PROVIDER_ALLOWLIST,
+            allowlist: descriptor.allowlist,
             ports: [443],
             images,
           },
           async (handle) => {
             const proxied = proxyEnvironment(handle);
-            let outcome: { value: AgentRunResult } | { error: unknown };
+            let outcome: { value: Awaited<ReturnType<typeof descriptor.run>> } | { error: unknown };
 
             try {
               await providerSmokeTest({
-                url: `https://${CODEX_PROVIDER_ALLOWLIST[0] ?? 'chatgpt.com'}/`,
+                url: `https://${descriptor.allowlist[0] ?? ''}/`,
                 network: networks.egress ?? '',
                 env: proxied,
                 timeoutSeconds: timeouts.connectivity_smoke_seconds,
                 images,
+                provider: descriptor.provider,
                 labels: attemptLabels(attempt, 'connectivity'),
               });
 
               await phase(agentPhase);
               outcome = {
-                value: await runCodexAgent({
+                value: await descriptor.run({
                   prompt,
                   policy: agentPolicy,
                   network: networks.egress ?? '',
@@ -452,12 +462,12 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
                   mounts: [
                     workspaceMount(workspace),
                     dependencyMount(agentDependencies),
-                    authMount('codex', runAuth),
+                    authMount(descriptor.authProvider, runAuth),
                   ],
                   timeoutSeconds: timeouts.agent_seconds,
                   graceSeconds: timeouts.termination_grace_seconds,
                   artifactDir: phaseArtifacts,
-                  secrets: collectSecrets(stored),
+                  secrets,
                   images: agentImages,
                   labels: attemptLabels(attempt, agentPhase),
                 }),
@@ -481,6 +491,17 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
         ),
       );
 
+      const agentRuns = (manifest.agent_runs ?? {}) as Record<string, unknown>;
+      agentRuns[agentPhase] = {
+        profile: profile.id,
+        provider: descriptor.provider,
+        cli_version: descriptor.cliVersion,
+        requested_model: profile.model,
+        reported_model: agentRun.reportedModel,
+        effort: profile.effort,
+      };
+      manifest.agent_runs = agentRuns;
+
       const agentUsage = usageSection(agentRun.usage);
       if (step.type === 'code_behavior') {
         const phaseUsage = (manifest.usage ?? {}) as Record<string, unknown>;
@@ -493,10 +514,20 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
       // §32: container logs are artifacts, and they pass through redaction like everything else.
       await writeLog(phaseArtifacts, 'agent.log', redact(agentRun.stdout + agentRun.stderr));
 
+      if (agentRun.reportedModel !== null && agentRun.reportedModel !== profile.model) {
+        throw new PhaseFailure(
+          agentPhase,
+          'agent_failed',
+          `provider reported model ${agentRun.reportedModel}, requested ${profile.model}`,
+        );
+      }
+
       if (agentRun.status !== 'completed') {
         throw new PhaseFailure(
           agentPhase,
-          agentRun.status === 'timeout' ? 'agent_timeout' : 'agent_failed',
+          agentRun.status === 'timeout'
+            ? 'agent_timeout'
+            : (agentRun.failureCategory ?? 'agent_failed'),
           `agent run ${agentRun.status} (exit ${String(agentRun.exitCode)})`,
         );
       }

@@ -17,6 +17,8 @@ import type { RuntimeImage } from '../docker/images.js';
 export interface RunInjection {
   /** Replaces the image the Codex invocation runs. */
   codex?: RuntimeImage;
+  /** Replaces the image the Claude invocation runs. */
+  claude?: RuntimeImage;
   /** Merged under the harness's own agent environment, which always wins. */
   agentEnv?: Record<string, string>;
   /**

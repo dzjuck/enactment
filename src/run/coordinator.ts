@@ -6,6 +6,7 @@ import { execa } from 'execa';
 import { ArtifactStore } from '../artifacts/store.js';
 import { idempotencyKey } from '../git/idempotency.js';
 import type { ApprovedInputs } from '../plan/execution-manifest.js';
+import { resolveNormalProfile } from '../routing/profiles.js';
 import type { PlanRecord, PlanState, StateStore } from '../state/store.js';
 import { newAttemptId } from '../volume/naming.js';
 import {
@@ -25,6 +26,7 @@ export interface CoordinatorOptions {
   /** Copied into the plan tree as approval evidence, when the CLI supplies it. */
   manifestPath?: string;
   sourceCodexHome?: string;
+  claudeTokenFile?: string;
   storeDirectory?: string;
   dependencyCacheDirectory?: string;
   injection?: RunInjection;
@@ -274,6 +276,7 @@ export async function runPlan(
 
     const outcome = await execute({
       step,
+      profile: resolveNormalProfile(step.complexity),
       planId: approved.plan.id,
       planHash: approved.planHash,
       manifestHash: approved.manifestHash,
@@ -288,6 +291,7 @@ export async function runPlan(
       artifactDir,
       snapshots,
       sourceCodexHome: options.sourceCodexHome,
+      claudeTokenFile: options.claudeTokenFile,
       storeDirectory: options.storeDirectory,
       dependencyCacheDirectory: options.dependencyCacheDirectory,
       injection: options.injection,

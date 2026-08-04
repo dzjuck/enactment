@@ -7,6 +7,7 @@ import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
 import { idempotencyKey } from '../git/idempotency.js';
 import { loadPlan } from '../plan/load.js';
 import type { Plan, PlanStep } from '../plan/schema.js';
+import { resolveNormalProfile } from '../routing/profiles.js';
 import { newAttemptId } from '../volume/naming.js';
 import type { RunInjection } from './inject.js';
 import {
@@ -44,6 +45,7 @@ export interface RunOptions {
   repoPath: string;
   artifactDir: string;
   sourceCodexHome?: string;
+  claudeTokenFile?: string;
   storeDirectory?: string;
   dependencyCacheDirectory?: string;
   /** Test-only substitution of runtime images and agent environment. See `RunInjection`. */
@@ -91,6 +93,7 @@ export async function runSinglePlanStep(
 
     inputs = {
       step,
+      profile: resolveNormalProfile(step.complexity),
       planId: plan.id,
       planHash,
       // No approved manifest exists on this path, so the plan's own byte hash is the
@@ -114,6 +117,7 @@ export async function runSinglePlanStep(
       artifactDir: options.artifactDir,
       snapshots: new ArtifactStore(join(options.artifactDir, 'snapshots')),
       sourceCodexHome: options.sourceCodexHome,
+      claudeTokenFile: options.claudeTokenFile,
       storeDirectory: options.storeDirectory,
       dependencyCacheDirectory: options.dependencyCacheDirectory,
       injection: options.injection,

@@ -1,4 +1,5 @@
 import type { RuntimeImages } from '../../docker/images.js';
+import type { ProviderName } from '../types.js';
 import { runContainer } from '../../docker/run.js';
 import { PhaseFailure } from '../../run/failure.js';
 
@@ -9,6 +10,7 @@ export interface SmokeOptions {
   env: Record<string, string>;
   timeoutSeconds: number;
   images: RuntimeImages;
+  provider?: ProviderName;
   labels?: Record<string, string>;
 }
 
@@ -30,7 +32,7 @@ export async function providerSmokeTest(options: SmokeOptions): Promise<SmokeRes
 
   const result = await runContainer(
     {
-      image: options.images.codex.id,
+      image: options.provider === 'claude' ? options.images.claude.id : options.images.codex.id,
       argv: [
         'curl',
         '-sS',
