@@ -138,7 +138,7 @@ describe('autonomous two-step plan', () => {
       storeDirectory: join(root, 'store'),
       dependencyCacheDirectory: join(root, 'deps'),
       injection: {
-        agent: stub,
+        codex: stub,
         agentEnv: {
           STUB_MODE: 'write',
           STUB_EVENTS: cannedEvents(),

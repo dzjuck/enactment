@@ -35,7 +35,8 @@ import { createRepo, createTargetRepo, git, removeRepo, type TargetRepo } from '
 import { planDocument } from '../helpers/plan.js';
 
 const IMAGES: RuntimeImages = {
-  agent: { role: 'agent', id: `sha256:${'a'.repeat(64)}` },
+  codex: { role: 'codex', id: `sha256:${'a'.repeat(64)}` },
+  claude: { role: 'claude', id: `sha256:${'e'.repeat(64)}` },
   verifier: { role: 'verifier', id: `sha256:${'b'.repeat(64)}` },
   setup: { role: 'setup', id: `sha256:${'c'.repeat(64)}` },
   proxy: { role: 'proxy', id: `sha256:${'d'.repeat(64)}` },
@@ -118,7 +119,8 @@ describe('candidate execution manifest', () => {
     expect(manifest.repository).toEqual({ base_branch: 'main', base_commit: BASE.commit });
     expect(manifest.runtime).toEqual({
       harness_version: '0.1.0',
-      agent_image_id: IMAGES.agent.id,
+      codex_image_id: IMAGES.codex.id,
+      claude_image_id: IMAGES.claude.id,
       verifier_image_id: IMAGES.verifier.id,
       setup_image_id: IMAGES.setup.id,
       proxy_image_id: IMAGES.proxy.id,
@@ -387,19 +389,22 @@ describe('execution manifest approval', () => {
     expect((error as ApprovalError).reason).toBe('base_unresolvable');
   });
 
-  it('rejects a changed runtime image ID before anything executes', async () => {
-    const { repo, manifestPath } = await approved();
+  it.each(['codex', 'claude'] as const)(
+    'rejects a changed %s runtime image ID before anything executes',
+    async (role) => {
+      const { repo, manifestPath } = await approved();
 
-    const error = await validateManifest(await loadManifest(manifestPath), {
-      repoPath: repo.dir,
-      resolveImages: () =>
-        Promise.resolve({ ...IMAGES, verifier: { role: 'verifier', id: `sha256:${'9'.repeat(64)}` } }),
-    }).catch((thrown: unknown) => thrown);
+      const error = await validateManifest(await loadManifest(manifestPath), {
+        repoPath: repo.dir,
+        resolveImages: () =>
+          Promise.resolve({ ...IMAGES, [role]: { role, id: `sha256:${'9'.repeat(64)}` } }),
+      }).catch((thrown: unknown) => thrown);
 
-    expect(error).toBeInstanceOf(ApprovalError);
-    expect((error as ApprovalError).reason).toBe('runtime_changed');
-    expect((error as ApprovalError).message).toContain('verifier_image_id');
-  });
+      expect(error).toBeInstanceOf(ApprovalError);
+      expect((error as ApprovalError).reason).toBe('runtime_changed');
+      expect((error as ApprovalError).message).toContain(`${role}_image_id`);
+    },
+  );
 
   it('rejects a changed harness version', async () => {
     const { repo, manifestPath } = await approved();

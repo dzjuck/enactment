@@ -17,7 +17,8 @@ import { StateStore } from '../../src/state/store.js';
 import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
 const IMAGES: RuntimeImages = {
-  agent: { role: 'agent', id: `sha256:${'a'.repeat(64)}` },
+  codex: { role: 'codex', id: `sha256:${'a'.repeat(64)}` },
+  claude: { role: 'claude', id: `sha256:${'e'.repeat(64)}` },
   verifier: { role: 'verifier', id: `sha256:${'b'.repeat(64)}` },
   setup: { role: 'setup', id: `sha256:${'c'.repeat(64)}` },
   proxy: { role: 'proxy', id: `sha256:${'d'.repeat(64)}` },
@@ -163,7 +164,7 @@ describe('prepare', () => {
 
     const manifest = await loadManifest(space.manifestPath);
     expect(manifest.manifest.repository.base_commit).toBe(space.repo.commit);
-    expect(manifest.manifest.runtime.agent_image_id).toBe(IMAGES.agent.id);
+    expect(manifest.manifest.runtime.codex_image_id).toBe(IMAGES.codex.id);
 
     await expect(access(join(space.stateDir, 'state.db'))).rejects.toThrow();
   });
@@ -416,7 +417,7 @@ describe('the approved manifest is the only runtime source', () => {
 
     const rebuilt: RuntimeImages = {
       ...IMAGES,
-      agent: { role: 'agent', id: `sha256:${'9'.repeat(64)}` },
+      codex: { role: 'codex', id: `sha256:${'9'.repeat(64)}` },
     };
 
     const result = await execute(

@@ -9,7 +9,8 @@ import type { RedVerdict } from '../verify/red.js';
 /** The `runtime` block of the DESIGN.md §20 execution manifest. */
 export interface RuntimeSection {
   harness_version: string;
-  agent_image_id: string;
+  codex_image_id: string;
+  claude_image_id: string;
   verifier_image_id: string;
   setup_image_id: string;
   proxy_image_id: string;
@@ -87,7 +88,8 @@ export function networkPolicySection(
 export function runtimeSection(images: RuntimeImages): RuntimeSection {
   return {
     harness_version: HARNESS_VERSION,
-    agent_image_id: images.agent.id,
+    codex_image_id: images.codex.id,
+    claude_image_id: images.claude.id,
     verifier_image_id: images.verifier.id,
     setup_image_id: images.setup.id,
     proxy_image_id: images.proxy.id,

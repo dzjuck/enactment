@@ -66,7 +66,7 @@ export interface ResolveRuntimeImagesOptions {
 }
 
 /**
- * Resolve the four runtime tags to image IDs, once, before anything is started.
+ * Resolve the five runtime tags to image IDs, once, before anything is started.
  *
  * V1 trusts the local Docker daemon: the Dockerfiles, the base-image digest and the tool
  * versions are pinned in source, and an explicit build produces the local images. What must

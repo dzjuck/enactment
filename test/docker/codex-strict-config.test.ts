@@ -33,7 +33,7 @@ const policy = compileCodexPolicy({ prompt: 'noop', workdir: '/tmp' });
 function runCodex(home: string, args: string[], timeoutSeconds = 30): Promise<RunResult> {
   return runContainer(
     {
-      image: IMAGE_PINS.agent.tag,
+      image: IMAGE_PINS.codex.tag,
       argv: args,
       network: 'none',
       env: { CODEX_HOME: CODEX_HOME_PATH },

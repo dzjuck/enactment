@@ -130,7 +130,7 @@ describe('a SIGKILLed run is cleaned up by the next production CLI start', () =>
           storeDirectory: join(root, 'store'),
           dependencyCacheDirectory: join(root, 'deps'),
           injection: {
-            agent: stub,
+            codex: stub,
             // Hangs, so the agent container is alive when the run is killed.
             agentEnv: {
               STUB_MODE: 'hang',

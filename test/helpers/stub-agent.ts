@@ -10,7 +10,7 @@ export const STUB_AGENT_IMAGE = 'ai-harness/stub-agent:test';
  * rule that what ran is what the manifest records.
  */
 export async function stubAgentImage(): Promise<RuntimeImage> {
-  return { role: 'agent', id: await resolveImageId(STUB_AGENT_IMAGE) };
+  return { role: 'codex', id: await resolveImageId(STUB_AGENT_IMAGE) };
 }
 
 export async function buildStubAgent(): Promise<string> {

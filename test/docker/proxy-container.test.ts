@@ -44,7 +44,7 @@ afterEach(async () => {
 
 function curlThrough(network: string, env: Record<string, string>, url: string): Promise<RunResult> {
   return runContainer({
-    image: IMAGE_PINS.agent.tag,
+    image: IMAGE_PINS.codex.tag,
     argv: ['curl', '-sS', '--proxytunnel', '--max-time', '10', url],
     network,
     env,

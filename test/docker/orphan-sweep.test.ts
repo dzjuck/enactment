@@ -133,7 +133,7 @@ describe('orphans left by a run that was killed outright', () => {
           dependencyCacheDirectory: join(root, 'deps'),
           injection: {
             attempt,
-            agent: stub,
+            codex: stub,
             // Hangs, so the agent container is alive when the run is killed.
             agentEnv: {
               STUB_MODE: 'hang',

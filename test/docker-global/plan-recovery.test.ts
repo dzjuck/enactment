@@ -190,7 +190,7 @@ describe('a SIGKILLed plan run', () => {
           storeDirectory: join(root, 'store'),
           dependencyCacheDirectory: join(root, 'deps'),
           // Hangs, so the agent container is alive when the process is killed.
-          injection: { agent: stub, agentEnv: stubEnv('hang') },
+          injection: { codex: stub, agentEnv: stubEnv('hang') },
         }),
       },
     });
@@ -241,7 +241,7 @@ describe('a SIGKILLed plan run', () => {
         sourceCodexHome: join(root, 'codex-source'),
         storeDirectory: join(root, 'store'),
         dependencyCacheDirectory: join(root, 'deps'),
-        injection: { agent: stub, agentEnv: stubEnv('write') },
+        injection: { codex: stub, agentEnv: stubEnv('write') },
       });
 
       expect(report.failure).toBeUndefined();

@@ -61,7 +61,7 @@ async function emptyVolume(): Promise<string> {
 
 function inWorkspace(name: string, argv: string[]): Promise<RunResult> {
   return runContainer({
-    image: IMAGE_PINS.agent.tag,
+    image: IMAGE_PINS.codex.tag,
     argv,
     network: 'none',
     mounts: [workspaceMount(name)],

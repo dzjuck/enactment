@@ -40,7 +40,7 @@ const artifactDirs: string[] = [];
 
 beforeAll(async () => {
   images = await runtimeImages();
-  stubImages = { ...images, agent: await stubAgentImage() };
+  stubImages = { ...images, codex: await stubAgentImage() };
 
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));

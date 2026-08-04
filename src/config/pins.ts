@@ -31,7 +31,7 @@ export const PROVIDER_ALLOWLIST_CLAUDE_VERSION = '2.1.221';
 export const TYPESCRIPT_VERSION = '5.9.3';
 export const TYPES_NODE_VERSION = '24.10.1';
 
-/** Multi-arch index digest, resolved from the registry. One base for all four images. */
+/** Multi-arch index digest, resolved from the registry. One base for all five images. */
 export const NODE_BASE_IMAGE =
   'node:22-bookworm-slim@sha256:f32b81066cde10a75dbac96646099533316d94bac4150c55da1636e1f0ffdc46';
 
@@ -39,9 +39,15 @@ export const NODE_BASE_IMAGE =
 export const AGENT_UID = 1001;
 export const AGENT_GID = 1001;
 
-export type ImageRole = 'agent' | 'verifier' | 'setup' | 'proxy';
+export type ImageRole = 'codex' | 'claude' | 'verifier' | 'setup' | 'proxy';
 
-export const IMAGE_ROLES: readonly ImageRole[] = ['agent', 'verifier', 'setup', 'proxy'];
+export const IMAGE_ROLES: readonly ImageRole[] = [
+  'codex',
+  'claude',
+  'verifier',
+  'setup',
+  'proxy',
+];
 
 /**
  * How one runtime image is built. The tag is a build alias only: what a run executes is the
@@ -65,11 +71,17 @@ const COMMON_BUILD_ARGS = {
 };
 
 export const IMAGE_PINS: Record<ImageRole, ImagePin> = {
-  agent: {
-    role: 'agent',
-    tag: `ai-harness/agent:${HARNESS_VERSION}`,
-    context: 'images/agent',
+  codex: {
+    role: 'codex',
+    tag: `ai-harness/codex:${HARNESS_VERSION}`,
+    context: 'images/codex',
     buildArgs: { ...COMMON_BUILD_ARGS, CODEX_VERSION },
+  },
+  claude: {
+    role: 'claude',
+    tag: `ai-harness/claude:${HARNESS_VERSION}`,
+    context: 'images/claude',
+    buildArgs: { ...COMMON_BUILD_ARGS, CLAUDE_VERSION },
   },
   verifier: {
     role: 'verifier',

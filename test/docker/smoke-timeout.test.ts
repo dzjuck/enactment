@@ -124,7 +124,7 @@ describe('termination ladder against a real container', () => {
 
     const result = await runContainer(
       {
-        image: IMAGE_PINS.agent.tag,
+        image: IMAGE_PINS.codex.tag,
         argv: ['sh', '-c', 'trap "" TERM; while true; do sleep 1; done'],
         network: 'none',
       },
@@ -140,7 +140,7 @@ describe('termination ladder against a real container', () => {
 
     try {
       const before = await runContainer({
-        image: IMAGE_PINS.agent.tag,
+        image: IMAGE_PINS.codex.tag,
         argv: ['sh', '-c', 'find /workspace -mindepth 1 | sort'],
         network: 'none',
         mounts: [workspaceMount(volume)],
@@ -149,7 +149,7 @@ describe('termination ladder against a real container', () => {
 
       const timedOut = await runContainer(
         {
-          image: IMAGE_PINS.agent.tag,
+          image: IMAGE_PINS.codex.tag,
           argv: [
             'sh',
             '-c',
@@ -165,7 +165,7 @@ describe('termination ladder against a real container', () => {
       await restoreWorkspace(volume, snapshot, images);
 
       const after = await runContainer({
-        image: IMAGE_PINS.agent.tag,
+        image: IMAGE_PINS.codex.tag,
         argv: ['sh', '-c', 'find /workspace -mindepth 1 | sort'],
         network: 'none',
         mounts: [workspaceMount(volume)],

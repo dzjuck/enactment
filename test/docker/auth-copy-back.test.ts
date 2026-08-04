@@ -115,7 +115,7 @@ async function runRotating(
     dependencyCacheDirectory: join(root, 'deps'),
     ...overrides,
     injection: {
-      agent: stub,
+      codex: stub,
       agentEnv: {
         STUB_EVENTS: cannedEvents(),
         STUB_WRITE_PATH: 'src/slugify.js',

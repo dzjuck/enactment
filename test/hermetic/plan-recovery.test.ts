@@ -25,7 +25,8 @@ import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.
 import { tarWithAdditions } from '../helpers/tar.js';
 
 const IMAGES: RuntimeImages = {
-  agent: { role: 'agent', id: `sha256:${'a'.repeat(64)}` },
+  codex: { role: 'codex', id: `sha256:${'a'.repeat(64)}` },
+  claude: { role: 'claude', id: `sha256:${'e'.repeat(64)}` },
   verifier: { role: 'verifier', id: `sha256:${'b'.repeat(64)}` },
   setup: { role: 'setup', id: `sha256:${'c'.repeat(64)}` },
   proxy: { role: 'proxy', id: `sha256:${'d'.repeat(64)}` },
@@ -163,7 +164,8 @@ const passingFinal = (): Promise<FinalVerificationResult> =>
     exportHash: `sha256:${'0'.repeat(64)}`,
     runtime: {
       harness_version: '0.1.0',
-      agent_image_id: IMAGES.agent.id,
+      codex_image_id: IMAGES.codex.id,
+      claude_image_id: IMAGES.claude.id,
       verifier_image_id: IMAGES.verifier.id,
       setup_image_id: IMAGES.setup.id,
       proxy_image_id: IMAGES.proxy.id,

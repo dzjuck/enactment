@@ -54,7 +54,7 @@ function run(role: ImageRole, withAuth: boolean): Promise<RunResult> {
 
 describe('provider auth mount', () => {
   it('control: the agent container receives the credentials', async () => {
-    const result = await run('agent', true);
+    const result = await run('codex', true);
 
     expect(result.stdout).toContain('access-canary');
     expect(result.stdout.trim().endsWith('1')).toBe(true);
@@ -72,7 +72,7 @@ describe('provider auth mount', () => {
 
   it('mounts the credentials read-write, as rotation requires', async () => {
     const result = await runContainer({
-      image: images.agent.id,
+      image: images.codex.id,
       argv: ['sh', '-c', `touch ${CODEX_HOME_PATH}/rotation-probe`],
       network: 'none',
       env: authEnv(),

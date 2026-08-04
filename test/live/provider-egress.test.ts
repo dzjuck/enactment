@@ -47,7 +47,7 @@ describe('real provider egress', () => {
           // A real upgrade request over the tunnel: the response is an HTTP status from
           // the provider, not a connection failure.
           const upgrade = await runContainer({
-            image: IMAGE_PINS.agent.tag,
+            image: IMAGE_PINS.codex.tag,
             argv: [
               'curl',
               '-sS',
@@ -72,7 +72,7 @@ describe('real provider egress', () => {
           expect(upgrade.stdout).toMatch(/^HTTP\/1\.1 \d{3}/);
 
           const denied = await runContainer({
-            image: IMAGE_PINS.agent.tag,
+            image: IMAGE_PINS.codex.tag,
             argv: ['curl', '-sS', '--max-time', '20', '-o', '/dev/null', `https://${DENIED}/`],
             network,
             env,
@@ -80,7 +80,7 @@ describe('real provider egress', () => {
           expect(denied.exitCode).not.toBe(0);
 
           const direct = await runContainer({
-            image: IMAGE_PINS.agent.tag,
+            image: IMAGE_PINS.codex.tag,
             argv: ['curl', '-sS', '--max-time', '20', '-o', '/dev/null', `https://${PROVIDER}/`],
             network,
           });

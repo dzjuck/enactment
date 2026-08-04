@@ -41,7 +41,7 @@ describe('implementation snapshot', () => {
 
     try {
       await runContainer({
-        image: IMAGE_PINS.agent.tag,
+        image: IMAGE_PINS.codex.tag,
         argv: ['sh', '-c', 'echo "export const slugify = () => \'done\';" > /workspace/src/slugify.js'],
         network: 'none',
         mounts: [workspaceMount(volume)],
@@ -52,7 +52,7 @@ describe('implementation snapshot', () => {
       const captured = await store.read(snapshot.hash);
 
       await runContainer({
-        image: IMAGE_PINS.agent.tag,
+        image: IMAGE_PINS.codex.tag,
         argv: [
           'sh',
           '-c',

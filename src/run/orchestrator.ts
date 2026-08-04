@@ -231,11 +231,11 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
 
   try {
     await phase('export');
-    // Harness-owned helpers keep the approved set even where they use the agent role; only
-    // the agent invocation itself is substitutable, and only by a test.
+    // Harness-owned helpers keep the approved set even where they use the Codex image; only
+    // the model invocation itself is substitutable, and only by a test.
     const agentImages: RuntimeImages = {
       ...images,
-      agent: options.injection?.agent ?? images.agent,
+      codex: options.injection?.codex ?? images.codex,
     };
     const { tar, hash: exportHash } = await exportCommit(options.repoPath, baseCommit);
     const timeouts = resolveTimeouts(step.timeouts);

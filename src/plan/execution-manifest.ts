@@ -84,7 +84,8 @@ const manifestSchema = z.strictObject({
     }),
     runtime: z.strictObject({
       harness_version: z.string().min(1),
-      agent_image_id: sha256,
+      codex_image_id: sha256,
+      claude_image_id: sha256,
       verifier_image_id: sha256,
       setup_image_id: sha256,
       proxy_image_id: sha256,
@@ -207,7 +208,8 @@ export async function buildManifest(options: BuildManifestOptions): Promise<Exec
     inputs: { plan_hash: planHash, policy_hash: policyHash(activePolicy()) },
     runtime: {
       harness_version: HARNESS_VERSION,
-      agent_image_id: images.agent.id,
+      codex_image_id: images.codex.id,
+      claude_image_id: images.claude.id,
       verifier_image_id: images.verifier.id,
       setup_image_id: images.setup.id,
       proxy_image_id: images.proxy.id,

@@ -60,7 +60,7 @@ async function seeded(attempt = newAttemptId()): Promise<string> {
 /** Runs in the hardened agent container, exactly as the agent phase would. */
 function inAgent(volume: string, argv: string[]) {
   return runContainer({
-    image: images.agent.id,
+    image: images.codex.id,
     argv,
     network: 'none',
     mounts: [authMount(volume)],
@@ -117,7 +117,7 @@ describe('per-run auth volume', () => {
     // Written the way Codex would write it: from inside the container, not from the host.
     const rewrite = await runContainer(
       {
-        image: images.agent.id,
+        image: images.codex.id,
         argv: ['sh', '-c', `cat > ${CODEX_HOME_PATH}/${AUTH_FILE}`],
         network: 'none',
         mounts: [authMount(volume)],

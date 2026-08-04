@@ -70,7 +70,8 @@ describe('prepare against the real daemon', () => {
     const images = await resolveRuntimeImages();
     expect(prepared.report).toMatchObject({
       runtime: {
-        agent_image_id: images.agent.id,
+        codex_image_id: images.codex.id,
+        claude_image_id: images.claude.id,
         verifier_image_id: images.verifier.id,
         setup_image_id: images.setup.id,
         proxy_image_id: images.proxy.id,

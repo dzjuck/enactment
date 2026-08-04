@@ -25,7 +25,7 @@ async function isInternal(name: string): Promise<boolean> {
 }
 
 function onNetwork(network: string, argv: string[]): Promise<RunResult> {
-  return runContainer({ image: IMAGE_PINS.agent.tag, argv, network });
+  return runContainer({ image: IMAGE_PINS.codex.tag, argv, network });
 }
 
 const LISTENER = [
@@ -136,7 +136,7 @@ describe('per-phase networks', () => {
   it('keeps the verifier away from the proxy even while the proxy is listening', async () => {
     await withPhaseNetworks(newAttemptId(), 'agent', async (networks) => {
       const listener = await startDetached({
-        image: IMAGE_PINS.agent.tag,
+        image: IMAGE_PINS.codex.tag,
         argv: LISTENER,
         network: networks.egress ?? '',
         name: `ai-harness-listener-${newAttemptId()}`,

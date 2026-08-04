@@ -5,7 +5,7 @@ import { AGENT_HOME, type ContainerSpec } from '../../src/docker/args.js';
 import { runContainer } from '../../src/docker/run.js';
 import { imageEnvNames, listContainers } from '../helpers/docker.js';
 
-const IMAGE = IMAGE_PINS.agent.tag;
+const IMAGE = IMAGE_PINS.codex.tag;
 const TEST_LABEL = 'ai-harness.test=run';
 
 function spec(argv: string[], overrides: Partial<ContainerSpec> = {}): ContainerSpec {

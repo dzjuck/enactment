@@ -1,15 +1,19 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runCodexAgent } from '../../src/adapters/codex/run.js';
 import { providerSmokeTest } from '../../src/adapters/codex/smoke.js';
+import { CLAUDE_AUTH_PATH } from '../../src/adapters/claude/policy.js';
+import { CODEX_HOME_PATH } from '../../src/adapters/codex/policy.js';
 import { ArtifactStore, type StoredArtifact } from '../../src/artifacts/store.js';
 import {
   AGENT_GID,
   AGENT_UID,
+  CLAUDE_VERSION,
   CODEX_VERSION,
   IMAGE_PINS,
   IMAGE_ROLES,
@@ -63,6 +67,7 @@ const { calls, fakeExeca } = vi.hoisted(() => {
 vi.mock('execa', () => ({ execa: fakeExeca }));
 
 const digits = (value: number): string => `sha256:${String(value).repeat(64)}`;
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 /** The image IDs the daemon would report. This is the only runtime identity there is. */
 const IDS = Object.fromEntries(
@@ -119,6 +124,11 @@ function storedArtifact(): Promise<StoredArtifact> {
 }
 
 describe('runtime image resolution', () => {
+  it('exposes the exact five runtime image roles without an agent alias', () => {
+    expect(IMAGE_ROLES).toEqual(['codex', 'claude', 'verifier', 'setup', 'proxy']);
+    expect(IMAGE_PINS).not.toHaveProperty('agent');
+  });
+
   it('inspects each role once and returns its immutable Docker image ID', async () => {
     const { invocations, exec } = recordingExec((tag) => Promise.resolve(idOf(tag)));
 
@@ -171,12 +181,36 @@ describe('image build arguments', () => {
     }
   });
 
-  it('builds the agent image with the pinned Codex version', async () => {
+  it('builds the Codex image with the pinned Codex version', async () => {
     const { invocations, exec } = recordingExec(() => Promise.resolve(''));
 
-    await buildImage('agent', exec);
+    await buildImage('codex', exec);
 
     expect((invocations[0] ?? []).join(' ')).toContain(`CODEX_VERSION=${CODEX_VERSION}`);
+  });
+
+  it('builds the Claude image with the pinned Claude Code version', async () => {
+    const { invocations, exec } = recordingExec(() => Promise.resolve(''));
+
+    await buildImage('claude', exec);
+
+    expect((invocations[0] ?? []).join(' ')).toContain(`CLAUDE_VERSION=${CLAUDE_VERSION}`);
+  });
+
+  it('creates both provider auth mount points with the numeric agent identity', async () => {
+    for (const [role, path] of [
+      ['codex', CODEX_HOME_PATH],
+      ['claude', CLAUDE_AUTH_PATH],
+    ] as const) {
+      const dockerfile = await readFile(
+        join(REPO_ROOT, IMAGE_PINS[role].context, 'Dockerfile'),
+        'utf8',
+      );
+
+      expect(dockerfile).toContain(`mkdir -p ${path}`);
+      expect(dockerfile).toContain(`chown "\${AGENT_UID}:\${AGENT_GID}" ${path}`);
+      expect(dockerfile).toContain(`chmod 0700 ${path}`);
+    }
   });
 });
 
@@ -190,7 +224,7 @@ describe('phases execute the supplied runtime image set', () => {
   it('initializes synthetic git with the agent image', async () => {
     await initSyntheticGit('ai-harness-ws-attempt-1', IMAGES);
 
-    expect(imagesRun()).toEqual([IMAGES.agent.id]);
+    expect(imagesRun()).toEqual([IMAGES.codex.id]);
   });
 
   it('snapshots and restores the workspace with the setup image', async () => {
@@ -247,7 +281,7 @@ describe('phases execute the supplied runtime image set', () => {
     expect(imagesRun()).toEqual([IMAGES.proxy.id]);
   });
 
-  it('runs the connectivity smoke test from the agent image', async () => {
+  it('runs the Codex connectivity smoke test from the Codex image', async () => {
     await providerSmokeTest({
       url: 'https://chatgpt.com/',
       network: 'egress',
@@ -256,10 +290,10 @@ describe('phases execute the supplied runtime image set', () => {
       images: IMAGES,
     });
 
-    expect(imagesRun()).toEqual([IMAGES.agent.id]);
+    expect(imagesRun()).toEqual([IMAGES.codex.id]);
   });
 
-  it('runs the agent from the agent image', async () => {
+  it('runs Codex from the Codex image', async () => {
     await runCodexAgent({
       prompt: 'implement it',
       network: 'egress',
@@ -271,7 +305,7 @@ describe('phases execute the supplied runtime image set', () => {
       images: IMAGES,
     });
 
-    expect(imagesRun()).toEqual([IMAGES.agent.id]);
+    expect(imagesRun()).toEqual([IMAGES.codex.id]);
   });
 
   it('never reaches a container-owning module through a mutable build tag', async () => {
@@ -322,10 +356,11 @@ describe('phases execute the supplied runtime image set', () => {
 });
 
 describe('runtimeSection', () => {
-  it('records exactly the four executed image IDs', () => {
+  it('records exactly the five executed image IDs', () => {
     expect(runtimeSection(IMAGES)).toEqual({
       harness_version: expect.any(String),
-      agent_image_id: IDS.agent,
+      codex_image_id: IDS.codex,
+      claude_image_id: IDS.claude,
       verifier_image_id: IDS.verifier,
       setup_image_id: IDS.setup,
       proxy_image_id: IDS.proxy,
@@ -336,5 +371,9 @@ describe('runtimeSection', () => {
     const recorded = JSON.stringify(runtimeSection(IMAGES));
 
     for (const tag of TAGS) expect(recorded).not.toContain(tag);
+  });
+
+  it('contains no obsolete ambiguous agent image field', () => {
+    expect(runtimeSection(IMAGES)).not.toHaveProperty('agent_image_id');
   });
 });

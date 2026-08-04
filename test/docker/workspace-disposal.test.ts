@@ -108,7 +108,7 @@ async function run(
   const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
   dirs.push(artifacts);
 
-  const injection: RunInjection = { agent: stub, agentEnv: env, ...overrides.injection };
+  const injection: RunInjection = { codex: stub, agentEnv: env, ...overrides.injection };
 
   const report = await runSinglePlanStep({
     planFile,
@@ -229,7 +229,7 @@ describe('a dirty attempt workspace is thrown away with the attempt', () => {
 
     // A failure manifest that lost the run's identity would make the evidence unusable.
     expect(manifest.repository?.base_commit).toBe(repo.commit);
-    expect(manifest.runtime?.agent_image_id).toBe(stub.id);
+    expect(manifest.runtime?.codex_image_id).toBe(stub.id);
     expect(manifest.inputs?.plan_hash).toMatch(/^sha256:/);
     expect(manifest.restoration).toBeUndefined();
   }, 300_000);

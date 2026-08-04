@@ -118,7 +118,8 @@ describe('real Codex tests-first run', () => {
     ) as Manifest;
 
     // What ran is what was recorded, for the real pinned image set.
-    expect(manifest.runtime.agent_image_id).toBe(images.agent.id);
+    expect(manifest.runtime.codex_image_id).toBe(images.codex.id);
+    expect(manifest.runtime.claude_image_id).toBe(images.claude.id);
     expect(manifest.runtime.verifier_image_id).toBe(images.verifier.id);
     expect(manifest.runtime.setup_image_id).toBe(images.setup.id);
     expect(manifest.runtime.proxy_image_id).toBe(images.proxy.id);

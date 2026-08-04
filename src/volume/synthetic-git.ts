@@ -50,7 +50,7 @@ export async function initSyntheticGit(
   labels?: Record<string, string>,
 ): Promise<void> {
   const result = await runContainer({
-    image: images.agent.id,
+    image: images.codex.id,
     argv: ['sh', '-c', INIT_SCRIPT],
     network: 'none',
     workdir: WORKSPACE_PATH,

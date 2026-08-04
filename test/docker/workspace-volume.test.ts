@@ -45,7 +45,7 @@ async function seed(): Promise<string> {
 
 async function inWorkspace(name: string, argv: string[]) {
   return runContainer({
-    image: IMAGE_PINS.agent.tag,
+    image: IMAGE_PINS.codex.tag,
     argv,
     network: 'none',
     mounts: [workspaceMount(name)],

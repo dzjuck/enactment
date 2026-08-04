@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+token_file=/run/claude-auth/token
+[ -s "$token_file" ] || {
+  echo "Claude token file is missing or empty" >&2
+  exit 2
+}
+
+CLAUDE_CODE_OAUTH_TOKEN="$(cat "$token_file")"
+export CLAUDE_CODE_OAUTH_TOKEN
+exec claude "$@"

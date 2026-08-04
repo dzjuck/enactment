@@ -65,7 +65,7 @@ function stubEnv(mode = 'write'): Record<string, string> {
 
 /** The only seam a test may use: an explicit runtime identity, recorded like any other. */
 function injection(mode = 'write'): RunInjection {
-  return { agent: stub, agentEnv: stubEnv(mode) };
+  return { codex: stub, agentEnv: stubEnv(mode) };
 }
 
 beforeAll(async () => {
@@ -343,7 +343,8 @@ describe('orchestrator', () => {
     expect(manifest.inputs.export_hash).toMatch(/^sha256:/);
     expect(manifest.inputs.network_policy_hash).toMatch(/^sha256:/);
     expect(manifest.inputs.dependency_cache_key).toMatch(/^sha256:/);
-    expect(manifest.runtime.agent_image_id).toMatch(/^sha256:/);
+    expect(manifest.runtime.codex_image_id).toMatch(/^sha256:/);
+    expect(manifest.runtime.claude_image_id).toMatch(/^sha256:/);
     expect(manifest.runtime.verifier_image_id).toMatch(/^sha256:/);
     expect(manifest.runtime.setup_image_id).toMatch(/^sha256:/);
     expect(manifest.runtime.proxy_image_id).toMatch(/^sha256:/);
@@ -357,10 +358,11 @@ describe('orchestrator', () => {
       runtime: Record<string, string>;
     };
 
-    expect(manifest.runtime.agent_image_id).toBe(stub.id);
-    expect(manifest.runtime.agent_image_id).not.toBe(production.agent.id);
+    expect(manifest.runtime.codex_image_id).toBe(stub.id);
+    expect(manifest.runtime.codex_image_id).not.toBe(production.codex.id);
 
     // Every role the injection did not replace is still the production identity.
+    expect(manifest.runtime.claude_image_id).toBe(production.claude.id);
     expect(manifest.runtime.verifier_image_id).toBe(production.verifier.id);
     expect(manifest.runtime.setup_image_id).toBe(production.setup.id);
     expect(manifest.runtime.proxy_image_id).toBe(production.proxy.id);

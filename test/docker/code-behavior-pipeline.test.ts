@@ -133,7 +133,7 @@ async function run(
 ): Promise<{ report: RunReport; artifacts: string }> {
   const artifacts = await mkdtemp(join(tmpdir(), 'harness-m2-artifacts-'));
   dirs.push(artifacts);
-  const injection: RunInjection = { agent: stub, agentEnv: env };
+  const injection: RunInjection = { codex: stub, agentEnv: env };
 
   const report = await runSinglePlanStep({
     planFile,
