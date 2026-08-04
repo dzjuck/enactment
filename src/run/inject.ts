@@ -21,6 +21,8 @@ export interface RunInjection {
   claude?: RuntimeImage;
   /** Merged under the harness's own agent environment, which always wins. */
   agentEnv?: Record<string, string>;
+  /** Test-only environment for the separate, workspace-free diagnosis invocation. */
+  diagnosisEnv?: Record<string, string>;
   /**
    * Fixes the attempt id. A test that has to inspect a run's Docker resources from outside —
    * after killing it, say — needs to know which label to look for without scanning globally

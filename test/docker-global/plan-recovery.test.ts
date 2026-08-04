@@ -249,7 +249,7 @@ describe('a SIGKILLed plan run', () => {
       expect(report.finalVerification?.status).toBe('pass');
 
       // The crashed attempt kept its id and reran; its evidence sits beside the recovery run.
-      expect(report.steps[0]?.attempt).toBe(crashedId);
+      expect(report.steps[0]?.attempts.at(-1)?.id).toBe(crashedId);
       const runs = await readdir(
         join(artifactsRoot, 'recovery-plan', 'steps', 'first-step', crashedId),
       );

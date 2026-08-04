@@ -93,7 +93,7 @@ const succeeded = (options: CoordinatorOptions): Promise<PlanReport> =>
     branch: `ai-harness/${options.approved.plan.id}`,
     baseCommit: options.approved.baseCommit,
     head: 'c'.repeat(40),
-    steps: [{ id: 'only-step', status: 'completed', commit: 'c'.repeat(40) }],
+    steps: [{ id: 'only-step', status: 'completed', attempts: [], commit: 'c'.repeat(40) }],
   });
 
 async function prepare(space: Workspace): Promise<void> {
@@ -261,7 +261,7 @@ describe('run', () => {
             state: 'failed' as const,
             branch: `ai-harness/${options.approved.plan.id}`,
             baseCommit: options.approved.baseCommit,
-            steps: [{ id: 'only-step', status: 'pending' as const }],
+            steps: [{ id: 'only-step', status: 'pending' as const, attempts: [] }],
             failure: { step: 'only-step', category: 'agent_failed', message: 'injected' },
             cleanupErrors: ['volume v-stuck still present'],
           }),
@@ -340,7 +340,7 @@ describe('cancel', () => {
             state: 'failed' as const,
             branch: `ai-harness/${options.approved.plan.id}`,
             baseCommit: options.approved.baseCommit,
-            steps: [{ id: 'only-step', status: 'pending' as const }],
+            steps: [{ id: 'only-step', status: 'pending' as const, attempts: [] }],
             failure: { step: 'only-step', message: 'injected' },
           });
         },

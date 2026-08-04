@@ -9,9 +9,11 @@ fi
 
 [ -z "${STUB_CLAUDE_STDERR:-}" ] || printf '%s\n' "$STUB_CLAUDE_STDERR" >&2
 
-if [ -n "${STUB_WRITE_PATH:-}" ]; then
-  mkdir -p "$(dirname "/workspace/${STUB_WRITE_PATH}")"
-  printf '%s' "${STUB_WRITE_CONTENT:-}" > "/workspace/${STUB_WRITE_PATH}"
+write_path=${STUB_CLAUDE_WRITE_PATH:-${STUB_WRITE_PATH:-}}
+write_content=${STUB_CLAUDE_WRITE_CONTENT:-${STUB_WRITE_CONTENT:-}}
+if [ -n "$write_path" ]; then
+  mkdir -p "$(dirname "/workspace/${write_path}")"
+  printf '%s' "$write_content" > "/workspace/${write_path}"
 fi
 
 case "${STUB_CLAUDE_MODE:-events}" in

@@ -255,10 +255,11 @@ describe('explicit retry after a recorded failure', () => {
     const plan = store.planForManifest(h.repo.dir, h.approved.manifestHash);
     const second = store.steps(plan?.row ?? 0)[1];
     const attempts = store.attempts(second?.row ?? 0);
-    expect(attempts).toHaveLength(2);
+    expect(attempts).toHaveLength(3);
     expect(attempts[0]?.state).toBe('failed');
-    expect(attempts[1]?.attemptId).not.toBe(attempts[0]?.attemptId);
-    expect(attempts.map((attempt) => attempt.ordinal)).toEqual([1, 2]);
+    expect(attempts[1]?.kind).toBe('stronger');
+    expect(attempts[2]?.attemptId).not.toBe(attempts[0]?.attemptId);
+    expect(attempts.map((attempt) => attempt.ordinal)).toEqual([1, 2, 3]);
   });
 });
 
@@ -332,7 +333,10 @@ describe('an attempt left in accepting', () => {
    * moment just before the acceptance transaction — which is exactly what a process killed
    * between the commit and the database write leaves behind.
    */
-  async function acceptingWithCommit(h: Harness): Promise<{ commit: string; key: string }> {
+  async function acceptingWithCommit(
+    h: Harness,
+    stronger = false,
+  ): Promise<{ commit: string; key: string }> {
     const plan = h.store.registerPlan({
       planId: h.approved.plan.id,
       manifestHash: h.approved.manifestHash,
@@ -353,10 +357,28 @@ describe('an attempt left in accepting', () => {
       parentCommit: h.approved.baseCommit,
     });
 
+    let retryOfAttemptRow: number | undefined;
+    if (stronger) {
+      const normal = h.store.startAttempt({
+        stepRow: step.row,
+        attemptId: 'failed-normal-attempt',
+        profileId: 'codex-fast',
+        parentCommit: h.approved.baseCommit,
+        artifactPath: join(h.artifactsRoot, 'demo-plan/steps/first-step/failed-normal/run-1'),
+      });
+      h.store.failPlan({
+        planRow: plan.row,
+        attemptRow: normal.row,
+        failure: 'agent_failed: retry me',
+      });
+      retryOfAttemptRow = normal.row;
+    }
+
     const attempt = h.store.startAttempt({
       stepRow: step.row,
       attemptId: 'accepting-attempt',
-      profileId: 'codex-fast',
+      profileId: stronger ? 'claude-deep' : 'codex-fast',
+      ...(retryOfAttemptRow === undefined ? {} : { retryOfAttemptRow }),
       parentCommit: h.approved.baseCommit,
       artifactPath: join(h.artifactsRoot, 'demo-plan/steps/first-step/accepting-attempt/run-1'),
     });
@@ -401,6 +423,32 @@ describe('an attempt left in accepting', () => {
     expect(report.state).toBe('completed');
     expect(report.head).toBe(commit);
     expect(report.steps[0]).toMatchObject({ status: 'completed', commit });
+    expect(await git(h.repo.dir, ['rev-list', '--count', BRANCH])).toBe('2');
+  });
+
+  it('reconciles an accepting stronger child without duplicating its commit', async () => {
+    const h = await harness(['first-step']);
+    const { commit } = await acceptingWithCommit(h, true);
+    const store = reopen(h);
+    let ran = false;
+
+    const report = await runPlan(
+      { approved: h.approved, store, artifactsRoot: h.artifactsRoot },
+      {
+        execute: () => {
+          ran = true;
+          return Promise.reject(new Error('should not run'));
+        },
+        verifyFinal: passingFinal,
+      },
+    );
+
+    expect(ran).toBe(false);
+    expect(report.state).toBe('completed');
+    expect(report.steps[0]?.attempts).toMatchObject([
+      { kind: 'normal', state: 'failed' },
+      { kind: 'stronger', profile: 'claude-deep', state: 'completed', commit },
+    ]);
     expect(await git(h.repo.dir, ['rev-list', '--count', BRANCH])).toBe('2');
   });
 

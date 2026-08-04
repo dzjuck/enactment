@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,7 +16,12 @@ import {
 import { runPlan, type PlanReport } from '../../src/run/coordinator.js';
 import { StateStore } from '../../src/state/store.js';
 import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
-import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
+import {
+  cannedClaudeEvents,
+  cannedEvents,
+  stubAgentImage,
+  stubClaudeImage,
+} from '../helpers/stub-agent.js';
 
 const LABEL = 'ai-harness.attempt';
 const NOTES = 'notes.txt';
@@ -65,11 +70,14 @@ const PLAN = [
 let repo: TargetRepo;
 let root: string;
 let stub: RuntimeImage;
+let claudeStub: RuntimeImage;
+let claudeTokenFile: string;
 const dirs: string[] = [];
 const stores: StateStore[] = [];
 
 beforeAll(async () => {
   stub = await stubAgentImage();
+  claudeStub = await stubClaudeImage();
   repo = await createM2Repo();
   root = await mkdtemp(join(tmpdir(), 'harness-plan-'));
 
@@ -77,6 +85,13 @@ beforeAll(async () => {
     join(root, AUTH_FILE),
     JSON.stringify({ tokens: { access_token: 'sk-plan-canary' } }),
   );
+
+  const claudeDir = join(root, 'auth', 'claude');
+  claudeTokenFile = join(claudeDir, 'token');
+  await mkdir(claudeDir, { recursive: true, mode: 0o700 });
+  await chmod(claudeDir, 0o700);
+  await writeFile(claudeTokenFile, 'claude-plan-token', { mode: 0o600 });
+  await chmod(claudeTokenFile, 0o600);
 }, 900_000);
 
 afterAll(async () => {
@@ -186,7 +201,9 @@ describe('autonomous two-step plan', () => {
     expect(await readdir(join(planRoot, 'reports'))).toEqual(['invocation-1.json']);
     expect(await readdir(join(planRoot, 'final'))).toEqual(['run-1']);
     for (const entry of report.steps) {
-      const runs = await readdir(join(planRoot, 'steps', entry.id, entry.attempt ?? ''));
+      const runs = await readdir(
+        join(planRoot, 'steps', entry.id, entry.attempts.at(-1)?.id ?? ''),
+      );
       expect(runs).toEqual(['run-1']);
     }
 
@@ -197,10 +214,116 @@ describe('autonomous two-step plan', () => {
 
     // No attempt-scoped resource survived either step.
     for (const entry of report.steps) {
-      const attempt = entry.attempt ?? '';
+      const attempt = entry.attempts.at(-1)?.id ?? '';
       await expect(labelled('container', attempt)).resolves.toEqual([]);
       await expect(labelled('volume', attempt)).resolves.toEqual([]);
       await expect(labelled('network', attempt)).resolves.toEqual([]);
+    }
+  }, 900_000);
+});
+
+describe('bounded stronger retry', () => {
+  it('diagnoses an invalid normal result, retries from clean source, and commits once', async () => {
+    const workdir = await scratch();
+    const artifactsRoot = await scratch();
+    const planFile = join(workdir, 'plan.yml');
+    await writeFile(
+      planFile,
+      [
+        'version: 1',
+        'id: retry-plan',
+        'steps:',
+        '  - type: task',
+        '    complexity: low',
+        '    id: write-note',
+        '    observable_behavior: Write retry-note.txt.',
+        '    implementation_paths:',
+        '      - retry-note.txt',
+        '    verification:',
+        '      commands:',
+        '        - ["node", "--version"]',
+        '    timeouts:',
+        '      connectivity_smoke_seconds: 20',
+        '      agent_seconds: 30',
+        '      termination_grace_seconds: 2',
+        'final_verification:',
+        '  commands:',
+        '    - ["node", "-e", "if (require(\'node:fs\').readFileSync(\'retry-note.txt\', \'utf8\').trim() !== \'clean retry\') process.exit(1)"]',
+        '',
+      ].join('\n'),
+    );
+    const manifestPath = join(workdir, 'execution-manifest.yml');
+    await writeManifest(
+      manifestPath,
+      await buildManifest({ planFile, manifestPath, repoPath: repo.dir }),
+    );
+    const approved = await validateManifest(await loadManifest(manifestPath), {
+      repoPath: repo.dir,
+    });
+    const store = StateStore.open(join(workdir, 'state.db'));
+    stores.push(store);
+
+    const report = await runPlan({
+      approved,
+      store,
+      artifactsRoot,
+      manifestPath,
+      sourceCodexHome: root,
+      claudeTokenFile,
+      storeDirectory: join(root, 'store'),
+      dependencyCacheDirectory: join(root, 'deps'),
+      injection: {
+        codex: stub,
+        claude: claudeStub,
+        agentEnv: {
+          STUB_MODE: 'write',
+          STUB_EVENTS: cannedEvents(),
+          STUB_WRITE_PATH: 'outside-scope.txt',
+          STUB_WRITE_CONTENT: 'dirty normal\n',
+          STUB_CLAUDE_MODE: 'events',
+          STUB_CLAUDE_EVENTS: cannedClaudeEvents().replace(
+            'claude-sonnet-5',
+            'claude-opus-5',
+          ),
+          STUB_CLAUDE_WRITE_PATH: 'retry-note.txt',
+          STUB_CLAUDE_WRITE_CONTENT: 'clean retry\n',
+        },
+        diagnosisEnv: { STUB_CLAUDE_MODE: 'diagnosis' },
+      },
+    });
+
+    expect(report.state).toBe('completed');
+    expect(report.steps[0]?.attempts).toMatchObject([
+      { kind: 'normal', state: 'failed' },
+      { kind: 'stronger', state: 'completed' },
+    ]);
+    expect(await git(repo.dir, ['rev-list', '--count', 'ai-harness/retry-plan'])).toBe('2');
+    expect(await git(repo.dir, ['show', `${report.head ?? ''}:retry-note.txt`])).toBe('clean retry');
+    await expect(
+      git(repo.dir, ['cat-file', '-e', `${report.head ?? ''}:outside-scope.txt`]),
+    ).rejects.toThrow();
+
+    const [normal, stronger] = report.steps[0]?.attempts ?? [];
+    expect(
+      await readFile(
+        join(
+          artifactsRoot,
+          'retry-plan',
+          'steps',
+          'write-note',
+          normal?.id ?? '',
+          'run-1',
+          'diagnosis',
+          'diagnosis.json',
+        ),
+        'utf8',
+      ),
+    ).not.toContain('claude-plan-token');
+
+    for (const attempt of [normal, stronger]) {
+      await expect(labelled('container', attempt?.id ?? '')).resolves.toEqual([]);
+      await expect(labelled('volume', attempt?.id ?? '')).resolves.toEqual([]);
+      await expect(labelled('network', attempt?.id ?? '')).resolves.toEqual([]);
     }
   }, 900_000);
 });

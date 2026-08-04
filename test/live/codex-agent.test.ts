@@ -94,7 +94,7 @@ describe('real Codex tests-first run', () => {
       'm2-slugify',
       'steps',
       'add-slugify',
-      step?.attempt ?? '',
+      step?.attempts.at(-1)?.id ?? '',
       'run-1',
     );
 

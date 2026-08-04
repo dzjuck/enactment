@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -6,7 +7,7 @@ import { execa } from 'execa';
 import { ArtifactStore } from '../artifacts/store.js';
 import { idempotencyKey } from '../git/idempotency.js';
 import type { ApprovedInputs } from '../plan/execution-manifest.js';
-import type { PlanRecord, PlanState, StateStore } from '../state/store.js';
+import type { AttemptRecord, PlanRecord, PlanState, StateStore } from '../state/store.js';
 import { newAttemptId } from '../volume/naming.js';
 import {
   verifyPlanHead,
@@ -14,9 +15,16 @@ import {
   type FinalVerificationResult,
 } from '../verify/final.js';
 import type { RunInjection } from './inject.js';
+import {
+  diagnoseFailure,
+  type DiagnosisOptions,
+  type DiagnosisResult,
+} from './diagnosis.js';
 import { runStep, type RunReport, type StepExecutionOptions } from './orchestrator.js';
 import { reconcile } from './recovery.js';
 import { nextAttempt } from './selection.js';
+import type { FailureCategory } from './failure.js';
+import { resolveTimeouts } from './timeout.js';
 
 export interface CoordinatorOptions {
   approved: ApprovedInputs;
@@ -35,6 +43,7 @@ export interface CoordinatorOptions {
 
 export interface CoordinatorDependencies {
   execute?: (options: StepExecutionOptions) => Promise<RunReport>;
+  diagnose?: (options: DiagnosisOptions) => Promise<DiagnosisResult>;
   verifyFinal?: (options: FinalVerificationOptions) => Promise<FinalVerificationResult>;
   /**
    * Narrow seam for the completion-ordering test. Production always uses the real writer; the
@@ -47,8 +56,17 @@ export interface CoordinatorDependencies {
 export interface PlanStepReport {
   id: string;
   status: 'pending' | 'completed';
-  attempt?: string;
+  attempts: PlanAttemptReport[];
   commit?: string;
+}
+
+export interface PlanAttemptReport {
+  id: string;
+  kind: AttemptRecord['kind'];
+  profile: AttemptRecord['profileId'];
+  state: AttemptRecord['state'];
+  commit?: string;
+  diagnosis?: DiagnosisResult;
 }
 
 export interface PlanFailure {
@@ -114,6 +132,39 @@ async function nextOrdinal(dir: string, prefix: string): Promise<number> {
   return used.length === 0 ? 1 : Math.max(...used) + 1;
 }
 
+function attemptFailure(attempt: AttemptRecord): { category: string; message: string } {
+  const failure = attempt.failure ?? 'internal_error: step failed';
+  const separator = failure.indexOf(':');
+  if (separator < 0) return { category: 'internal_error', message: failure };
+  return {
+    category: failure.slice(0, separator),
+    message: failure.slice(separator + 1).trim(),
+  };
+}
+
+function savedDiagnosis(attempt: AttemptRecord): DiagnosisResult | undefined {
+  const path = join(attempt.artifactPath, 'diagnosis', 'diagnosis.json');
+  if (!existsSync(path)) return undefined;
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as DiagnosisResult;
+  } catch {
+    return undefined;
+  }
+}
+
+function advisoryFor(attempt: AttemptRecord, diagnosis: DiagnosisResult): string {
+  const failure = attemptFailure(attempt);
+  return [
+    `Original failure category: ${failure.category}`,
+    `Original failure message: ${failure.message}`,
+    ...(diagnosis.status === 'completed' && diagnosis.text.trim() !== ''
+      ? [`Diagnosis advisory: ${diagnosis.text.trim()}`]
+      : []),
+  ]
+    .join('\n')
+    .slice(0, 4_000);
+}
+
 /**
  * Drive an approved plan to completion: one step at a time, in order, without asking again.
  *
@@ -126,6 +177,7 @@ export async function runPlan(
   dependencies: CoordinatorDependencies = {},
 ): Promise<PlanReport> {
   const execute = dependencies.execute ?? runStep;
+  const diagnose = dependencies.diagnose ?? diagnoseFailure;
   const verifyFinal = dependencies.verifyFinal ?? verifyPlanHead;
   const persist = dependencies.writeReport ?? writeReport;
 
@@ -133,6 +185,7 @@ export async function runPlan(
   const branch = `ai-harness/${approved.plan.id}`;
   const planRoot = join(options.artifactsRoot, approved.plan.id);
   const snapshots = new ArtifactStore(join(planRoot, 'snapshots'));
+  const diagnosisResults = new Map<number, DiagnosisResult>();
 
   const plan = store.registerPlan({
     planId: approved.plan.id,
@@ -160,7 +213,17 @@ export async function runPlan(
       steps: store.steps(plan.row).map((row) => ({
         id: row.stepId,
         status: row.status,
-        attempt: store.attempts(row.row).at(-1)?.attemptId,
+        attempts: store.attempts(row.row).map((attempt) => {
+          const diagnosis = diagnosisResults.get(attempt.row) ?? savedDiagnosis(attempt);
+          return {
+            id: attempt.attemptId,
+            kind: attempt.kind,
+            profile: attempt.profileId,
+            state: attempt.state,
+            ...(attempt.commit === undefined ? {} : { commit: attempt.commit }),
+            ...(diagnosis === undefined ? {} : { diagnosis }),
+          };
+        }),
         commit: row.commit,
       })),
       ...extra,
@@ -228,6 +291,40 @@ export async function runPlan(
     });
   }
 
+  // A kill after Step 6's atomic terminal write can leave no report. Resume a pending
+  // stronger child, but otherwise report that durable cycle before an explicit later retry.
+  if (state().state === 'failed') {
+    const pending = store.nextPendingStep(plan.row);
+    if (pending !== undefined) {
+      const step = approved.plan.steps[pending.position];
+      if (step === undefined) throw new Error(`plan has no step at position ${String(pending.position)}`);
+      const attempts = store.attempts(pending.row);
+      const selection = nextAttempt({
+        step: pending,
+        complexity: step.complexity,
+        attempts,
+        parentCommit: state().headCommit ?? state().baseCommit,
+      });
+      const latest = attempts.at(-1);
+      const previous = await latestReport(planRoot);
+      const alreadyReported =
+        latest !== undefined &&
+        previous?.steps.some((entry) => entry.attempts.some((attempt) => attempt.id === latest.attemptId)) === true;
+      const resumable = selection?.action === 'reuse' || selection?.kind === 'stronger';
+      if (!resumable && latest !== undefined && !alreadyReported) {
+        const failure = attemptFailure(latest);
+        return await finish({
+          failure: {
+            step: pending.stepId,
+            phase: latest.phase,
+            category: failure.category,
+            message: failure.message,
+          },
+        });
+      }
+    }
+  }
+
   store.setPlanState(plan.row, 'running');
 
   for (;;) {
@@ -252,6 +349,44 @@ export async function runPlan(
       parentCommit,
     });
     if (selection === undefined) throw new Error(`pending step ${pending.stepId} selected nothing`);
+
+    let advisoryContext: string | undefined;
+    if (selection.kind === 'stronger') {
+      const parentRow = selection.retryOfAttemptRow;
+      const failed = parentRow === undefined ? undefined : store.attemptByRow(parentRow);
+      if (failed === undefined) throw new Error('stronger retry has no failed parent attempt');
+      const failure = attemptFailure(failed);
+      const timeouts = resolveTimeouts(step.timeouts);
+      let diagnosis = savedDiagnosis(failed);
+      if (diagnosis === undefined) {
+        try {
+          diagnosis = await diagnose({
+            attempt: failed,
+            behavior: step.observable_behavior,
+            category: failure.category as FailureCategory,
+            message: failure.message,
+            images:
+              options.injection?.claude === undefined
+                ? approved.images
+                : { ...approved.images, claude: options.injection.claude },
+            claudeTokenFile: options.claudeTokenFile,
+            timeoutSeconds: timeouts.agent_seconds,
+            graceSeconds: timeouts.termination_grace_seconds,
+            ...(options.injection?.diagnosisEnv === undefined
+              ? {}
+              : { env: options.injection.diagnosisEnv }),
+          });
+        } catch (error) {
+          diagnosis = {
+            status: 'failed',
+            text: '',
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }
+      diagnosisResults.set(failed.row, diagnosis);
+      advisoryContext = advisoryFor(failed, diagnosis);
+    }
 
     const crashed = selection.action === 'reuse' ? selection.attempt : undefined;
     const attemptId = crashed?.attemptId ?? options.injection?.attempt ?? newAttemptId();
@@ -301,6 +436,7 @@ export async function runPlan(
       claudeTokenFile: options.claudeTokenFile,
       storeDirectory: options.storeDirectory,
       dependencyCacheDirectory: options.dependencyCacheDirectory,
+      ...(advisoryContext === undefined ? {} : { advisoryContext }),
       injection: options.injection,
       signal: options.signal,
       onEvent: (event) => {
@@ -317,6 +453,17 @@ export async function runPlan(
         failure: `${outcome.category ?? 'internal_error'}: ${outcome.message ?? 'step failed'}`,
       });
       await pruneSnapshots(store, plan.row, snapshots);
+
+      const retry = nextAttempt({
+        step: pending,
+        complexity: step.complexity,
+        attempts: store.attempts(pending.row),
+        parentCommit: selection.parentCommit,
+      });
+      if (retry?.kind === 'stronger') {
+        store.setPlanState(plan.row, 'running');
+        continue;
+      }
 
       return await finish({
         failure: {

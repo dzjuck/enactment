@@ -14,6 +14,7 @@ import {
   type ApprovedInputs,
 } from '../../src/plan/execution-manifest.js';
 import { pruneSnapshots, runPlan, type PlanReport } from '../../src/run/coordinator.js';
+import type { DiagnosisResult } from '../../src/run/diagnosis.js';
 import type { StepExecutionOptions, RunReport } from '../../src/run/orchestrator.js';
 import { PROFILES } from '../../src/routing/profiles.js';
 import { StateStore } from '../../src/state/store.js';
@@ -359,6 +360,203 @@ describe('plan failure', () => {
     expect(started).toBe(false);
     expect(report.state).toBe('failed');
     expect(report.failure?.message).toMatch(/ai-harness\/demo-plan/);
+  });
+});
+
+describe('stronger retry', () => {
+  const diagnosed = (): Promise<DiagnosisResult> =>
+    Promise.resolve({ status: 'completed', text: 'Check the allowed source scope.' });
+
+  it('diagnoses once and runs one stronger child from a clean attempt', async () => {
+    const { repo, approved, store, artifactsRoot } = await harness(['first-step']);
+    const seen: StepExecutionOptions[] = [];
+    const accept = committingExecutor(repo, seen);
+    let diagnoses = 0;
+
+    const report = await runPlan(
+      { approved, store, artifactsRoot },
+      {
+        execute: async (options) => {
+          seen.push(options);
+          if (seen.length === 1) {
+            return {
+              status: 'failed',
+              attempt: options.attempt,
+              failedPhase: 'agent',
+              category: 'invalid_change',
+              message: 'outside scope',
+            };
+          }
+          seen.pop();
+          return accept(options);
+        },
+        diagnose: async () => {
+          diagnoses += 1;
+          return diagnosed();
+        },
+        verifyFinal: passingFinal,
+      },
+    );
+
+    expect(diagnoses).toBe(1);
+    expect(seen).toHaveLength(2);
+    expect(seen.map((options) => options.profile)).toEqual([
+      PROFILES['codex-fast'],
+      PROFILES['claude-deep'],
+    ]);
+    expect(seen[1]?.attempt).not.toBe(seen[0]?.attempt);
+    expect(seen[1]?.parentCommit).toBe(seen[0]?.parentCommit);
+    expect(seen[1]?.artifactDir).not.toBe(seen[0]?.artifactDir);
+    expect(seen[1]?.advisoryContext).toContain('Check the allowed source scope.');
+    expect(seen[1]?.advisoryContext).toContain('invalid_change');
+    expect(report.state).toBe('completed');
+    expect(report.steps[0]?.attempts).toMatchObject([
+      { kind: 'normal', profile: 'codex-fast', state: 'failed' },
+      { kind: 'stronger', profile: 'claude-deep', state: 'completed' },
+    ]);
+  });
+
+  it.each(['failed', 'timeout'] as const)(
+    'keeps the original failure primary when diagnosis is %s',
+    async (diagnosisStatus) => {
+      const { repo, approved, store, artifactsRoot } = await harness(['first-step']);
+      const seen: StepExecutionOptions[] = [];
+      const accept = committingExecutor(repo, seen);
+
+      const report = await runPlan(
+        { approved, store, artifactsRoot },
+        {
+          execute: async (options) => {
+            seen.push(options);
+            if (seen.length === 1) {
+              return {
+                status: 'failed',
+                attempt: options.attempt,
+                failedPhase: 'green',
+                category: 'verification_failed',
+                message: 'expected test failed',
+              };
+            }
+            seen.pop();
+            return accept(options);
+          },
+          diagnose: () =>
+            Promise.resolve({ status: diagnosisStatus, text: '', error: 'diagnosis unavailable' }),
+          verifyFinal: passingFinal,
+        },
+      );
+
+      expect(report.state).toBe('completed');
+      expect(seen).toHaveLength(2);
+      expect(seen[1]?.advisoryContext).toContain('verification_failed');
+      expect(seen[1]?.advisoryContext).toContain('expected test failed');
+      expect(seen[1]?.advisoryContext).not.toContain('diagnosis unavailable');
+      expect(report.steps[0]?.attempts[0]?.diagnosis).toMatchObject({ status: diagnosisStatus });
+    },
+  );
+
+  it.each([
+    'provider_error',
+    'agent_timeout',
+    'test_contract_disputed',
+    'baseline_failed',
+    'setup_failed',
+    'provider_connectivity_timeout',
+    'internal_error',
+  ] as const)('does not diagnose or retry %s', async (category) => {
+    const { approved, store, artifactsRoot } = await harness(['first-step']);
+    let executions = 0;
+    let diagnoses = 0;
+
+    const report = await runPlan(
+      { approved, store, artifactsRoot },
+      {
+        execute: (options) => {
+          executions += 1;
+          return Promise.resolve({
+            status: 'failed',
+            attempt: options.attempt,
+            category,
+            message: 'terminal',
+          });
+        },
+        diagnose: () => {
+          diagnoses += 1;
+          return diagnosed();
+        },
+        verifyFinal: passingFinal,
+      },
+    );
+
+    expect(report.state).toBe('failed');
+    expect(executions).toBe(1);
+    expect(diagnoses).toBe(0);
+  });
+
+  it('stops after one failed stronger child and never verifies the plan', async () => {
+    const { approved, store, artifactsRoot } = await harness(['first-step', 'second-step']);
+    const seen: StepExecutionOptions[] = [];
+    let diagnoses = 0;
+    let finalRan = false;
+
+    const report = await runPlan(
+      { approved, store, artifactsRoot },
+      {
+        execute: (options) => {
+          seen.push(options);
+          return Promise.resolve({
+            status: 'failed',
+            attempt: options.attempt,
+            category: 'agent_failed',
+            message: `${options.profile.id} failed`,
+          });
+        },
+        diagnose: () => {
+          diagnoses += 1;
+          return diagnosed();
+        },
+        verifyFinal: () => {
+          finalRan = true;
+          return passingFinal();
+        },
+      },
+    );
+
+    expect(seen).toHaveLength(2);
+    expect(diagnoses).toBe(1);
+    expect(finalRan).toBe(false);
+    expect(report.state).toBe('failed');
+    expect(report.steps[1]?.status).toBe('pending');
+    expect(report.steps[0]?.attempts).toHaveLength(2);
+  });
+
+  it('does not diagnose a commit-plus-cleanup failure', async () => {
+    const { repo, approved, store, artifactsRoot } = await harness(['first-step']);
+    const seen: StepExecutionOptions[] = [];
+    const accept = committingExecutor(repo, seen);
+    let diagnoses = 0;
+
+    const report = await runPlan(
+      { approved, store, artifactsRoot },
+      {
+        execute: async (options) => ({
+          ...(await accept(options)),
+          status: 'failed',
+          category: 'internal_error',
+          message: 'cleanup failed',
+          cleanupErrors: ['volume survived'],
+        }),
+        diagnose: () => {
+          diagnoses += 1;
+          return diagnosed();
+        },
+        verifyFinal: passingFinal,
+      },
+    );
+
+    expect(diagnoses).toBe(0);
+    expect(report.state).toBe('failed');
+    expect(report.steps[0]?.status).toBe('completed');
   });
 });
 

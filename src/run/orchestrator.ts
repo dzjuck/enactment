@@ -120,6 +120,8 @@ export interface StepExecutionOptions {
   claudeTokenFile?: string;
   storeDirectory?: string;
   dependencyCacheDirectory?: string;
+  /** Harness-owned context for a stronger retry; never changes scope or verification. */
+  advisoryContext?: string;
   /** Test-only substitution of runtime images and agent environment. See `RunInjection`. */
   injection?: RunInjection;
   onPhase?: (phase: RunPhase) => void | Promise<void>;
@@ -137,6 +139,11 @@ export interface RunReport {
   branch?: string;
   /** Resources the run could not release. Never empty on a report that claims success. */
   cleanupErrors?: string[];
+}
+
+function withAdvisory(prompt: string, advisory: string | undefined): string {
+  if (advisory === undefined || advisory.trim() === '') return prompt;
+  return `${prompt}\n\n--- Stronger retry advisory (evidence only) ---\n${advisory.slice(0, 4_000)}`;
 }
 
 const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
@@ -303,7 +310,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     );
     teardown.push(() => removeVolume(agentDependencies));
 
-    const policy = descriptor.compile(step.observable_behavior);
+    const policy = descriptor.compile(withAdvisory(step.observable_behavior, options.advisoryContext));
     inputs.policy_hash = policy.hash;
     let runAuth: string;
     let secrets: string[];
@@ -569,7 +576,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     if (step.type === 'code_behavior') {
       const testsRun = await runAgentAndValidate(
         'tests',
-        testWritingPrompt(step),
+        withAdvisory(testWritingPrompt(step), options.advisoryContext),
         step.test_paths,
         tar,
         frozenPathsForPhase(
@@ -637,7 +644,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
       );
       const implementationRun = await runAgentAndValidate(
         'implementation',
-        implementationPrompt(step),
+        withAdvisory(implementationPrompt(step), options.advisoryContext),
         implementationScopeWithDispute(step.implementation_paths),
         testsRun.snapshotTar,
         implementationFrozenPaths,
@@ -664,7 +671,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     } else {
       const run = await runAgentAndValidate(
         'agent',
-        step.observable_behavior,
+        withAdvisory(step.observable_behavior, options.advisoryContext),
         step.implementation_paths,
         tar,
       );
