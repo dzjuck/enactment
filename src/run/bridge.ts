@@ -21,11 +21,10 @@ export { RUN_PHASES } from './orchestrator.js';
 export type { OnStepEvent, RunPhase, RunReport, StepEvent } from './orchestrator.js';
 
 /**
- * Temporary bridge from a plan to the single-step executor.
+ * Take the only step of a one-step plan.
  *
- * The executor runs one step per invocation; the plan coordinator that walks a whole plan
- * arrives in Step 7. Until then a multi-step plan is refused rather than truncated: a harness
- * that silently ran step 1 and reported success would claim the plan was executed.
+ * A multi-step plan is refused rather than truncated: running step 1 and reporting success
+ * would claim the whole plan was executed.
  */
 export function singlePlanStep(plan: Plan): PlanStep {
   const [step] = plan.steps;
@@ -39,7 +38,7 @@ export function singlePlanStep(plan: Plan): PlanStep {
   return step;
 }
 
-/** What the CLI supplies. Everything the executor needs is derived from it here. */
+/** What a caller supplies. Everything the executor needs is derived from it here. */
 export interface RunOptions {
   planFile: string;
   repoPath: string;
@@ -65,11 +64,13 @@ async function git(repoPath: string, args: string[]): Promise<string> {
 }
 
 /**
- * Resolve a one-step plan into approved executor inputs and run it.
+ * Resolve a one-step plan into executor inputs and run it.
  *
- * This is where the plan is read, the images are resolved and the repository head is looked
- * up — once, before anything starts. The coordinator replaces it in Step 7 and takes those
- * values from the approved manifest instead; the executor below it does not change.
+ * Test-only scaffolding, and not reachable from the CLI: production runs the coordinator,
+ * which takes these same values from the approved manifest rather than reading the plan and
+ * the repository head itself. It survives because the M1 and M2 pipeline suites exercise one
+ * step against a real daemon, and driving that through a whole plan would test the
+ * coordinator instead of the executor.
  */
 export async function runSinglePlanStep(
   options: RunOptions,

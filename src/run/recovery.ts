@@ -7,6 +7,7 @@ import { exportCommit } from '../git/export.js';
 import { findCommitByKey } from '../git/idempotency.js';
 import type { ApprovedInputs } from '../plan/execution-manifest.js';
 import type { AttemptRecord, PlanRecord, StateStore, StepRecord } from '../state/store.js';
+import { excludeDispute } from '../verify/dispute.js';
 
 export class ReconcileError extends Error {
   constructor(message: string) {
@@ -94,9 +95,13 @@ async function finishAcceptance(
 
   // Only Git acceptance is retried. The candidate was verified before the attempt entered
   // `accepting`, so finishing it needs no model output and no second verification.
+  //
+  // The change set is rebuilt exactly as the executor built it (§15): the cumulative diff from
+  // the parent to the verified candidate, minus the dispute marker, which is a message to the
+  // harness rather than source. Both acceptance paths must commit the same files.
   const { tar } = await exportCommit(repoPath, attempt.parentCommit);
   const candidate = await snapshots.read(attempt.candidateSnapshot);
-  const changes = await sourceDiff(tar, candidate);
+  const changes = excludeDispute(await sourceDiff(tar, candidate));
 
   const accepted = await acceptChanges({
     repoPath,

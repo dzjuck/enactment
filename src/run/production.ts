@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 
+import { ArtifactStore } from '../artifacts/store.js';
 import type { RuntimeImages } from '../docker/images.js';
 import {
   ApprovalError,
@@ -119,10 +120,14 @@ async function run(
 /**
  * Release a repository from the plan that owns it.
  *
- * Only SQLite changes: the branch, its commits, the attempt history and the artifacts are all
- * evidence of work that really happened, and cancelling a plan is not a reason to destroy it.
+ * The branch, its commits, the attempt history and the evidence all survive: they record work
+ * that really happened, and cancelling a plan is not a reason to destroy it. The exception is
+ * the snapshot store, which §11 bounds by attempt termination — a plan retired after a process
+ * was killed mid-attempt still holds that attempt's workspace tars, and nothing would ever
+ * come back for them. Retiring the plan is the last moment anything can.
+ *
  * Idempotent, because an operator retrying a cancel should not have to know whether the first
- * one landed.
+ * one landed. A completed plan is a no-op for the same reason: it already owns nothing.
  */
 async function cancel(command: CancelCommand): Promise<CommandResult> {
   const loaded = await loadManifest(command.manifestPath);
@@ -141,10 +146,24 @@ async function cancel(command: CancelCommand): Promise<CommandResult> {
       };
     }
 
-    if (plan.state !== 'cancelled') store.cancelPlan(command.repoPath, loaded.manifestHash);
+    if (plan.state !== 'cancelled' && plan.state !== 'completed') {
+      store.cancelPlan(command.repoPath, loaded.manifestHash);
+    }
+
+    // Everything, not only what an `accepting` attempt still needs: the plan is terminal, so
+    // there is no acceptance left for a candidate to finish.
+    const snapshots = new ArtifactStore(join(command.artifactDir, plan.planId, 'snapshots'));
+    for (const artifact of await snapshots.list()) {
+      await snapshots.remove(artifact);
+    }
 
     return {
-      report: { plan: plan.planId, state: 'cancelled', branch: plan.branch, head: plan.headCommit },
+      report: {
+        plan: plan.planId,
+        state: plan.state === 'completed' ? 'completed' : 'cancelled',
+        branch: plan.branch,
+        head: plan.headCommit,
+      },
       exitCode: 0,
     };
   } finally {

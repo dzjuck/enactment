@@ -11,7 +11,7 @@ export const CLI_USAGE = [
   'usage:',
   '  harness prepare <plan.yml> --repo <path> --output <execution-manifest.yml>',
   '  harness run <execution-manifest.yml> --repo <path> [--artifacts <dir>]',
-  '  harness cancel <execution-manifest.yml> --repo <path>',
+  '  harness cancel <execution-manifest.yml> --repo <path> [--artifacts <dir>]',
 ].join('\n');
 
 /** Harness state locations only. Nothing here reaches the container contract. */
@@ -41,6 +41,8 @@ export interface CancelCommand extends StateLocations {
   kind: 'cancel';
   manifestPath: string;
   repoPath: string;
+  /** Where the plan tree lives, so retiring a plan can release its snapshots. */
+  artifactDir: string;
 }
 
 export type Command = PrepareCommand | RunCommand | CancelCommand;
@@ -49,7 +51,7 @@ export type Command = PrepareCommand | RunCommand | CancelCommand;
 const ACCEPTED = {
   prepare: ['repo', 'output'],
   run: ['repo', 'artifacts'],
-  cancel: ['repo'],
+  cancel: ['repo', 'artifacts'],
 } as const;
 
 function stateLocations(env: NodeJS.ProcessEnv): StateLocations {
@@ -118,15 +120,13 @@ export function parseCommand(argv: string[], env: NodeJS.ProcessEnv = process.en
     return { kind: 'prepare', planFile: file, repoPath, output, ...locations };
   }
 
+  // Same default as `run`, because it names the same tree: an operator who passed
+  // `--artifacts` to the run passes it here too, and one who did not needs neither.
+  const artifactDir = parsed.values.artifacts ?? 'artifacts';
+
   if (name === 'cancel') {
-    return { kind: 'cancel', manifestPath: file, repoPath, ...locations };
+    return { kind: 'cancel', manifestPath: file, repoPath, artifactDir, ...locations };
   }
 
-  return {
-    kind: 'run',
-    manifestPath: file,
-    repoPath,
-    artifactDir: parsed.values.artifacts ?? 'artifacts',
-    ...locations,
-  };
+  return { kind: 'run', manifestPath: file, repoPath, artifactDir, ...locations };
 }

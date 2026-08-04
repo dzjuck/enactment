@@ -682,7 +682,7 @@ Commit trailers:
 ```text
 AI-Harness-Plan: collector-dashboard
 AI-Harness-Step: persist-runs
-AI-Harness-Attempt: 2
+AI-Harness-Attempt: 4f3c1b9a2e5d7801
 AI-Harness-Idempotency-Key: ...
 ```
 

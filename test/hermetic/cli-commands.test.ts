@@ -130,7 +130,7 @@ describe('command parsing', () => {
     ['a missing plan file', ['prepare', '--repo', '/repo', '--output', 'm.yml']],
     ['a missing output path', ['prepare', 'plan.yml', '--repo', '/repo']],
     ['a surplus positional', ['cancel', 'm.yml', 'extra', '--repo', '/repo']],
-    ['an artifacts flag on cancel', ['cancel', 'm.yml', '--repo', '/repo', '--artifacts', '/out']],
+    ['an output flag on cancel', ['cancel', 'm.yml', '--repo', '/repo', '--output', '/out']],
     ['an image override', ['run', 'm.yml', '--repo', '/repo', '--agent-image', 'x']],
     ['a network override', ['run', 'm.yml', '--repo', '/repo', '--network', 'host']],
     ['an allowlist override', ['run', 'm.yml', '--repo', '/repo', '--allow-host', 'evil.test']],

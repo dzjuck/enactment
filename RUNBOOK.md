@@ -205,13 +205,16 @@ parent commit, and a repeated key returns the existing commit instead of making 
 ### Cancelling
 
 ```sh
-node dist/cli.js cancel execution-manifest.yml --repo /path/to/repo
+node dist/cli.js cancel execution-manifest.yml --repo /path/to/repo --artifacts ./artifacts
 ```
 
 One live plan may own a repository at a time; cancelling releases it so a different manifest can
-register. It changes SQLite only — the branch, its commits, the attempt history and the artifacts
-all survive, because they are evidence of work that really happened. It is idempotent, and it
-refuses a repository the given manifest does not own.
+register. The branch, its commits, the attempt history and the evidence all survive, because they
+are evidence of work that really happened. The one thing it deletes is the plan's `snapshots/`
+directory: retiring the plan is the last moment anything comes back for the workspace tars a
+killed run left, and their hashes stay in the evidence. Pass the same `--artifacts` you ran with
+so it can find them. It is idempotent, a no-op on an already completed plan, and it refuses a
+repository the given manifest does not own.
 
 **Cancellation is terminal.** Running the cancelled manifest again returns a `cancelled` report
 and a non-zero exit without reconciling, running a step, or verifying anything. To carry the work
@@ -261,8 +264,10 @@ token. The manifest's `*_image_id` fields are the images that actually ran.
 **Snapshots are not kept.** While an attempt runs, every workspace tar it takes stays in
 `snapshots/`, because the verifier reads them during baseline, RED and GREEN. When the attempt
 terminates they are deleted — except one still needed as the verified acceptance candidate of an
-attempt interrupted mid-commit, which goes once its commit is recorded. Their hashes remain in
-`run-manifest.json` either way, so a run stays reproducible without storing every tree forever.
+attempt interrupted mid-commit, which goes once its commit is recorded. What a killed process left
+behind goes at the start of the next run of that plan, or when the plan is cancelled. Their hashes
+remain in `run-manifest.json` either way, so a run stays reproducible without storing every tree
+forever.
 
 Persistent state lives outside the artifact directory, under `HARNESS_STATE_DIR`: `auth/` (the
 credential store, mode `0600`), `dependency-cache/`, and `state.db`.
