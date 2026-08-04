@@ -31,7 +31,7 @@ beforeAll(async () => {
 
   authVolume = await createAuthVolume(
     newAttemptId(),
-    { auth: await readAuthStore(store), policy: policy.files },
+    { provider: 'codex', auth: await readAuthStore(store), policy: policy.files },
     images,
   );
 });
@@ -48,7 +48,7 @@ function run(role: ImageRole, withAuth: boolean): Promise<RunResult> {
     image: images[role].id,
     argv: probe,
     network: 'none',
-    ...(withAuth ? { env: authEnv(), mounts: [authMount(authVolume)] } : {}),
+    ...(withAuth ? { env: authEnv(), mounts: [authMount('codex', authVolume)] } : {}),
   });
 }
 
@@ -76,7 +76,7 @@ describe('provider auth mount', () => {
       argv: ['sh', '-c', `touch ${CODEX_HOME_PATH}/rotation-probe`],
       network: 'none',
       env: authEnv(),
-      mounts: [authMount(authVolume)],
+      mounts: [authMount('codex', authVolume)],
     });
 
     expect(result.exitCode).toBe(0);
@@ -85,6 +85,6 @@ describe('provider auth mount', () => {
   it('gives the setup and verifier images no auth volume mount at all', () => {
     // The mount is a volume, never a bind of the host store: no host ownership is involved,
     // so the same contract holds on OrbStack, Docker Desktop and native Linux.
-    expect(authMount(authVolume).type).toBe('volume');
+    expect(authMount('codex', authVolume).type).toBe('volume');
   });
 });

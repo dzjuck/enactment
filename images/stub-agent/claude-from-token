@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+token_file=/run/claude-auth/token
+if [ -s "$token_file" ]; then
+  CLAUDE_CODE_OAUTH_TOKEN="$(cat "$token_file")"
+  export CLAUDE_CODE_OAUTH_TOKEN
+fi
+
+exec claude "$@"

@@ -1,6 +1,12 @@
 #!/bin/sh
 set -eu
 
+token_file=/run/claude-auth/token
+if [ -s "$token_file" ] && [ "${CLAUDE_CODE_OAUTH_TOKEN:-}" != "$(cat "$token_file")" ]; then
+  echo 'Claude launcher did not export the mounted token' >&2
+  exit 65
+fi
+
 [ -z "${STUB_CLAUDE_STDERR:-}" ] || printf '%s\n' "$STUB_CLAUDE_STDERR" >&2
 
 case "${STUB_CLAUDE_MODE:-events}" in

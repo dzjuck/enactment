@@ -1,17 +1,26 @@
+import { CLAUDE_AUTH_PATH } from '../adapters/claude/policy.js';
 import { CODEX_HOME_PATH } from '../adapters/codex/policy.js';
 import type { Mount } from '../docker/args.js';
 import type { RuntimeImages } from '../docker/images.js';
 import { runContainer } from '../docker/run.js';
 import { withOwnedResource } from '../run/ownership.js';
-import { attemptLabels, authVolumeName } from '../volume/naming.js';
+import { attemptLabels, authVolumeName, type AuthProvider } from '../volume/naming.js';
 import { createVolume, removeVolume, volumeExists } from '../volume/workspace.js';
 import { AUTH_FILE, AuthError, type AuthStore, updateAuthStore } from './store.js';
 
 /** What a run's CODEX_HOME contains: the credential, plus the compiled policy files. */
-export interface AuthVolumeContents {
+export interface CodexAuthVolumeContents {
+  provider: 'codex';
   auth: string;
   policy: Record<string, string>;
 }
+
+export interface ClaudeAuthVolumeContents {
+  provider: 'claude';
+  token: string;
+}
+
+export type AuthVolumeContents = CodexAuthVolumeContents | ClaudeAuthVolumeContents;
 
 export interface AuthVolumeDependencies {
   seed?: (
@@ -38,8 +47,12 @@ export interface AuthVolumeDependencies {
  *
  * Read-write, because the provider CLI rewrites `auth.json` in place when it rotates (§5).
  */
-export function authMount(volume: string): Mount {
-  return { type: 'volume', source: volume, target: CODEX_HOME_PATH };
+export function authMount(provider: AuthProvider, volume: string): Mount {
+  return {
+    type: 'volume',
+    source: volume,
+    target: provider === 'codex' ? CODEX_HOME_PATH : CLAUDE_AUTH_PATH,
+  };
 }
 
 /**
@@ -50,9 +63,9 @@ export function authMount(volume: string): Mount {
  * secret, so they travel as environment values; their names come from the compiled policy,
  * never from a model.
  */
-async function seedAuthVolume(
+async function seedCodexAuthVolume(
   volume: string,
-  contents: AuthVolumeContents,
+  contents: CodexAuthVolumeContents,
   images: RuntimeImages,
   labels?: Record<string, string>,
 ): Promise<void> {
@@ -74,7 +87,7 @@ async function seedAuthVolume(
       // Offline: a helper holding credentials has no reason to reach anything.
       network: 'none',
       env,
-      mounts: [authMount(volume)],
+      mounts: [authMount('codex', volume)],
       ...(labels === undefined ? {} : { labels }),
     },
     { input: Buffer.from(contents.auth) },
@@ -83,6 +96,42 @@ async function seedAuthVolume(
   if (result.exitCode !== 0) {
     // Names the volume, never the credential.
     throw new AuthError(`seeding auth volume ${volume} failed (${String(result.exitCode)})`);
+  }
+}
+
+export async function seedClaudeAuthVolume(
+  volume: string,
+  token: string,
+  images: RuntimeImages,
+  labels?: Record<string, string>,
+): Promise<void> {
+  const tokenPath = `${CLAUDE_AUTH_PATH}/token`;
+  const result = await runContainer(
+    {
+      image: images.claude.id,
+      argv: ['sh', '-c', `set -e\numask 077\ncat > ${tokenPath}\nchmod 0600 ${tokenPath}`],
+      network: 'none',
+      mounts: [authMount('claude', volume)],
+      ...(labels === undefined ? {} : { labels }),
+    },
+    { input: Buffer.from(token) },
+  );
+
+  if (result.exitCode !== 0) {
+    throw new AuthError(`seeding Claude auth volume ${volume} failed (${String(result.exitCode)})`);
+  }
+}
+
+async function seedAuthVolume(
+  volume: string,
+  contents: AuthVolumeContents,
+  images: RuntimeImages,
+  labels?: Record<string, string>,
+): Promise<void> {
+  if (contents.provider === 'codex') {
+    await seedCodexAuthVolume(volume, contents, images, labels);
+  } else {
+    await seedClaudeAuthVolume(volume, contents.token, images, labels);
   }
 }
 
@@ -105,7 +154,7 @@ export async function readAuthVolumeFile(
     image: images.codex.id,
     argv: ['cat', `${CODEX_HOME_PATH}/${name}`],
     network: 'none',
-    mounts: [authMount(volume)],
+    mounts: [authMount('codex', volume)],
     ...(labels === undefined ? {} : { labels }),
   });
 
@@ -132,17 +181,17 @@ export async function createAuthVolume(
   dependencies: AuthVolumeDependencies = {},
 ): Promise<string> {
   const seed = dependencies.seed ?? seedAuthVolume;
-  const name = authVolumeName(attempt);
+  const name = authVolumeName(contents.provider, attempt);
 
   if (await volumeExists(name)) {
     throw new AuthError(`auth volume ${name} already exists`);
   }
 
-  const labels = attemptLabels(attempt, 'auth');
+  const labels = attemptLabels(attempt, `auth-${contents.provider}`);
   await createVolume(name, labels);
 
   return withOwnedResource(name, removeVolume, async () => {
-    await seed(name, contents, images, attemptLabels(attempt, 'auth-seed'));
+    await seed(name, contents, images, attemptLabels(attempt, `auth-${contents.provider}-seed`));
     return name;
   });
 }

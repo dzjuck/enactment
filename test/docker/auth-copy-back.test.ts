@@ -190,7 +190,7 @@ describe('a rotated credential survives every way the agent block can end', () =
     const { report, stored } = await runRotating({ STUB_MODE: 'fail' });
 
     expect(stored).toBe(ROTATED);
-    await expect(volumeExists(authVolumeName(report.attempt))).resolves.toBe(false);
+    await expect(volumeExists(authVolumeName('codex', report.attempt))).resolves.toBe(false);
   }, 300_000);
 
   it('leaves no credential value in the artifact tree', async () => {
@@ -221,7 +221,7 @@ describe('a run credential that cannot be trusted fails the run', () => {
     // The host store is left exactly as it was, and still usable by the next run.
     expect(stored).toBe(SEEDED);
     expect((await stat(storeFile)).mode & 0o777).toBe(0o600);
-    await expect(volumeExists(authVolumeName(report.attempt))).resolves.toBe(false);
+    await expect(volumeExists(authVolumeName('codex', report.attempt))).resolves.toBe(false);
   }, 300_000);
 
   it('still reports the commit the run verified before copy-back failed', async () => {

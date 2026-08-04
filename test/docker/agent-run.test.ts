@@ -66,6 +66,7 @@ beforeAll(async () => {
   authVolume = await createAuthVolume(
     newAttemptId(),
     {
+      provider: 'codex',
       auth: await readAuthStore(store),
       policy: compileCodexPolicy({ prompt: PROMPT, workdir: '/workspace' }).files,
     },
@@ -118,7 +119,7 @@ async function runStub(
     prompt: PROMPT,
     network: 'none',
     env: { STUB_MODE: mode, STUB_EVENTS: events },
-    mounts: [workspaceMount(workspace), dependencyMount(depsVolume), authMount(authVolume)],
+    mounts: [workspaceMount(workspace), dependencyMount(depsVolume), authMount('codex', authVolume)],
     timeoutSeconds: 60,
     graceSeconds: 2,
     artifactDir: artifacts,
@@ -162,7 +163,7 @@ describe('agent invocation', () => {
       prompt: PROMPT,
       network: 'none',
       env: { STUB_MODE: 'mounts', STUB_EVENTS: '' },
-      mounts: [workspaceMount(workspace), dependencyMount(depsVolume), authMount(authVolume)],
+      mounts: [workspaceMount(workspace), dependencyMount(depsVolume), authMount('codex', authVolume)],
       timeoutSeconds: 60,
       graceSeconds: 2,
       artifactDir: artifacts,

@@ -2,9 +2,12 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createRedactor } from '../../artifacts/redact.js';
+import { authMount, createAuthVolume } from '../../auth/volume.js';
 import type { Mount } from '../../docker/args.js';
 import type { RuntimeImages } from '../../docker/images.js';
 import { runContainer } from '../../docker/run.js';
+import { attemptLabels } from '../../volume/naming.js';
+import { removeVolume } from '../../volume/workspace.js';
 import {
   evaluateClaudeResult,
   parseClaudeEvents,
@@ -122,4 +125,39 @@ export async function runClaudeAgent(options: ClaudeRunOptions): Promise<ClaudeR
     stdout: result.stdout,
     stderr: result.stderr,
   };
+}
+
+export interface AuthenticatedClaudeRunOptions extends ClaudeRunOptions {
+  attempt: string;
+  token: string;
+}
+
+export async function runAuthenticatedClaudeAgent(
+  options: AuthenticatedClaudeRunOptions,
+): Promise<ClaudeRunResult> {
+  const volume = await createAuthVolume(
+    options.attempt,
+    { provider: 'claude', token: options.token },
+    options.images,
+  );
+
+  try {
+    return await runClaudeAgent({
+      mode: options.mode,
+      prompt: options.prompt,
+      model: options.model,
+      effort: options.effort,
+      network: options.network,
+      env: options.env,
+      mounts: [...options.mounts, authMount('claude', volume)],
+      timeoutSeconds: options.timeoutSeconds,
+      graceSeconds: options.graceSeconds,
+      artifactDir: options.artifactDir,
+      images: options.images,
+      labels: options.labels ?? attemptLabels(options.attempt, 'claude-agent'),
+      secrets: [...(options.secrets ?? []), options.token],
+    });
+  } finally {
+    await removeVolume(volume);
+  }
 }

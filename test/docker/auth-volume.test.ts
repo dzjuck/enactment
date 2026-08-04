@@ -52,7 +52,11 @@ afterEach(async () => {
 });
 
 async function seeded(attempt = newAttemptId()): Promise<string> {
-  const volume = await createAuthVolume(attempt, { auth: STORED, policy: policy.files }, images);
+  const volume = await createAuthVolume(
+    attempt,
+    { provider: 'codex', auth: STORED, policy: policy.files },
+    images,
+  );
   created.push(volume);
   return volume;
 }
@@ -63,7 +67,7 @@ function inAgent(volume: string, argv: string[]) {
     image: images.codex.id,
     argv,
     network: 'none',
-    mounts: [authMount(volume)],
+    mounts: [authMount('codex', volume)],
   });
 }
 
@@ -120,7 +124,7 @@ describe('per-run auth volume', () => {
         image: images.codex.id,
         argv: ['sh', '-c', `cat > ${CODEX_HOME_PATH}/${AUTH_FILE}`],
         network: 'none',
-        mounts: [authMount(volume)],
+        mounts: [authMount('codex', volume)],
       },
       { input: Buffer.from(rotated) },
     );
@@ -151,7 +155,7 @@ describe('per-run auth volume', () => {
     const attempt = newAttemptId();
     const volume = await seeded(attempt);
 
-    expect(volume).toBe(authVolumeName(attempt));
+    expect(volume).toBe(authVolumeName('codex', attempt));
 
     const { stdout } = await execa('docker', [
       'volume',
@@ -167,18 +171,21 @@ describe('per-run auth volume', () => {
     const attempt = newAttemptId();
 
     await expect(
-      createAuthVolume(attempt, { auth: STORED, policy: policy.files }, images, {
-        seed: () => Promise.reject(new Error('injected seed failure')),
-      }),
+      createAuthVolume(
+        attempt,
+        { provider: 'codex', auth: STORED, policy: policy.files },
+        images,
+        { seed: () => Promise.reject(new Error('injected seed failure')) },
+      ),
     ).rejects.toThrow('injected seed failure');
 
-    await expect(volumeExists(authVolumeName(attempt))).resolves.toBe(false);
+    await expect(volumeExists(authVolumeName('codex', attempt))).resolves.toBe(false);
   }, 120_000);
 
   it('never binds the host auth directory into a container', async () => {
     const volume = await seeded();
 
-    expect(authMount(volume)).toEqual({
+    expect(authMount('codex', volume)).toEqual({
       type: 'volume',
       source: volume,
       target: CODEX_HOME_PATH,

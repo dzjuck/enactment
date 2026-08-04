@@ -310,7 +310,11 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
 
     // CODEX_HOME is a per-attempt volume, not a bind of the host store: no host directory is
     // ever mounted into a container, so no host uid mapping is part of the contract.
-    const runAuth = await createAuthVolume(attempt, { auth: stored, policy: policy.files }, images);
+    const runAuth = await createAuthVolume(
+      attempt,
+      { provider: 'codex', auth: stored, policy: policy.files },
+      images,
+    );
     teardown.push(() => removeVolume(runAuth));
 
     // Pushed *after* the removal so that teardown's reverse order runs it *first*: the volume
@@ -448,7 +452,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
                   mounts: [
                     workspaceMount(workspace),
                     dependencyMount(agentDependencies),
-                    authMount(runAuth),
+                    authMount('codex', runAuth),
                   ],
                   timeoutSeconds: timeouts.agent_seconds,
                   graceSeconds: timeouts.termination_grace_seconds,
