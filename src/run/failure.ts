@@ -21,6 +21,15 @@ export const FAILURE_CATEGORIES = [
 
 export type FailureCategory = (typeof FAILURE_CATEGORIES)[number];
 
+/** Model-caused failures for which one stronger attempt may be useful. */
+export const RETRYABLE_FAILURE_CATEGORIES: ReadonlySet<FailureCategory> = new Set([
+  'agent_failed',
+  'invalid_change',
+  'closure_violation',
+  'red_invalid',
+  'verification_failed',
+]);
+
 export class PhaseFailure extends Error {
   readonly phase: string;
   readonly category: FailureCategory;

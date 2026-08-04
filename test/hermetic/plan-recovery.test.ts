@@ -19,6 +19,7 @@ import {
 } from '../../src/plan/execution-manifest.js';
 import { runPlan } from '../../src/run/coordinator.js';
 import type { RunReport, StepExecutionOptions } from '../../src/run/orchestrator.js';
+import { PROFILES } from '../../src/routing/profiles.js';
 import { StateStore } from '../../src/state/store.js';
 import type { FinalVerificationResult } from '../../src/verify/final.js';
 import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
@@ -279,6 +280,7 @@ describe('a crashed attempt', () => {
     const attempt = h.store.startAttempt({
       stepRow: step.row,
       attemptId: 'crashed-attempt',
+      profileId: 'codex-fast',
       parentCommit: h.approved.baseCommit,
       artifactPath: join(h.artifactsRoot, 'demo-plan/steps/first-step/crashed-attempt/run-1'),
     });
@@ -309,6 +311,7 @@ describe('a crashed attempt', () => {
 
     expect(seen).toHaveLength(1);
     expect(seen[0]?.attempt).toBe('crashed-attempt');
+    expect(seen[0]?.profile).toBe(PROFILES['codex-fast']);
     expect(seen[0]?.parentCommit).toBe(h.approved.baseCommit);
     expect(seen[0]?.artifactDir).toBe(join(attemptRoot, 'run-2'));
     expect(report.state).toBe('completed');
@@ -353,6 +356,7 @@ describe('an attempt left in accepting', () => {
     const attempt = h.store.startAttempt({
       stepRow: step.row,
       attemptId: 'accepting-attempt',
+      profileId: 'codex-fast',
       parentCommit: h.approved.baseCommit,
       artifactPath: join(h.artifactsRoot, 'demo-plan/steps/first-step/accepting-attempt/run-1'),
     });
@@ -432,6 +436,7 @@ describe('an attempt left in accepting', () => {
     const attempt = h.store.startAttempt({
       stepRow: step.row,
       attemptId: 'accepting-attempt',
+      profileId: 'codex-fast',
       parentCommit: h.approved.baseCommit,
       artifactPath: join(h.artifactsRoot, 'demo-plan/steps/first-step/accepting-attempt/run-1'),
     });
@@ -592,6 +597,7 @@ describe('startup snapshot reconciliation', () => {
     const attempt = h.store.startAttempt({
       stepRow: step.row,
       attemptId: 'accepting-attempt',
+      profileId: 'codex-fast',
       parentCommit: h.approved.baseCommit,
       artifactPath: join(h.artifactsRoot, 'unused'),
     });

@@ -267,6 +267,13 @@ describe('plan progression', () => {
 });
 
 describe('plan failure', () => {
+  it('has no split attempt-failure and plan-failure write path', async () => {
+    const coordinator = await readFile(join(process.cwd(), 'src/run/coordinator.ts'), 'utf8');
+
+    expect(coordinator).not.toContain('.failAttempt(');
+    expect(coordinator).toContain('.failPlan(');
+  });
+
   it('stops at the failing step, starts no later step and no final verification', async () => {
     const { repo, approved, store, artifactsRoot } = await harness();
     const seen: StepExecutionOptions[] = [];
@@ -480,6 +487,7 @@ describe('snapshot retention', () => {
     const attempt = store.startAttempt({
       stepRow: step.row,
       attemptId: 'attempt-1',
+      profileId: 'codex-fast',
       parentCommit: approved.baseCommit,
       artifactPath: join(artifactsRoot, 'unused'),
     });

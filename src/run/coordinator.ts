@@ -6,7 +6,6 @@ import { execa } from 'execa';
 import { ArtifactStore } from '../artifacts/store.js';
 import { idempotencyKey } from '../git/idempotency.js';
 import type { ApprovedInputs } from '../plan/execution-manifest.js';
-import { resolveNormalProfile } from '../routing/profiles.js';
 import type { PlanRecord, PlanState, StateStore } from '../state/store.js';
 import { newAttemptId } from '../volume/naming.js';
 import {
@@ -17,6 +16,7 @@ import {
 import type { RunInjection } from './inject.js';
 import { runStep, type RunReport, type StepExecutionOptions } from './orchestrator.js';
 import { reconcile } from './recovery.js';
+import { nextAttempt } from './selection.js';
 
 export interface CoordinatorOptions {
   approved: ApprovedInputs;
@@ -245,12 +245,15 @@ export async function runPlan(
       throw new Error(`plan has no step at position ${String(pending.position)}`);
     }
 
-    // A `running` row is an attempt whose process died: reuse its id so the whole step reruns
-    // under one identity, and give the rerun its own `run-<n>` directory rather than writing
-    // over the evidence the killed run left. A `failed` row is a recorded outcome and is never
-    // reused — an explicit retry is a new attempt.
-    const crashed = store.attempts(pending.row).find((entry) => entry.state === 'running');
+    const selection = nextAttempt({
+      step: pending,
+      complexity: step.complexity,
+      attempts: store.attempts(pending.row),
+      parentCommit,
+    });
+    if (selection === undefined) throw new Error(`pending step ${pending.stepId} selected nothing`);
 
+    const crashed = selection.action === 'reuse' ? selection.attempt : undefined;
     const attemptId = crashed?.attemptId ?? options.injection?.attempt ?? newAttemptId();
     const attemptRoot = join(planRoot, 'steps', pending.stepId, attemptId);
     const artifactDir = await claimOrdinalDirectory(attemptRoot, 'run');
@@ -259,7 +262,7 @@ export async function runPlan(
       planId: approved.plan.id,
       stepId: pending.stepId,
       attempt: attemptId,
-      parentCommit,
+      parentCommit: selection.parentCommit,
     });
 
     const attempt =
@@ -267,7 +270,11 @@ export async function runPlan(
       store.startAttempt({
         stepRow: pending.row,
         attemptId,
-        parentCommit,
+        profileId: selection.profile.id,
+        ...(selection.kind === 'stronger'
+          ? { retryOfAttemptRow: selection.retryOfAttemptRow }
+          : {}),
+        parentCommit: selection.parentCommit,
         artifactPath: artifactDir,
       });
 
@@ -276,14 +283,14 @@ export async function runPlan(
 
     const outcome = await execute({
       step,
-      profile: resolveNormalProfile(step.complexity),
+      profile: selection.profile,
       planId: approved.plan.id,
       planHash: approved.planHash,
       manifestHash: approved.manifestHash,
       images: approved.images,
       repoPath: approved.repoPath,
       baseBranch: approved.baseBranch,
-      parentCommit,
+      parentCommit: selection.parentCommit,
       branch,
       branchExists,
       attempt: attemptId,
@@ -304,11 +311,11 @@ export async function runPlan(
     });
 
     if (outcome.commit === undefined) {
-      store.failAttempt(
-        attempt.row,
-        `${outcome.category ?? 'internal_error'}: ${outcome.message ?? 'step failed'}`,
-      );
-      store.setPlanState(plan.row, 'failed');
+      store.failPlan({
+        planRow: plan.row,
+        attemptRow: attempt.row,
+        failure: `${outcome.category ?? 'internal_error'}: ${outcome.message ?? 'step failed'}`,
+      });
       await pruneSnapshots(store, plan.row, snapshots);
 
       return await finish({

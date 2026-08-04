@@ -2,6 +2,8 @@ import { mkdirSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import type { ProfileId } from '../routing/profiles.js';
+
 export class StateStoreError extends Error {
   constructor(message: string) {
     super(message);
@@ -10,12 +12,13 @@ export class StateStoreError extends Error {
 }
 
 /** One version, no migration framework: an unknown version is an error, not an upgrade. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export type PlanState = 'approved' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 /** Only the states recovery has to distinguish. `failed` is terminal for that attempt. */
 export type AttemptState = 'running' | 'accepting' | 'completed' | 'failed';
+export type AttemptKind = 'normal' | 'stronger';
 
 /** Diagnostic only — the latest phase reached, not a second state machine. */
 export type AttemptPhase =
@@ -53,6 +56,10 @@ export interface AttemptRecord {
   stepRow: number;
   attemptId: string;
   ordinal: number;
+  profileId: ProfileId;
+  retryOfAttemptRow?: number;
+  /** Derived from `retryOfAttemptRow`; never stored separately. */
+  kind: AttemptKind;
   state: AttemptState;
   phase?: AttemptPhase;
   parentCommit: string;
@@ -77,6 +84,8 @@ export interface RegisterPlanInput {
 export interface StartAttemptInput {
   stepRow: number;
   attemptId: string;
+  profileId: ProfileId;
+  retryOfAttemptRow?: number;
   parentCommit: string;
   artifactPath: string;
 }
@@ -86,6 +95,12 @@ export interface CompleteAcceptanceInput {
   stepRow: number;
   attemptRow: number;
   commit: string;
+}
+
+export interface FailPlanInput {
+  planRow: number;
+  attemptRow: number;
+  failure: string;
 }
 
 const SCHEMA = `
@@ -125,6 +140,9 @@ CREATE TABLE attempts (
   step_row           INTEGER NOT NULL REFERENCES steps(row_id),
   attempt_id         TEXT NOT NULL,
   ordinal            INTEGER NOT NULL,
+  profile_id         TEXT NOT NULL
+                     CHECK (profile_id IN ('codex-fast','codex-deep','claude-balanced','claude-deep')),
+  retry_of_attempt_row INTEGER REFERENCES attempts(row_id),
   state              TEXT NOT NULL
                      CHECK (state IN ('running','accepting','completed','failed')),
   phase              TEXT,
@@ -181,11 +199,18 @@ function stepRecord(row: Row): StepRecord {
 }
 
 function attemptRecord(row: Row): AttemptRecord {
+  const retryOfAttemptRow =
+    row.retry_of_attempt_row === null || row.retry_of_attempt_row === undefined
+      ? undefined
+      : number(row, 'retry_of_attempt_row');
   return {
     row: number(row, 'row_id'),
     stepRow: number(row, 'step_row'),
     attemptId: text(row, 'attempt_id'),
     ordinal: number(row, 'ordinal'),
+    profileId: text(row, 'profile_id') as ProfileId,
+    retryOfAttemptRow,
+    kind: retryOfAttemptRow === undefined ? 'normal' : 'stronger',
     state: text(row, 'state') as AttemptState,
     phase: optionalText(row, 'phase') as AttemptPhase | undefined,
     parentCommit: text(row, 'parent_commit'),
@@ -400,10 +425,20 @@ export class StateStore {
     const row = Number(
       this.db
         .prepare(
-          `INSERT INTO attempts (step_row, attempt_id, ordinal, state, phase, parent_commit, artifact_path)
-           VALUES (?, ?, ?, 'running', 'preparing', ?, ?)`,
+          `INSERT INTO attempts
+             (step_row, attempt_id, ordinal, profile_id, retry_of_attempt_row, state, phase,
+              parent_commit, artifact_path)
+           VALUES (?, ?, ?, ?, ?, 'running', 'preparing', ?, ?)`,
         )
-        .run(input.stepRow, input.attemptId, ordinal, input.parentCommit, input.artifactPath)
+        .run(
+          input.stepRow,
+          input.attemptId,
+          ordinal,
+          input.profileId,
+          input.retryOfAttemptRow ?? null,
+          input.parentCommit,
+          input.artifactPath,
+        )
         .lastInsertRowid,
     );
 
@@ -445,10 +480,29 @@ export class StateStore {
     return this.attemptByRow(row)?.runs ?? 1;
   }
 
-  failAttempt(row: number, failure: string): void {
-    this.db
-      .prepare(`UPDATE attempts SET state = 'failed', failure = ? WHERE row_id = ?`)
-      .run(failure, row);
+  /** Atomically stops an attempt and its plan, so recovery cannot observe half a failure. */
+  failPlan(input: FailPlanInput): void {
+    this.db.exec('BEGIN');
+    try {
+      const attempt = this.db
+        .prepare(`UPDATE attempts SET state = 'failed', failure = ? WHERE row_id = ?`)
+        .run(input.failure, input.attemptRow);
+      if (attempt.changes !== 1) {
+        throw new StateStoreError(`attempt row ${String(input.attemptRow)} does not exist`);
+      }
+
+      const plan = this.db
+        .prepare(`UPDATE plans SET state = 'failed' WHERE row_id = ?`)
+        .run(input.planRow);
+      if (plan.changes !== 1) {
+        throw new StateStoreError(`plan row ${String(input.planRow)} does not exist`);
+      }
+
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   /**
