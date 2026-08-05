@@ -8,11 +8,13 @@ import type { RuntimeImage } from '../docker/images.js';
  * environment variable that constructs one, so an operator cannot run a different image than
  * the set resolved at startup.
  *
- * The substitution is scoped to the Codex invocation — the container the model itself runs
- * in. Harness-owned helpers keep the resolved production images even when they happen to use
- * the Codex image, because they are the harness acting, not the model. Whatever is substituted
- * still carries a real, resolved identity and is recorded in the run manifest exactly like
- * any other image: injection never suspends the rule that what ran is what was recorded.
+ * The substitution is scoped to the provider invocation — the container the model itself runs
+ * in, whichever provider the attempt's profile selected, plus the coordinator's separate
+ * diagnosis call. Harness-owned helpers keep the resolved production images even when they
+ * happen to use a provider image, because they are the harness acting, not the model. Whatever
+ * is substituted still carries a real, resolved identity and is recorded in the run manifest
+ * exactly like any other image: injection never suspends the rule that what ran is what was
+ * recorded.
  */
 export interface RunInjection {
   /** Replaces the image the Codex invocation runs. */

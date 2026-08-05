@@ -5,8 +5,13 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { RuntimeImages } from '../../src/docker/images.js';
-import { diagnoseFailure } from '../../src/run/diagnosis.js';
+import {
+  DIAGNOSIS_TIMEOUT_SECONDS,
+  diagnoseFailure,
+  diagnosisTimeoutSeconds,
+} from '../../src/run/diagnosis.js';
 import type { AttemptRecord } from '../../src/state/store.js';
+import { CONTRACT_TIMEOUTS } from '../../src/run/timeout.js';
 
 const IMAGES: RuntimeImages = {
   codex: { role: 'codex', id: `sha256:${'a'.repeat(64)}` },
@@ -118,5 +123,20 @@ describe('failure diagnosis', () => {
       { invoke },
     );
     expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  // A text-only call with no workspace, tools or dependencies needs a fraction of the agent
+  // budget, and whatever it spends is spent in front of the stronger retry. DESIGN §5 lets a
+  // phase lower a timeout and never raise one, so a task that asked for less still gets less.
+  it('bounds the diagnosis budget below the agent budget', () => {
+    expect(DIAGNOSIS_TIMEOUT_SECONDS).toBeLessThan(CONTRACT_TIMEOUTS.agent_seconds);
+  });
+
+  it.each([
+    [CONTRACT_TIMEOUTS.agent_seconds, DIAGNOSIS_TIMEOUT_SECONDS],
+    [DIAGNOSIS_TIMEOUT_SECONDS + 1, DIAGNOSIS_TIMEOUT_SECONDS],
+    [60, 60],
+  ])('caps a %d-second agent budget at %d for diagnosis', (agentSeconds, expected) => {
+    expect(diagnosisTimeoutSeconds(agentSeconds)).toBe(expected);
   });
 });

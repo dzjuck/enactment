@@ -24,6 +24,19 @@ const EVIDENCE_FILES = new Set([
 const MAX_EVIDENCE_BYTES = 2_000;
 const MAX_PROMPT_BYTES = 10_000;
 
+/**
+ * Diagnosis reads a bounded prompt with no workspace, tools or dependencies, so it needs a
+ * fraction of an agent's budget — and everything it spends is spent in front of the stronger
+ * retry that is waiting on it. Claude does not exit by itself when the provider is
+ * unreachable (§5), so this is the deadline, not a safety net around one.
+ */
+export const DIAGNOSIS_TIMEOUT_SECONDS = 300;
+
+/** §5 lets a phase lower a timeout and never raise one, so a smaller task budget still wins. */
+export function diagnosisTimeoutSeconds(agentSeconds: number): number {
+  return Math.min(agentSeconds, DIAGNOSIS_TIMEOUT_SECONDS);
+}
+
 export interface DiagnosisResult {
   status: 'completed' | 'failed' | 'timeout';
   text: string;
@@ -169,13 +182,14 @@ async function invokeClaude(
       },
       async (handle) => {
         const env = { ...options.env, ...proxyEnvironment(handle) };
+        const timeoutSeconds = diagnosisTimeoutSeconds(options.timeoutSeconds);
         let result: DiagnosisResult;
         try {
           await providerSmokeTest({
             url: `https://${CLAUDE_PROVIDER_ALLOWLIST[0] ?? ''}/`,
             network: networks.egress ?? '',
             env,
-            timeoutSeconds: Math.min(options.timeoutSeconds, 20),
+            timeoutSeconds: Math.min(timeoutSeconds, 20),
             images,
             provider: 'claude',
             labels: attemptLabels(attempt, 'diagnosis-connectivity'),
@@ -190,7 +204,7 @@ async function invokeClaude(
             network: networks.egress ?? '',
             env,
             mounts: invocation.mounts,
-            timeoutSeconds: options.timeoutSeconds,
+            timeoutSeconds,
             graceSeconds: options.graceSeconds,
             artifactDir,
             images,
