@@ -21,7 +21,15 @@ import { exportCommit } from '../git/export.js';
 import { withPhaseNetworks } from '../net/manage.js';
 import { runReview } from '../review/run.js';
 import { proxyEnvironment, withProxy, writeProxyRecords } from '../proxy/container.js';
-import { runVerification } from '../verify/run.js';
+import {
+  DEFAULT_VERIFICATION_TIMEOUT_SECONDS,
+  runVerification,
+  runWorkspaceCommands,
+  withVerifierWorkspace,
+  writeVerificationArtifact,
+  type VerificationResult,
+} from '../verify/run.js';
+import { runRuntimeCheck } from '../verify/runtime.js';
 import { baselineArtifact, captureBaseline } from '../verify/baseline.js';
 import { classifyRed, redResultsArtifact } from '../verify/red.js';
 import type { TestRunResults } from '../verify/results.js';
@@ -33,7 +41,7 @@ import {
   excludeDispute,
   implementationScopeWithDispute,
 } from '../verify/dispute.js';
-import { attemptLabels } from '../volume/naming.js';
+import { attemptLabels, workspaceVolumeName } from '../volume/naming.js';
 import { snapshotWorkspace } from '../volume/snapshot.js';
 import { initSyntheticGit } from '../volume/synthetic-git.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../volume/workspace.js';
@@ -47,6 +55,7 @@ import { OwnershipError } from './ownership.js';
 import {
   baselineSection,
   networkPolicySection,
+  runtimeCheckSection,
   runtimeSection,
   usageSection,
 } from './manifest.js';
@@ -67,6 +76,7 @@ export const RUN_PHASES = [
   'implementation_diff',
   'green',
   'verify',
+  'runtime',
   'review',
   'commit',
 ] as const;
@@ -166,6 +176,10 @@ const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
   implementation: 'agent_failed',
   implementation_diff: 'invalid_change',
   verify: 'verification_failed',
+  // A failing runtime *verdict* raises `verification_failed` itself. What is left here is the
+  // harness failing to perform the check at all — Docker, log capture, artifact writing —
+  // which is a harness fault, not a statement about the code.
+  runtime: 'internal_error',
   review: 'review_failed',
   commit: 'internal_error',
 };
@@ -198,6 +212,7 @@ const ATTEMPT_PHASE: Record<RunPhase, AttemptPhase> = {
   implementation_diff: 'implementation',
   green: 'green',
   verify: 'verify',
+  runtime: 'runtime',
   review: 'review',
   commit: 'review',
 };
@@ -740,16 +755,46 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     }
 
     await phase('verify');
-    const verification = await runVerification({
-      attempt,
-      snapshot: implementation,
-      dependencySnapshot,
-      commands: step.verification.commands,
-      artifactDir: options.artifactDir,
-      graceSeconds: timeouts.termination_grace_seconds,
-      images,
-      redact,
-    });
+    const runtimeBlock = step.verification.runtime;
+
+    // One acquisition for both checks: a static command may build exactly what
+    // `start_command` launches, and a second restore would discard that build output.
+    const verified = await withVerifierWorkspace(
+      { attempt, snapshot: implementation, dependencySnapshot, images },
+      async (workspace) => {
+        const commands = await runWorkspaceCommands({
+          attempt,
+          mounts: workspace.mounts,
+          commands: step.verification.commands,
+          artifactDir: options.artifactDir,
+          images,
+          timeoutSeconds: DEFAULT_VERIFICATION_TIMEOUT_SECONDS,
+          graceSeconds: timeouts.termination_grace_seconds,
+          redact,
+        });
+
+        if (commands.status !== 'pass' || runtimeBlock === undefined) return { commands };
+
+        await phase('runtime');
+        const runtimeCheck = await runRuntimeCheck({
+          attempt,
+          runtime: runtimeBlock,
+          mounts: workspace.mounts,
+          images,
+          artifactDir: options.artifactDir,
+          graceSeconds: timeouts.termination_grace_seconds,
+          redact,
+        });
+
+        return { commands, runtimeCheck };
+      },
+    );
+
+    const verification: VerificationResult = {
+      ...verified.commands,
+      workspaceVolume: workspaceVolumeName(`${attempt}-verify`),
+    };
+    await writeVerificationArtifact(options.artifactDir, verification, redact);
 
     await writeLog(
       options.artifactDir,
@@ -767,6 +812,25 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
         'verification_failed',
         `verification ${verification.status}`,
       );
+    }
+
+    const runtimeCheck = verified.runtimeCheck;
+    if (runtimeCheck !== undefined) {
+      manifest.runtime_check = runtimeCheckSection(runtimeCheck);
+
+      if (runtimeCheck.status !== 'pass') {
+        // A leak that happened alongside a failed check is recorded in the manifest and swept
+        // below; it does not become the reason the step failed.
+        throw new PhaseFailure(
+          'runtime',
+          'verification_failed',
+          `runtime ${runtimeCheck.stage ?? 'check'} ${runtimeCheck.status}`,
+        );
+      }
+
+      if (runtimeCheck.cleanupError !== undefined) {
+        throw new PhaseFailure('runtime', 'internal_error', runtimeCheck.cleanupError);
+      }
     }
 
     await phase('review');

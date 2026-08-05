@@ -9,7 +9,9 @@ import { IMAGE_ROLES } from '../../src/config/pins.js';
 import type { RuntimeImages } from '../../src/docker/images.js';
 import { CleanupError } from '../../src/run/cleanup.js';
 import { OwnershipError } from '../../src/run/ownership.js';
-import { runVerification } from '../../src/verify/run.js';
+import { runVerification, withVerifierWorkspace } from '../../src/verify/run.js';
+import { DEPENDENCY_PATH } from '../../src/deps/volume.js';
+import { WORKSPACE_PATH } from '../../src/volume/workspace.js';
 
 const { calls, fakeExeca } = vi.hoisted(() => {
   const recorded: string[][] = [];
@@ -131,5 +133,85 @@ describe('verifier acquisition rollback', () => {
       'ai-harness-deps-attempt-1-verify-verifier',
       'ai-harness-ws-attempt-1-verify',
     ]);
+  });
+});
+
+/**
+ * `runVerification` is now a wrapper around this scope, and the step executor uses the scope
+ * directly so that static and runtime verification share one workspace. The rollback
+ * behaviour therefore has to hold at this level too, not only through the wrapper.
+ */
+describe('withVerifierWorkspace', () => {
+  function scope<T>(
+    use: Parameters<typeof withVerifierWorkspace<T>>[1],
+    overrides: Partial<Parameters<typeof withVerifierWorkspace>[0]> = {},
+  ): Promise<T> {
+    return withVerifierWorkspace(
+      {
+        attempt: 'attempt-1',
+        snapshot,
+        dependencySnapshot: Buffer.alloc(0),
+        images: IMAGES,
+        ...overrides,
+      },
+      use,
+    );
+  }
+
+  it('hands the caller the workspace and dependency mounts it acquired', async () => {
+    const workspace = await scope((acquired) => Promise.resolve(acquired), {
+      removeVolume: () => Promise.resolve(),
+    });
+
+    expect(workspace.workspaceVolume).toBe('ai-harness-ws-attempt-1-verify');
+    expect(workspace.dependencyVolume).toBe('ai-harness-deps-attempt-1-verify-verifier');
+    expect(workspace.mounts).toEqual([
+      { type: 'volume', source: workspace.workspaceVolume, target: WORKSPACE_PATH },
+      { type: 'volume', source: workspace.dependencyVolume, target: DEPENDENCY_PATH },
+    ]);
+  });
+
+  it('releases both volumes in reverse acquisition order', async () => {
+    const removed: string[] = [];
+
+    await scope(() => Promise.resolve('done'), {
+      removeVolume: async (name) => void removed.push(name),
+    });
+
+    expect(removed).toEqual([
+      'ai-harness-deps-attempt-1-verify-verifier',
+      'ai-harness-ws-attempt-1-verify',
+    ]);
+  });
+
+  it('releases only what it acquired when acquisition fails part-way', async () => {
+    const removed: string[] = [];
+
+    await scope(() => Promise.resolve('unreachable'), {
+      createDependencies: () => Promise.reject(new Error('dependency volume unavailable')),
+      removeVolume: async (name) => void removed.push(name),
+    }).catch(() => undefined);
+
+    expect(removed).toEqual(['ai-harness-ws-attempt-1-verify']);
+  });
+
+  it('keeps the scope failure primary when the rollback fails too', async () => {
+    const failure = await scope(() => Promise.reject(new Error('runtime check exploded')), {
+      removeVolume: () => Promise.reject(new Error('volume removal refused')),
+    }).catch((cause: unknown) => cause);
+
+    expect(failure).toBeInstanceOf(OwnershipError);
+    expect(((failure as OwnershipError).cause as Error).message).toContain(
+      'runtime check exploded',
+    );
+    expect((failure as OwnershipError).cleanupCause).toBeInstanceOf(CleanupError);
+  });
+
+  it('reports a rollback failure even when the scope succeeded', async () => {
+    const failure = await scope(() => Promise.resolve('done'), {
+      removeVolume: () => Promise.reject(new Error('volume removal refused')),
+    }).catch((cause: unknown) => cause);
+
+    expect(failure).toBeInstanceOf(CleanupError);
   });
 });

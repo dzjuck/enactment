@@ -29,6 +29,7 @@ export type AttemptPhase =
   | 'implementation'
   | 'green'
   | 'verify'
+  | 'runtime'
   | 'review';
 
 export interface PlanRecord {

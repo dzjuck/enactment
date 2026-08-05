@@ -5,6 +5,7 @@ import type { RuntimeImages } from '../docker/images.js';
 import type { BaselineArtifact } from '../verify/baseline.js';
 import type { GreenVerdict } from '../verify/green.js';
 import type { RedVerdict } from '../verify/red.js';
+import type { RuntimeCheckResult } from '../verify/runtime.js';
 
 /** The `runtime` block of the DESIGN.md §20 execution manifest. */
 export interface RuntimeSection {
@@ -58,6 +59,43 @@ export function usageSection(usage: UsageSection): UsageSection {
     input_tokens: usage.input_tokens,
     output_tokens: usage.output_tokens,
     cached_input_tokens: usage.cached_input_tokens,
+  };
+}
+
+/**
+ * DESIGN.md §21 / M6: the runtime verdict, recorded beside the static one.
+ *
+ * `manifest.runtime` is already the image section, so this is a separate key rather than a
+ * nested one: an attempt's evidence must not need to disambiguate two meanings of "runtime".
+ */
+export interface RuntimeCheckSection {
+  status: RuntimeCheckResult['status'];
+  stage?: RuntimeCheckResult['stage'];
+  url: string;
+  readiness_url: string;
+  readiness_ms: number;
+  start_command: string[];
+  commands: { argv: string[]; exit_code: number; status: string; duration_ms: number }[];
+  verifier_image_id: string;
+  cleanup_error?: string;
+}
+
+export function runtimeCheckSection(result: RuntimeCheckResult): RuntimeCheckSection {
+  return {
+    status: result.status,
+    stage: result.stage,
+    url: result.url,
+    readiness_url: result.readinessUrl,
+    readiness_ms: result.readiness.durationMs,
+    start_command: [...result.startCommand],
+    commands: result.commands.map((command) => ({
+      argv: [...command.argv],
+      exit_code: command.exitCode,
+      status: command.status,
+      duration_ms: command.durationMs,
+    })),
+    verifier_image_id: result.verifierImage,
+    cleanup_error: result.cleanupError,
   };
 }
 

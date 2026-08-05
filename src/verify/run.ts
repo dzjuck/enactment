@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import type { StoredArtifact } from '../artifacts/store.js';
 import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
+import type { Mount } from '../docker/args.js';
 import type { RuntimeImages } from '../docker/images.js';
 import { runContainer, type RunStatus } from '../docker/run.js';
 import { CleanupError, releaseAll } from '../run/cleanup.js';
@@ -33,25 +34,20 @@ export interface VerificationResult {
   workspaceVolume: string;
 }
 
-export interface VerificationOptions {
+/** A restored, disposable copy of the implementation snapshot with clean dependencies. */
+export interface VerifierWorkspace {
+  workspaceVolume: string;
+  dependencyVolume: string;
+  /** What every container running inside this workspace mounts. */
+  mounts: Mount[];
+}
+
+export interface VerifierWorkspaceOptions {
   attempt: string;
   /** The immutable implementation snapshot — the only acceptance candidate (§15). */
   snapshot: StoredArtifact;
   dependencySnapshot: Buffer;
-  /** Fixed argument arrays from the plan; never shell strings (§16). */
-  commands: readonly (readonly string[])[];
-  /** Vitest argv from the plan; reporter arguments are appended by the harness. */
-  testCommand?: readonly string[];
-  artifactDir: string;
   images: RuntimeImages;
-  timeoutSeconds?: number;
-  graceSeconds?: number;
-  /**
-   * Applied to the stored result. The verifier holds no credentials of its own, but it runs
-   * the agent's source: anything the agent wrote into a file can reach this artifact through
-   * a command's output, so it passes the same boundary as every other artifact (§32).
-   */
-  redact?: (text: string) => string;
   /** Injectable acquisition steps, so each stage of the rollback window is testable. */
   createDependencies?: (
     scope: string,
@@ -68,33 +64,30 @@ export interface VerificationOptions {
   removeVolume?: (name: string) => Promise<void>;
 }
 
-export const DEFAULT_VERIFICATION_TIMEOUT_SECONDS = 600;
-
 /**
- * Run the declared verification commands over a disposable copy of the implementation
- * snapshot with fresh dependencies, offline and without credentials.
+ * Own a disposable verifier workspace for the duration of one scope.
  *
- * Nothing the verifier writes can be accepted: it works on a copy, and the copy is destroyed
- * here (§15).
+ * Each resource is registered the moment it exists, so a failure part-way through acquisition
+ * rolls back exactly what was acquired — and never names a volume that was not. An earlier
+ * shape created two volumes before entering any cleanup scope, so a dependency-volume failure
+ * stranded the workspace volume.
+ *
+ * The scope is its own function because more than one caller needs the same workspace: the
+ * step executor runs its static verification commands and its optional runtime check inside a
+ * single acquisition, so a static command may build what `start_command` launches.
  */
-export async function runVerification(
-  options: VerificationOptions,
-): Promise<VerificationResult> {
-  const timeoutSeconds = options.timeoutSeconds ?? DEFAULT_VERIFICATION_TIMEOUT_SECONDS;
-  const graceSeconds = options.graceSeconds ?? 10;
-
+export async function withVerifierWorkspace<T>(
+  options: VerifierWorkspaceOptions,
+  use: (workspace: VerifierWorkspace) => Promise<T>,
+): Promise<T> {
   const acquireDependencies = options.createDependencies ?? acquireVerifierDependencies;
   const restore = options.restore ?? restoreWorkspace;
   const release = options.removeVolume ?? removeVolume;
 
   const workspaceVolume = workspaceVolumeName(`${options.attempt}-verify`);
 
-  // Each resource is registered the moment it exists, so a failure part-way through
-  // acquisition rolls back exactly what was acquired — and never names a volume that was
-  // not. The previous shape created two volumes before entering any cleanup scope, so a
-  // dependency-volume failure stranded the workspace volume.
   const rollback: (() => Promise<void>)[] = [];
-  let outcome: { value: VerificationResult } | { error: unknown };
+  let outcome: { value: T } | { error: unknown };
 
   try {
     await createVolume(workspaceVolume, attemptLabels(options.attempt, 'verify-workspace'));
@@ -108,72 +101,19 @@ export async function runVerification(
     );
     rollback.push(() => release(dependencyVolume));
 
-    await restore(workspaceVolume, options.snapshot, options.images, attemptLabels(options.attempt, 'verify-restore'));
-
-    const commands: CommandResult[] = [];
-    let status: VerificationResult['status'] = 'pass';
-    let testCommand: TestCommandResult | undefined;
-    let testResults: TestRunResults | undefined;
-
-    if (options.testCommand !== undefined) {
-      const testRun = await runStructuredTests({
-        testCommand: options.testCommand,
-        mounts: [workspaceMount(workspaceVolume), dependencyMount(dependencyVolume)],
-        artifactDir: options.artifactDir,
-        images: options.images,
-        timeoutSeconds,
-        graceSeconds,
-        labels: attemptLabels(options.attempt, 'verify-tests'),
-        ...(options.redact === undefined ? {} : { redact: options.redact }),
-      });
-      testCommand = testRun.command;
-      testResults = testRun.results;
-
-      if (testRun.command.status === 'timeout') status = 'timeout';
-      else if (testRun.command.exitCode !== 0) status = 'fail';
-    }
-
-    for (const argv of status === 'pass' ? options.commands : []) {
-      const run = await runContainer(
-        {
-          image: options.images.verifier.id,
-          argv: [...argv],
-          // DESIGN.md §6: no network at all, so verification cannot reach a model.
-          network: 'none',
-          mounts: [workspaceMount(workspaceVolume), dependencyMount(dependencyVolume)],
-          labels: attemptLabels(options.attempt, 'verify'),
-        },
-        { timeoutSeconds, graceSeconds },
-      );
-
-      commands.push({
-        argv: [...argv],
-        exitCode: run.exitCode,
-        stdout: run.stdout,
-        stderr: run.stderr,
-        status: run.status,
-        durationMs: run.durationMs,
-      });
-
-      if (run.status === 'timeout') {
-        status = 'timeout';
-        break;
-      }
-
-      if (run.exitCode !== 0) {
-        status = 'fail';
-        break;
-      }
-    }
+    await restore(
+      workspaceVolume,
+      options.snapshot,
+      options.images,
+      attemptLabels(options.attempt, 'verify-restore'),
+    );
 
     outcome = {
-      value: {
-        status,
-        commands,
+      value: await use({
         workspaceVolume,
-        ...(testCommand === undefined ? {} : { testCommand }),
-        ...(testResults === undefined ? {} : { testResults }),
-      },
+        dependencyVolume,
+        mounts: [workspaceMount(workspaceVolume), dependencyMount(dependencyVolume)],
+      }),
     };
   } catch (error) {
     outcome = { error };
@@ -193,18 +133,172 @@ export async function runVerification(
   }
 
   if ('error' in outcome) throw outcome.error;
+  return outcome.value;
+}
 
-  const redact = options.redact ?? ((text: string) => text);
+export interface WorkspaceCommandOptions {
+  attempt: string;
+  mounts: readonly Mount[];
+  /** Fixed argument arrays from the plan; never shell strings (§16). */
+  commands: readonly (readonly string[])[];
+  /** Vitest argv from the plan; reporter arguments are appended by the harness. */
+  testCommand?: readonly string[];
+  artifactDir: string;
+  images: RuntimeImages;
+  timeoutSeconds: number;
+  graceSeconds: number;
+  redact?: (text: string) => string;
+}
 
-  await mkdir(options.artifactDir, { recursive: true });
+export type WorkspaceCommandResults = Omit<VerificationResult, 'workspaceVolume'>;
+
+/**
+ * Run the declared verification commands inside an already-acquired workspace, offline.
+ *
+ * Ownership of the workspace stays with the caller: this creates no volume and removes none,
+ * so one acquisition can carry a second phase.
+ */
+export async function runWorkspaceCommands(
+  options: WorkspaceCommandOptions,
+): Promise<WorkspaceCommandResults> {
+  const mounts = [...options.mounts];
+  const commands: CommandResult[] = [];
+  let status: VerificationResult['status'] = 'pass';
+  let testCommand: TestCommandResult | undefined;
+  let testResults: TestRunResults | undefined;
+
+  if (options.testCommand !== undefined) {
+    const testRun = await runStructuredTests({
+      testCommand: options.testCommand,
+      mounts,
+      artifactDir: options.artifactDir,
+      images: options.images,
+      timeoutSeconds: options.timeoutSeconds,
+      graceSeconds: options.graceSeconds,
+      labels: attemptLabels(options.attempt, 'verify-tests'),
+      ...(options.redact === undefined ? {} : { redact: options.redact }),
+    });
+    testCommand = testRun.command;
+    testResults = testRun.results;
+
+    if (testRun.command.status === 'timeout') status = 'timeout';
+    else if (testRun.command.exitCode !== 0) status = 'fail';
+  }
+
+  for (const argv of status === 'pass' ? options.commands : []) {
+    const run = await runContainer(
+      {
+        image: options.images.verifier.id,
+        argv: [...argv],
+        // DESIGN.md §6: no network at all, so verification cannot reach a model.
+        network: 'none',
+        mounts,
+        labels: attemptLabels(options.attempt, 'verify'),
+      },
+      { timeoutSeconds: options.timeoutSeconds, graceSeconds: options.graceSeconds },
+    );
+
+    commands.push({
+      argv: [...argv],
+      exitCode: run.exitCode,
+      stdout: run.stdout,
+      stderr: run.stderr,
+      status: run.status,
+      durationMs: run.durationMs,
+    });
+
+    if (run.status === 'timeout') {
+      status = 'timeout';
+      break;
+    }
+
+    if (run.exitCode !== 0) {
+      status = 'fail';
+      break;
+    }
+  }
+
+  return {
+    status,
+    commands,
+    ...(testCommand === undefined ? {} : { testCommand }),
+    ...(testResults === undefined ? {} : { testResults }),
+  };
+}
+
+/**
+ * Write the verification record.
+ *
+ * Separate from the run so that the step executor, which acquires its own workspace, stores
+ * the same document from the same place rather than an approximation of it.
+ */
+export async function writeVerificationArtifact(
+  artifactDir: string,
+  result: VerificationResult,
+  redact: (text: string) => string = (text) => text,
+): Promise<void> {
+  await mkdir(artifactDir, { recursive: true });
   await writeFile(
-    join(options.artifactDir, VERIFICATION_ARTIFACT),
+    join(artifactDir, VERIFICATION_ARTIFACT),
     // The parsed results are deliberately dropped: `tests` is a Map, which stringifies to `{}`
     // and would read as "no tests ran". The runner's own document is stored beside this file.
-    redact(`${JSON.stringify({ ...outcome.value, testResults: undefined }, null, 2)}\n`),
+    redact(`${JSON.stringify({ ...result, testResults: undefined }, null, 2)}\n`),
+  );
+}
+
+export interface VerificationOptions extends VerifierWorkspaceOptions {
+  /** Fixed argument arrays from the plan; never shell strings (§16). */
+  commands: readonly (readonly string[])[];
+  /** Vitest argv from the plan; reporter arguments are appended by the harness. */
+  testCommand?: readonly string[];
+  artifactDir: string;
+  timeoutSeconds?: number;
+  graceSeconds?: number;
+  /**
+   * Applied to the stored result. The verifier holds no credentials of its own, but it runs
+   * the agent's source: anything the agent wrote into a file can reach this artifact through
+   * a command's output, so it passes the same boundary as every other artifact (§32).
+   */
+  redact?: (text: string) => string;
+}
+
+export const DEFAULT_VERIFICATION_TIMEOUT_SECONDS = 600;
+
+/**
+ * Run the declared verification commands over a disposable copy of the implementation
+ * snapshot with fresh dependencies, offline and without credentials.
+ *
+ * Nothing the verifier writes can be accepted: it works on a copy, and the copy is destroyed
+ * here (§15).
+ */
+export async function runVerification(
+  options: VerificationOptions,
+): Promise<VerificationResult> {
+  const timeoutSeconds = options.timeoutSeconds ?? DEFAULT_VERIFICATION_TIMEOUT_SECONDS;
+  const graceSeconds = options.graceSeconds ?? 10;
+
+  const results = await withVerifierWorkspace(options, (workspace) =>
+    runWorkspaceCommands({
+      attempt: options.attempt,
+      mounts: workspace.mounts,
+      commands: options.commands,
+      artifactDir: options.artifactDir,
+      images: options.images,
+      timeoutSeconds,
+      graceSeconds,
+      ...(options.testCommand === undefined ? {} : { testCommand: options.testCommand }),
+      ...(options.redact === undefined ? {} : { redact: options.redact }),
+    }),
   );
 
-  return outcome.value;
+  const result: VerificationResult = {
+    ...results,
+    workspaceVolume: workspaceVolumeName(`${options.attempt}-verify`),
+  };
+
+  await writeVerificationArtifact(options.artifactDir, result, options.redact);
+
+  return result;
 }
 
 /** Adapts the dependency-volume signature to the acquisition step's argument order. */
