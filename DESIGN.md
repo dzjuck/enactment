@@ -44,7 +44,6 @@ Supported:
 * Claude Code;
 * one active plan per repository;
 * one step at a time;
-* local service containers;
 * public or server-enforced read-only API checks.
 
 Not supported:
@@ -59,6 +58,7 @@ Not supported:
 * production deployment;
 * external writes;
 * automatic merge;
+* local service containers;
 * OpenHands;
 * Web UI;
 * local models.
@@ -82,8 +82,7 @@ Host
     ├── setup
     ├── reviewer
     ├── documentation downloader
-    ├── egress proxy
-    └── local test services
+    └── egress proxy
 ```
 
 Docker is the host-isolation boundary.
@@ -316,27 +315,23 @@ Never place all phases on one shared egress-capable network.
 
 ```text
 agent
-├── attempt-services-net
 └── agent-egress-net
     └── provider proxy
 ```
 
 ### Offline verifier
 
-Without services:
-
 ```text
 network_mode: none
 ```
 
-With local services:
+### Local runtime check
 
 ```text
-verifier
-└── attempt-services-net
+application ── attempt-runtime-net ── behavioral-check verifier
 ```
 
-The verifier cannot reach the proxy.
+The runtime network is internal. Neither container can reach the provider proxy or the internet.
 
 ### Setup phase
 
@@ -458,7 +453,7 @@ Live verification is permitted only for:
 
 1. public unauthenticated APIs where writes are unavailable;
 2. credentials with server-enforced read-only permissions;
-3. local mocks or recorded fixtures.
+3. in-process mocks or recorded fixtures.
 
 Generic authenticated API access is not described as read-only.
 
@@ -905,7 +900,6 @@ Approval required for:
 * image changes;
 * new domains;
 * dependency changes;
-* service changes;
 * capability expansion;
 * routing changes;
 * verification-closure changes.
@@ -1086,36 +1080,30 @@ The implementation agent cannot weaken tests directly.
 
 ---
 
-## 26. Local service containers
+## 26. Post-V1 local service containers
 
-Supported:
+Local dependency services are deliberately deferred until a real project requires one. V1 does
+not expose a service schema, accept Compose files or store inert service configuration.
 
-* PostgreSQL;
-* Redis;
-* RabbitMQ;
-* MinIO;
-* local mock APIs.
+The first required service will introduce the shared lifecycle together with one concrete,
+tested harness-owned profile:
 
-Profiles are harness-owned:
-
-```yaml
-services:
-  postgres-test:
-    image: postgres@sha256:...
-    environment:
-      POSTGRES_DB: test
-      POSTGRES_USER: test
+```text
+create private phase network
+→ start service from a pinned image digest
+→ wait for a profile-owned readiness check
+→ run the agent or verifier using Docker DNS
+→ capture service logs
+→ destroy service containers, volumes and network
 ```
 
-Rules:
+The harness will use its existing Docker execution layer, not Docker Compose. Plans will reference
+harness-owned profile IDs; they will not provide arbitrary images, mounts, privileges, environment
+or Compose definitions.
 
-* image digest pinned;
-* no host mounts;
-* no Docker socket;
-* no host network;
-* private attempt network;
-* test credentials only;
-* destroyed afterward.
+Every service phase will use fresh state. Profiles will permit only test credentials, no host
+mounts, no Docker socket and no host network. Profile content and resolved image IDs will be part
+of manifest approval.
 
 ---
 
@@ -1347,7 +1335,6 @@ Full plan repair handles:
 * wrong architecture;
 * obsolete future steps;
 * changed ordering;
-* new services;
 * new documentation;
 * new dependencies;
 * API-assumption changes.
@@ -1589,16 +1576,23 @@ There is no composed final review. Every changed file is scanned by the step tha
 and CE rules are intra-file, so the branch-head content cannot create a new blocking combination.
 Revisit this only if interfile analysis is introduced.
 
-## Milestone 6 — Local Services
+## Milestone 6 — Runtime and Behavioral Checks
 
 Adds:
 
-* PostgreSQL;
-* Redis;
-* RabbitMQ;
 * operational steps;
 * mixed steps;
-* startup and behavioral checks.
+* detached application startup in a hardened container;
+* private offline runtime-check networks;
+* readiness and behavioral checks from a verifier container;
+* application log capture;
+* deterministic teardown on success, failure and timeout.
+
+Working result:
+
+```text
+implementation snapshot → isolated application startup → behavioral verification → commit
+```
 
 ## Milestone 7 — Documentation Workflow
 
@@ -1619,7 +1613,7 @@ Adds:
 * amendments;
 * future-step insertion/removal/reordering;
 * compensating steps;
-* dependency and service escalation.
+* dependency escalation.
 
 ## Milestone 9 — Metrics and Feedback
 
@@ -1642,6 +1636,18 @@ Adds:
 * costs;
 * model comparison;
 * repair history.
+
+## Post-V1 Milestone 11 — Local Services
+
+Adds, when demanded by a real project:
+
+* harness-owned service profiles, one concrete service at a time;
+* pinned service image IDs in manifest approval;
+* per-phase service networks and fresh state;
+* profile-owned readiness checks;
+* service logs, timeout handling and deterministic cleanup.
+
+Docker Compose and repository-provided service definitions remain unsupported.
 
 ---
 
