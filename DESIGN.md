@@ -714,7 +714,9 @@ immutable implementation snapshot
 → discard verifier workspace
 ```
 
-Review runs on another disposable copy.
+Review packs only the validated added/modified regular files into one disposable volume: modified
+files appear under `before/` and `after/`; additions appear only under `after/`. The pinned reviewer
+mounts that volume read-only and offline. It receives no dependencies, credentials or canonical Git.
 
 Verifier or reviewer mutations cannot affect accepted source.
 
@@ -846,6 +848,7 @@ Each step declares:
 * observable behavior;
 * type;
 * complexity (`low | medium | high`);
+* risk (`standard | high`);
 * test paths;
 * implementation paths;
 * expected test IDs;
@@ -859,8 +862,9 @@ The authored order **is** the dependency chain: step N depends on step N-1. Mile
 step at a time, so an explicit `depends_on` and a DAG scheduler would add a second description of
 the same fact. `final_verification.commands` is required.
 
-Risk, services, network requirements and review metadata are rejected rather than stored inert,
-and arrive with the milestones that execute them.
+Risk is explicit user-owned data: authorization, financial logic, migrations, destructive local
+behavior, concurrency and credential handling are `high`. Services, network requirements and
+user-defined review metadata remain rejected rather than stored inert.
 
 ---
 
@@ -883,6 +887,7 @@ execution_manifest:
     codex_image_id: sha256:...
     claude_image_id: sha256:...
     verifier_image_id: sha256:...
+    reviewer_image_id: sha256:...
     setup_image_id: sha256:...
     proxy_image_id: sha256:...
 ```
@@ -1319,23 +1324,16 @@ commit-plus-cleanup failures are not diagnosed or retried.
 
 ## 29. Review policy
 
-```yaml
-review:
-  read_code_after_finish: true
-  high_risk_steps: required
-```
+The V1 reviewer is pinned Semgrep CE with a small vendored JavaScript/TypeScript security-rule
+subset. It runs once per verified step with no model, network, provider credentials, dependencies or
+canonical Git. `high_risk_steps: required` means critical findings always block and warnings also
+block steps whose required `risk` is `high`; standard-step warnings are recorded and continue.
 
-High-risk examples:
-
-* authentication;
-* authorization;
-* financial logic;
-* migrations;
-* destructive local behavior;
-* concurrency;
-* credential handling.
-
-Normal verified steps continue automatically.
+Review scans the same changed regular files before and after, then subtracts the parent multiset by
+rule ID, repository-relative path and exact matched-text hash. Added files have no baseline;
+deletions and symlinks are not targets. A rename is therefore an addition. Semgrep CE is intra-file,
+so this is a narrow deterministic gate, not proof of security and not a replacement for human branch
+review. There are no waivers, suppressions or project-supplied rules in V1.
 
 The harness never merges automatically.
 
@@ -1416,7 +1414,8 @@ ordinal. A `running` row found at startup belongs to a process that died, so its
 the whole step reruns from its stored parent.
 
 The execution phase — `preparing`, `baseline`, `tests`, `red`, `implementation`, `green`,
-`verify` — is a diagnostic column recording where an attempt was, not a second state machine.
+`verify`, `review` — is a diagnostic column recording where an attempt was, not a second state
+machine.
 
 Recovery reconciles:
 
@@ -1580,11 +1579,15 @@ Adds:
 
 Adds:
 
-* independent reviewer;
-* critical findings;
-* warnings;
-* high-risk review;
-* optional final review.
+* required per-step risk;
+* pinned offline static reviewer;
+* introduced critical findings and warnings;
+* risk-dependent blocking before acceptance;
+* bounded stronger retry for `review_blocked`.
+
+There is no composed final review. Every changed file is scanned by the step that last changes it,
+and CE rules are intra-file, so the branch-head content cannot create a new blocking combination.
+Revisit this only if interfile analysis is introduced.
 
 ## Milestone 6 — Local Services
 
@@ -1803,6 +1806,17 @@ Established against Claude Code `2.1.221` on OrbStack `linux/arm64` before routi
   the plan's separate Agent SDK credit. The harness neither measures nor routes around that balance;
   operators check it before enabling medium routes, diagnosis or stronger retry.
 
+### Findings from the Milestone 5 implementation
+
+* **Both fixed scan roots must always exist.** An added-only change has no `before/` file, but Semgrep
+  treats a missing fixed root as target-discovery failure. The review tar therefore always contains
+  empty `before/` and `after/` directories before file entries are added.
+* **Reduced scanner evidence is the safe artifact.** Scanner messages and matched source never enter
+  `scan.json` or `review.json`; only rule ID, relative path, location and mapped severity survive.
+* **Review needs no new durable state.** The existing text phase records `review`, failures use the
+  existing atomic terminal transaction, and reports load summaries from attempt artifacts. Schema
+  version remains 2.
+
 ### Conclusion
 
 Milestone 1 is feasible with a simpler security model than earlier drafts assumed:
@@ -1890,8 +1904,9 @@ Approved plan
 → isolated agent container
 → immutable implementation snapshot
 → disposable offline verifier
-→ deterministic acceptance
+→ pinned offline review of changed files
+→ deterministic acceptance or explicit finding-backed stop
 → harness-owned commit
 → next step
-→ optional final review
+→ final verification
 ```

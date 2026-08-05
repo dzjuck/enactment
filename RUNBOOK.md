@@ -26,14 +26,14 @@ crash. Nothing here uses the test suites.
   enabling Claude routing.
 * A Git repository to work on, committed clean. The harness works from a commit, never from
   your working tree, and never touches your checked-out branch.
-* A fresh Milestone 4 `state.db`. Schema version 2 intentionally has no migration from earlier
+* A fresh schema-version-2 `state.db`. There is intentionally no migration from earlier
   milestones. Preserve any needed evidence, then move the old database aside before the first run.
 
 ## 1. Build
 
 ```sh
 npm ci
-npm run images:build     # builds Codex, Claude, verifier, setup and proxy images
+npm run images:build     # builds Codex, Claude, verifier, reviewer, setup and proxy images
 npm run build            # compiles the harness into dist/
 ```
 
@@ -56,6 +56,7 @@ id: slugify-plan
 steps:
   - type: code_behavior
     complexity: low
+    risk: standard
     id: add-slugify
     observable_behavior: Add URL-safe slugify behavior.
     implementation_paths:
@@ -87,7 +88,7 @@ title. For `describe('slugify')` and `it('lowercases and hyphenates words')`, de
 
 The harness captures the baseline, asks one agent to write tests, verifies RED, freezes tests and
 runner inputs, asks a second agent for implementation, verifies GREEN offline, runs the opaque
-commands, then commits both changes. Phase artifacts live under `baseline/`, `tests/`, `red/`,
+commands, reviews changed files offline, then commits both changes. Phase artifacts live under `baseline/`, `tests/`, `red/`,
 `implementation/`, and `green/`.
 
 The original single-agent step type remains available:
@@ -98,6 +99,7 @@ id: slugify-plan
 steps:
   - type: task
     complexity: medium
+    risk: high
     id: add-slugify
     observable_behavior: |
       Implement the slugify function in src/slugify.js.
@@ -128,8 +130,13 @@ The table is deterministic, not a ranking. No normal route uses `claude-deep`; i
 the one stronger retry, so a retry always differs from the normal profile. One profile owns every
 model phase in an attempt. Plans cannot override provider, model or effort.
 
-`operational` and `mixed` steps are rejected until their milestone, as are service and review
-fields.
+`risk` is required and is either `standard` or `high`. Mark authentication, authorization,
+financial logic, migrations, destructive local behavior, concurrency and credential handling as
+`high`. Risk changes only the review threshold: critical findings always block; warnings are
+recorded for `standard` steps and block `high` steps.
+
+`operational` and `mixed` steps are rejected until their milestone, as are service fields and
+user-defined review commands, rules, suppressions or overrides.
 
 Rules the loader enforces: no unknown fields; verification commands are argv arrays, never shell
 strings; `implementation_paths` are relative, free of `..`, and may not name `package.json` or a
@@ -141,7 +148,7 @@ lockfile. `timeouts` may lower the defaults above, never raise them.
 ## 3. Prepare and approve
 
 Preparation resolves everything an approval covers — the plan's exact bytes, the repository's
-current head, fixed network/routing/dependency policies, and the five runtime image IDs — into
+current head, fixed network/routing/dependency/review policies, and the six runtime image IDs — into
 one candidate manifest. It is read-only apart from the file it writes:
 
 ```sh
@@ -163,6 +170,7 @@ execution_manifest:
     codex_image_id: sha256:...
     claude_image_id: sha256:...
     verifier_image_id: sha256:...
+    reviewer_image_id: sha256:...
     setup_image_id: sha256:...
     proxy_image_id: sha256:...
 ```
@@ -189,7 +197,8 @@ branch but could not release its containers or volumes exits non-zero and report
 
 The JSON report on stdout carries the plan state, branch and head, each step's `attempts` list and
 commit, final verification, and any failure. Each attempt lists `id`, `kind` (`normal` or
-`stronger`), `profile`, `state`, optional commit, and diagnosis. The same report is
+`stronger`), `profile`, `state`, optional commit, diagnosis, and a review summary containing risk,
+verdict and severity counts. The same report is
 stored under `<artifacts>/<plan-id>/reports/invocation-<n>.json`, and earlier reports are never
 replaced.
 
@@ -229,6 +238,8 @@ parent commit, and a repeated key returns the existing commit instead of making 
 One invocation can make at most one normal attempt, one diagnosis and one stronger attempt.
 `provider_error` is deliberately non-retryable: it is a provider refusal such as invalid auth,
 quota or an unavailable model, not evidence that a stronger model can repair the workspace.
+`review_blocked` is retryable; `review_failed` is not. A blocked implementation may be repaired by
+the stronger attempt. A scanner timeout, error or invalid result requires fixing the reviewer.
 
 ### Cancelling
 
@@ -276,13 +287,16 @@ Inside one `run-<n>` directory:
 
 | File | What it holds |
 | --- | --- |
-| `run-manifest.json` | Base commit, input hashes, five executed image IDs, selected profile, requested/reported model, usage, snapshots, result and cleanup errors. |
+| `run-manifest.json` | Base commit, input hashes, six executed image IDs, selected profile, requested/reported model, usage, review verdict, snapshots, result and cleanup errors. |
 | `prompt.txt` | Exactly what the agent was sent. |
 | `agent-events.jsonl` / `claude-events.jsonl` | Redacted provider event stream. |
 | `logs/agent.log`, `logs/verification.log` | Redacted container output. |
 | `proxy-records.jsonl` | One record per connection: hostname, allowed/denied, bytes, duration, result. |
 | `verification.json` | Per-command exit codes and output. |
 | `source-diff.json` | The validated change set that was committed. |
+| `review/scan.json` | Reduced before/after findings; no scanner messages or source. |
+| `review/review.json` | Introduced findings, risk, verdict, counts, reviewer image and scanned paths. |
+| `review/reviewer.log` | Redacted scanner stderr. |
 | `diagnosis/diagnosis.json` | Redacted status and advisory text for a retryable failed normal attempt. |
 
 A `code_behavior` step adds `baseline/`, `tests/`, `red/`, `implementation/` and `green/`
@@ -389,9 +403,20 @@ parent — stops the plan without changing either side.
 | `closure_violation` | An agent changed a frozen test, runner configuration, setup file, manifest, or lockfile. |
 | `test_contract_disputed` | The implementation agent reported that the frozen tests are wrong. Read `implementation/test-contract-dispute.md`; no commit was created. |
 | `verification_failed` | GREEN or an opaque verification command failed. Read `green/verdict.json` and `verification.json`. |
+| `review_blocked` | A critical finding, or any warning on a high-risk step. Read `review/review.json`; one stronger retry is allowed. |
+| `review_failed` | The scanner timed out, exited non-zero, reported an error, or returned invalid JSON. Terminal; repair the reviewer instead of rerolling code. |
 | Report `failed` with a `commit` and a copy-back cleanup error | The work was verified and committed, but the rotated credential could not be saved. Re-authenticate (§6) before the next run. |
 | `plan_changed` / `policy_changed` / `runtime_changed` | The approval no longer describes what would run: the plan bytes, the fixed policies, or the harness version and image IDs changed. Re-prepare, read the new manifest, and run it. |
 | `base_unresolvable` | The approved base commit does not exist in this repository. Wrong `--repo`, or the commit was garbage-collected. |
 | `already exists but this plan has accepted nothing` | `ai-harness/<plan-id>` exists from an earlier plan or a person. Rename or delete it, or choose a different plan id. |
 | `refusing to move a ref the harness no longer recognises` | The plan branch and the recorded head disagree. Nothing was changed; reconcile by hand, or cancel the plan and start a new one. |
 | `is owned by plan ... cancel it before registering a different manifest` | Another plan owns this repository. Finish it, or `cancel` its manifest. |
+
+Review is one pinned Semgrep CE scan over added and modified files, offline and without credentials,
+dependencies or canonical Git. Findings already present in the parent are subtracted. A rename is
+treated as an addition, so moved vulnerable legacy code can block. CE analysis is intra-file: this
+is a narrow deterministic gate, not proof of security or a replacement for human branch review.
+
+There is no waiver. Resolve a false-positive critical finding by changing the code, or change the
+vendored rules/reviewer image and re-prepare for explicit approval. Rule, scanner, policy or image
+changes always require rebuild plus re-approval.
