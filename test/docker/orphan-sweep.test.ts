@@ -38,6 +38,7 @@ beforeAll(async () => {
     planDocument([
         'type: task',
         'complexity: low',
+        'risk: standard',
         'id: add-slugify',
         'observable_behavior: Implement the slugify function in src/slugify.js',
         'implementation_paths:',

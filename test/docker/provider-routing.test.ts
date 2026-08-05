@@ -90,6 +90,7 @@ async function run(
     planDocument([
       'type: task',
       `complexity: ${complexity}`,
+      'risk: standard',
       `id: route-${complexity}`,
       'observable_behavior: Write src/routed.js',
       'implementation_paths:',

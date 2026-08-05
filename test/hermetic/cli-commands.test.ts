@@ -30,6 +30,7 @@ const PLAN = [
   'steps:',
   '  - type: task',
   '    complexity: low',
+  '    risk: standard',
   '    id: only-step',
   '    observable_behavior: Do the thing.',
   '    implementation_paths:',

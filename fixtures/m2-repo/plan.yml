@@ -3,6 +3,7 @@ id: m2-slugify
 steps:
   - type: code_behavior
     complexity: low
+    risk: standard
     id: add-slugify
     observable_behavior: |
       Add slugify behavior that lowercases titles, drops punctuation, and joins words with

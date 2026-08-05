@@ -38,6 +38,13 @@ export const STEP_TYPES = ['task', 'code_behavior'] as const;
 export const STEP_COMPLEXITIES = ['low', 'medium', 'high'] as const;
 export type StepComplexity = (typeof STEP_COMPLEXITIES)[number];
 
+/**
+ * DESIGN.md §29: the review gate's threshold. Required, so an older plan is rejected rather
+ * than silently treated as risk-reviewed. It is not a routing input; complexity is.
+ */
+export const STEP_RISKS = ['standard', 'high'] as const;
+export type StepRisk = (typeof STEP_RISKS)[number];
+
 const LATER_MILESTONE_TYPES = ['operational', 'mixed'];
 
 function coversDependencyManifest(pattern: string): boolean {
@@ -109,6 +116,9 @@ const timeouts = z
 const commonFields = {
   id: slug,
   complexity: z.enum(STEP_COMPLEXITIES),
+  risk: z.enum(STEP_RISKS, {
+    error: `must be one of: ${STEP_RISKS.join(', ')}; mark authentication, authorization, financial logic, migrations, destructive local behavior, concurrency and credential handling as "high"`,
+  }),
   observable_behavior: z.string().min(1),
   implementation_paths: z.array(implementationPath).min(1, 'must declare at least one path'),
   timeouts,

@@ -21,7 +21,7 @@ async function loadError(name: string): Promise<PlanConfigError> {
   throw new Error(`expected ${name} to be rejected, but it loaded`);
 }
 
-function planDocument(complexity: string): Record<string, unknown> {
+function planDocument(complexity: string, risk: unknown = 'standard'): Record<string, unknown> {
   return {
     version: 1,
     id: 'complexity-plan',
@@ -29,6 +29,7 @@ function planDocument(complexity: string): Record<string, unknown> {
       {
         type: 'task',
         complexity,
+        risk,
         id: 'task-step',
         observable_behavior: 'Run a task.',
         implementation_paths: ['src/task.ts'],
@@ -37,6 +38,7 @@ function planDocument(complexity: string): Record<string, unknown> {
       {
         type: 'code_behavior',
         complexity,
+        risk,
         id: 'code-step',
         observable_behavior: 'Add behavior.',
         implementation_paths: ['src/code.ts'],
@@ -78,6 +80,7 @@ describe('loadPlan', () => {
         {
           type: 'task',
           complexity: 'low',
+          risk: 'standard',
           id: 'add-slugify',
           observable_behavior:
             'Implement the slugify function in src/slugify.js so that it converts a title\ninto a URL-safe slug.\n',
@@ -95,6 +98,7 @@ describe('loadPlan', () => {
         {
           type: 'code_behavior',
           complexity: 'medium',
+          risk: 'high',
           id: 'add-slugify-tests-first',
           observable_behavior: 'Add slugify behavior.\n',
           implementation_paths: ['src/slugify.js'],
@@ -160,9 +164,40 @@ describe('loadPlan', () => {
     it.each([
       ['missing-complexity.yml', 'steps[0].complexity'],
       ['unknown-complexity.yml', 'steps[0].complexity'],
+      ['missing-risk.yml', 'steps[0].risk'],
+      ['unknown-risk.yml', 'steps[0].risk'],
     ])('rejects %s at %s', async (name, path) => {
       const error = await loadError(name);
       expect(error.message).toContain(path);
+    });
+
+    it.each(['standard', 'high'])('loads %s risk on both step types', async (risk) => {
+      const { plan } = await loadPlan(await writeDocument(planDocument('low', risk)));
+
+      expect(plan.steps.map((step) => step.risk)).toEqual([risk, risk]);
+    });
+
+    it.each([true, 3])('rejects a non-string risk (%s) at the step path', async (risk) => {
+      const error = await loadDocumentError(planDocument('low', risk));
+
+      expect(error.message).toContain('steps[0].risk');
+    });
+
+    it('rejects a plan-level review section', async () => {
+      const error = await loadDocumentError({ ...planDocument('low'), review: { final: true } });
+
+      expect(error.message).toContain('review');
+    });
+
+    it('rejects a step-level review section', async () => {
+      const document = planDocument('low');
+      const first = (document.steps as Array<Record<string, unknown>>)[0];
+      if (first === undefined) throw new Error('generated plan has no first step');
+      first.review = { rules: ['no-eval'] };
+
+      const error = await loadDocumentError(document);
+      expect(error.message).toContain('steps[0]');
+      expect(error.message).toContain('review');
     });
 
     it('rejects duplicate step IDs, naming the offending step', async () => {

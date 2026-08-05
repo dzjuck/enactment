@@ -3,6 +3,7 @@ id: slugify-plan
 steps:
   - type: task
     complexity: low
+    risk: standard
     id: add-slugify
     implementation_paths:
       - src/slugify.js

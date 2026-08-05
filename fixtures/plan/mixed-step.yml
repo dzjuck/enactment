@@ -3,6 +3,7 @@ id: slugify-plan
 steps:
   - type: mixed
     complexity: low
+    risk: standard
     id: start-server
     observable_behavior: The server starts and answers /health.
     implementation_paths: [src/server.js]

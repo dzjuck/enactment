@@ -42,6 +42,7 @@ beforeAll(async () => {
       'steps:',
       '  - type: task',
       '    complexity: medium',
+      '    risk: standard',
       '    id: write-claude-note',
       '    observable_behavior: |',
       '      Create claude-live.txt containing exactly: claude live ok',

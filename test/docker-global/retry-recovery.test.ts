@@ -48,6 +48,7 @@ async function fixture(category = 'agent_failed') {
       'steps:',
       '  - type: task',
       '    complexity: low',
+      '    risk: standard',
       '    id: first-step',
       '    observable_behavior: Write one note.',
       '    implementation_paths:',

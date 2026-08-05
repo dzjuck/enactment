@@ -46,10 +46,11 @@ async function scratch(): Promise<string> {
   return dir;
 }
 
-function step(id: string, complexity = 'low'): string[] {
+function step(id: string, complexity = 'low', risk = 'standard'): string[] {
   return [
     `  - type: task`,
     `    complexity: ${complexity}`,
+    `    risk: ${risk}`,
     `    id: ${id}`,
     `    observable_behavior: Do ${id}.`,
     `    implementation_paths:`,
@@ -63,12 +64,13 @@ function step(id: string, complexity = 'low'): string[] {
 function planDocumentFor(
   stepIds: string[],
   complexities: Record<string, string> = {},
+  risks: Record<string, string> = {},
 ): string {
   return [
     'version: 1',
     'id: demo-plan',
     'steps:',
-    ...stepIds.flatMap((id) => step(id, complexities[id])),
+    ...stepIds.flatMap((id) => step(id, complexities[id], risks[id])),
     'final_verification:',
     '  commands:',
     '    - ["node", "--version"]',
@@ -86,13 +88,14 @@ interface Harness {
 async function harness(
   stepIds = ['first-step', 'second-step'],
   complexities: Record<string, string> = {},
+  risks: Record<string, string> = {},
 ): Promise<Harness> {
   const repo = await createM2Repo();
   repos.push(repo.dir);
 
   const dir = await scratch();
   const planFile = join(dir, 'plan.yml');
-  await writeFile(planFile, planDocumentFor(stepIds, complexities));
+  await writeFile(planFile, planDocumentFor(stepIds, complexities, risks));
 
   const manifestPath = join(dir, 'execution-manifest.yml');
   await writeManifest(
@@ -177,6 +180,26 @@ describe('plan progression', () => {
       PROFILES['codex-fast'],
       PROFILES['claude-balanced'],
       PROFILES['codex-deep'],
+    ]);
+  });
+
+  it('routes on complexity alone, so a high-risk step keeps its normal profile', async () => {
+    const ids = ['standard-step', 'high-risk-step'];
+    const { repo, approved, store, artifactsRoot } = await harness(
+      ids,
+      { 'standard-step': 'low', 'high-risk-step': 'low' },
+      { 'high-risk-step': 'high' },
+    );
+    const seen: StepExecutionOptions[] = [];
+
+    await runPlan(
+      { approved, store, artifactsRoot },
+      { execute: committingExecutor(repo, seen), verifyFinal: passingFinal },
+    );
+
+    expect(seen.map((options) => options.profile)).toEqual([
+      PROFILES['codex-fast'],
+      PROFILES['codex-fast'],
     ]);
   });
 

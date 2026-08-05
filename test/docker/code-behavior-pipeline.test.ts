@@ -85,6 +85,7 @@ async function writePlan(
     planDocument([
       'type: code_behavior',
       'complexity: low',
+      'risk: standard',
       'id: add-slugify-tests-first',
       'observable_behavior: Add slugify behavior for URL-safe titles.',
       'implementation_paths:',

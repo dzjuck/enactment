@@ -2,8 +2,8 @@ version: 1
 id: slugify-plan
 steps:
   - type: task
-    complexity: extreme
-    risk: standard
+    complexity: low
+    risk: extreme
     id: add-slugify
     observable_behavior: Implement slugify.
     implementation_paths: [src/slugify.js]

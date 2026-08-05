@@ -3,6 +3,7 @@ id: slugify-plan
 steps:
   - type: code_behavior
     complexity: low
+    risk: standard
     id: add-slugify-tests-first
     observable_behavior: Add slugify behavior.
     implementation_paths: [src/**]

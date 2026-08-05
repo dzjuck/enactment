@@ -47,6 +47,7 @@ const BASE = { branch: 'main', commit: 'f'.repeat(40) };
 const STEP = [
   'type: code_behavior',
   'complexity: low',
+  'risk: standard',
   'id: add-slugify',
   'observable_behavior: Add slugify behavior.',
   'implementation_paths:',
@@ -169,6 +170,22 @@ describe('candidate execution manifest', () => {
     );
 
     expect(high.inputs.plan_hash).not.toBe(low.inputs.plan_hash);
+  });
+
+  it('changes the plan hash when only step risk changes, so risk needs re-approval', async () => {
+    const dir = await workspace();
+    const manifestPath = join(dir, 'execution-manifest.yml');
+    const standard = await build(await writePlan(dir, STEP, 'standard.yml'), manifestPath);
+    const high = await build(
+      await writePlan(
+        dir,
+        STEP.map((line) => (line === 'risk: standard' ? 'risk: high' : line)),
+        'high.yml',
+      ),
+      manifestPath,
+    );
+
+    expect(high.inputs.plan_hash).not.toBe(standard.inputs.plan_hash);
   });
 
   it('contains the complete fixed provider and routing contract', () => {

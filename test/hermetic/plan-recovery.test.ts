@@ -59,6 +59,7 @@ function planDocumentFor(stepIds: string[]): string {
     ...stepIds.flatMap((id) => [
       '  - type: task',
       '    complexity: low',
+      '    risk: standard',
       `    id: ${id}`,
       `    observable_behavior: Do ${id}.`,
       '    implementation_paths:',

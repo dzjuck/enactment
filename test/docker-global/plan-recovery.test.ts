@@ -39,6 +39,7 @@ const PLAN = [
   ...['first-step', 'second-step'].flatMap((id) => [
     '  - type: task',
     '    complexity: low',
+    '    risk: standard',
     `    id: ${id}`,
     `    observable_behavior: Record a note for ${id}.`,
     '    implementation_paths:',

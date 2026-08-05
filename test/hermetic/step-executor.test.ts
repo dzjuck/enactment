@@ -28,6 +28,7 @@ const IMAGES: RuntimeImages = {
 const STEP = [
   'type: task',
   'complexity: low',
+  'risk: standard',
   'id: add-slugify',
   'observable_behavior: Implement the slugify function.',
   'implementation_paths:',
