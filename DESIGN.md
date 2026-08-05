@@ -777,6 +777,12 @@ After valid RED, only declared implementation paths may change.
 
 Any required closure change triggers test-contract repair.
 
+Repository-provided behavioral checker scripts (§19) are protected by scope rather than by a new
+closure list: they must live outside `implementation_paths` and, for `code_behavior`, outside
+`test_paths`, where existing diff validation rejects any agent edit to them. V1 does not infer
+source paths from arbitrary argv, so placing a checker inside an agent-writable scope is an
+accepted trusted-plan authoring error rather than a load-time rejection.
+
 ---
 
 ## 18. Planning flow
@@ -848,7 +854,45 @@ Each step declares:
 * implementation paths;
 * expected test IDs;
 * allowed RED categories;
-* verification commands.
+* verification commands;
+* an optional runtime block.
+
+### Runtime verification is a step property
+
+A step that must prove its application *runs* declares `verification.runtime`:
+
+```yaml
+verification:
+  commands:
+    - ["npx", "--no-install", "tsc", "--noEmit"]
+  runtime:
+    start_command: ["node", "src/server.js"]
+    port: 3000
+    readiness_path: /health
+    behavioral_commands:
+      - ["node", "harness-checks/runtime-check.mjs"]
+```
+
+The block is optional on `task` and on `code_behavior`, and rejected nowhere else because there is
+nowhere else. `start_command` and every behavioral command are argv arrays (§16); `port` is 1–65535;
+`readiness_path` starts with `/`; at least one behavioral command is required. Runtime configuration
+is part of the plan's raw-byte hash.
+
+Everything else is fixed harness policy, part of the policy hash:
+
+```yaml
+runtime:
+  host: 0.0.0.0
+  readiness_timeout_seconds: 60
+  command_timeout_seconds: 600
+  probe: http-get-200
+  environment: [HOST, PORT, HARNESS_APP_URL]
+  network: internal
+```
+
+The application receives harness-owned `HOST=0.0.0.0` and `PORT`, and must listen on `0.0.0.0`
+because the checker reaches it over Docker DNS. Behavioral commands additionally receive
+`HARNESS_APP_URL=http://<app-container>:<port>`. A task may neither lower nor raise these.
 
 `observable_behavior` is the text sent to the agent; it replaces the earlier `prompt`. Plan and
 step IDs are Git-safe lowercase slugs, because they name a branch and an artifact directory.
@@ -910,10 +954,23 @@ Retries and recovery do not require approval.
 
 ## 21. Step types
 
-Milestone 3 executes `task` and `code_behavior`. `task` is the Milestone 1 single-agent pipeline,
-now nested inside a plan. `operational` and `mixed` are rejected by the loader until the startup
-and behavioral checks below exist, so a plan cannot declare a step the harness would silently
-under-execute.
+There are two: `task`, the Milestone 1 single-agent pipeline nested inside a plan, and
+`code_behavior`, the tests-first pipeline. Either may declare the optional runtime block of §19.
+
+The names `operational` and `mixed` are rejected by the loader, and now denote nothing. Measured
+against the code they were never separate pipelines — `operational` is `task` plus a runtime check
+and `mixed` is `code_behavior` plus a runtime check — so V1 expresses that difference as one
+optional property rather than as two duplicated pipelines and a doubled Docker matrix.
+
+### `task`
+
+```text
+implementation
+→ static check
+→ runtime check, if declared
+→ review
+→ commit
+```
 
 ### `code_behavior`
 
@@ -924,34 +981,29 @@ baseline
 → freeze
 → implementation
 → GREEN
-→ review
-→ commit
-```
-
-### `operational`
-
-```text
-baseline
-→ implementation
 → static check
-→ startup check
-→ behavioral check
+→ runtime check, if declared
 → review
 → commit
 ```
 
-### `mixed`
+### Runtime check
 
 ```text
-baseline
-→ tests
-→ RED
-→ code and operational implementation
-→ GREEN
-→ local runtime check
-→ review
-→ commit
+restore implementation snapshot and clean dependencies
+→ run static commands offline
+→ create the internal attempt-runtime network
+→ start the application detached, from the verifier image
+→ poll readiness from one verifier container
+→ run behavioral commands sequentially, stopping at the first failure
+→ capture application logs
+→ remove the container, then the network, then the volumes
 ```
+
+Static and runtime verification share one disposable workspace and dependency volume, so a static
+command may build what `start_command` launches. The application and the checkers receive no
+provider authentication, no proxy and no egress, and nothing they write can be accepted:
+acceptance uses the pre-verification implementation snapshot.
 
 ---
 
@@ -1401,8 +1453,9 @@ ordinal. A `running` row found at startup belongs to a process that died, so its
 the whole step reruns from its stored parent.
 
 The execution phase — `preparing`, `baseline`, `tests`, `red`, `implementation`, `green`,
-`verify`, `review` — is a diagnostic column recording where an attempt was, not a second state
-machine.
+`verify`, `runtime`, `review` — is a diagnostic column recording where an attempt was, not a
+second state machine. It carries no `CHECK` constraint, so adding a phase leaves the schema
+version unchanged.
 
 Recovery reconciles:
 
@@ -1580,8 +1633,7 @@ Revisit this only if interfile analysis is introduced.
 
 Adds:
 
-* operational steps;
-* mixed steps;
+* an optional `verification.runtime` block on `task` and `code_behavior` steps;
 * detached application startup in a hardened container;
 * private offline runtime-check networks;
 * readiness and behavioral checks from a verifier container;

@@ -1,0 +1,44 @@
+version: 1
+id: runtime-plan
+steps:
+  - type: task
+    complexity: low
+    risk: standard
+    id: serve-health
+    observable_behavior: |
+      Serve a health endpoint from src/server.js.
+    implementation_paths:
+      - src/server.js
+    verification:
+      commands:
+        - ["npx", "--no-install", "tsc", "--noEmit"]
+      runtime:
+        start_command: ["node", "src/server.js"]
+        port: 3000
+        readiness_path: /health
+        behavioral_commands:
+          - ["node", "harness-checks/runtime-check.mjs"]
+  - type: code_behavior
+    complexity: medium
+    risk: high
+    id: serve-orders
+    observable_behavior: |
+      Serve the order list over HTTP.
+    implementation_paths:
+      - src/orders.js
+    test_paths:
+      - test/orders.test.js
+    expected_test_ids:
+      - orders are listed
+    verification:
+      test_command: ["npx", "--no-install", "vitest", "run"]
+      runtime:
+        start_command: ["node", "src/server.js", "--orders"]
+        port: 8080
+        readiness_path: /ready
+        behavioral_commands:
+          - ["node", "harness-checks/orders-check.mjs"]
+          - ["node", "harness-checks/health-check.mjs"]
+final_verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]

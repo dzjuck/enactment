@@ -36,6 +36,14 @@ import {
   type ReviewSeverity,
 } from '../review/policy.js';
 import {
+  RUNTIME_COMMAND_TIMEOUT_SECONDS,
+  RUNTIME_ENVIRONMENT,
+  RUNTIME_HOST,
+  RUNTIME_NETWORK,
+  RUNTIME_PROBE,
+  RUNTIME_READINESS_TIMEOUT_SECONDS,
+} from '../verify/runtime-policy.js';
+import {
   NORMAL_ROUTES,
   PROFILE_IDS,
   PROFILES,
@@ -131,9 +139,20 @@ export interface ReviewContract {
   network: 'none';
 }
 
+/** DESIGN.md §6 / §21: what the harness owns about a runtime-verified step, not the plan. */
+export interface RuntimeContract {
+  host: string;
+  readiness_timeout_seconds: number;
+  command_timeout_seconds: number;
+  probe: string;
+  environment: string[];
+  network: string;
+}
+
 export interface Policy {
   providers: { codex: ProviderContract; claude: ProviderContract };
   review: ReviewContract;
+  runtime: RuntimeContract;
   routing: {
     profiles: AgentProfile[];
     normal_routes: Record<StepComplexity, ProfileId>;
@@ -182,6 +201,14 @@ export function activePolicy(): Policy {
       severity_map: { ...REVIEW_SEVERITY_MAP },
       timeout_seconds: REVIEW_TIMEOUT_SECONDS,
       network: 'none',
+    },
+    runtime: {
+      host: RUNTIME_HOST,
+      readiness_timeout_seconds: RUNTIME_READINESS_TIMEOUT_SECONDS,
+      command_timeout_seconds: RUNTIME_COMMAND_TIMEOUT_SECONDS,
+      probe: RUNTIME_PROBE,
+      environment: [...RUNTIME_ENVIRONMENT],
+      network: RUNTIME_NETWORK,
     },
     routing: {
       profiles: PROFILE_IDS.map((id) => ({ ...PROFILES[id] })),

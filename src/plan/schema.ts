@@ -96,6 +96,28 @@ const command = z
   .array(z.string().min(1), { error: 'must be an argument array, not a shell string' })
   .min(1, 'must contain at least the program name');
 
+/**
+ * DESIGN.md §21 / M6: the optional runtime check, expressed as a step property rather than as
+ * its own step type. `operational` and `mixed` were the two existing pipelines plus this block,
+ * so the block is what exists and the names are not.
+ *
+ * Everything the harness owns — host, readiness predicate, timeouts, environment, network — is
+ * fixed policy in `src/verify/runtime-policy.ts`, not a field here.
+ */
+const runtimeVerification = z.strictObject({
+  start_command: command,
+  port: z.number().int().min(1).max(65535),
+  readiness_path: z
+    .string()
+    .min(1)
+    .refine((value) => value.startsWith('/'), {
+      error: (issue) => `"${String(issue.input)}" must be a request path starting with "/"`,
+    }),
+  behavioral_commands: z.array(command).min(1, 'must declare at least one command'),
+});
+
+export type RuntimeVerification = z.infer<typeof runtimeVerification>;
+
 const timeouts = z
   .strictObject({
     connectivity_smoke_seconds: z
@@ -129,6 +151,7 @@ const taskStep = z.strictObject({
   ...commonFields,
   verification: z.strictObject({
     commands: z.array(command).min(1, 'must declare at least one command'),
+    runtime: runtimeVerification.optional(),
   }),
 });
 
@@ -147,6 +170,7 @@ const codeBehaviorStep = z
       closure_paths: z
         .array(repositoryPath('closure paths', true))
         .default(DEFAULT_VERIFICATION_CLOSURE),
+      runtime: runtimeVerification.optional(),
     }),
     baseline: z
       .strictObject({
@@ -179,7 +203,7 @@ const codeBehaviorStep = z
 const stepType = z.enum(STEP_TYPES, {
   error: (issue) =>
     typeof issue.input === 'string' && LATER_MILESTONE_TYPES.includes(issue.input)
-      ? `step type "${issue.input}" is not supported yet; M3 runs "task" and "code_behavior"`
+      ? `step type "${issue.input}" is not supported; runtime verification is an optional "verification.runtime" block on "task" and "code_behavior"`
       : `must be one of: ${STEP_TYPES.join(', ')}`,
 });
 

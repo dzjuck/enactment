@@ -280,6 +280,141 @@ describe('loadPlan', () => {
     });
   });
 
+  describe('verification.runtime', () => {
+    const VALID_RUNTIME = {
+      start_command: ['node', 'src/server.js'],
+      port: 3000,
+      readiness_path: '/health',
+      behavioral_commands: [['node', 'harness-checks/runtime-check.mjs']],
+    };
+
+    function runtimeDocument(
+      runtime: unknown,
+      stepExtra: Record<string, unknown> = {},
+    ): Record<string, unknown> {
+      return {
+        version: 1,
+        id: 'runtime-plan',
+        steps: [
+          {
+            type: 'task',
+            complexity: 'low',
+            risk: 'standard',
+            id: 'serve-health',
+            observable_behavior: 'Serve /health.',
+            implementation_paths: ['src/server.js'],
+            verification: { commands: [['npm', 'test']], runtime },
+            ...stepExtra,
+          },
+        ],
+        final_verification: { commands: [['npm', 'test']] },
+      };
+    }
+
+    it('loads a task and a code_behavior runtime block with every field preserved', async () => {
+      const { plan } = await loadPlan(fixture('runtime.yml'));
+
+      expect(plan.steps[0]?.verification.runtime).toEqual({
+        start_command: ['node', 'src/server.js'],
+        port: 3000,
+        readiness_path: '/health',
+        behavioral_commands: [['node', 'harness-checks/runtime-check.mjs']],
+      });
+      expect(plan.steps[1]?.verification.runtime).toEqual({
+        start_command: ['node', 'src/server.js', '--orders'],
+        port: 8080,
+        readiness_path: '/ready',
+        behavioral_commands: [
+          ['node', 'harness-checks/orders-check.mjs'],
+          ['node', 'harness-checks/health-check.mjs'],
+        ],
+      });
+    });
+
+    it('leaves runtime undefined on plans that declare no runtime block', async () => {
+      const { plan } = await loadPlan(fixture('valid.yml'));
+
+      expect(plan.steps[0]?.verification.runtime).toBeUndefined();
+      expect(plan.steps[1]?.verification.runtime).toBeUndefined();
+      expect(plan.steps[0]?.verification).not.toHaveProperty('runtime');
+      expect(plan.steps[1]?.verification).not.toHaveProperty('runtime');
+    });
+
+    it.each([
+      ['a missing start_command', { ...VALID_RUNTIME, start_command: undefined }, 'start_command'],
+      ['an empty start_command', { ...VALID_RUNTIME, start_command: [] }, 'start_command'],
+      ['a start_command shell string', { ...VALID_RUNTIME, start_command: 'node src/server.js' }, 'start_command'],
+      ['port 0', { ...VALID_RUNTIME, port: 0 }, 'port'],
+      ['port 65536', { ...VALID_RUNTIME, port: 65536 }, 'port'],
+      ['a non-integer port', { ...VALID_RUNTIME, port: 3000.5 }, 'port'],
+      ['a missing port', { ...VALID_RUNTIME, port: undefined }, 'port'],
+      ['a readiness_path without a leading slash', { ...VALID_RUNTIME, readiness_path: 'health' }, 'readiness_path'],
+      ['a missing readiness_path', { ...VALID_RUNTIME, readiness_path: undefined }, 'readiness_path'],
+      [
+        'missing behavioral_commands',
+        { ...VALID_RUNTIME, behavioral_commands: undefined },
+        'behavioral_commands',
+      ],
+      [
+        'empty behavioral_commands',
+        { ...VALID_RUNTIME, behavioral_commands: [] },
+        'behavioral_commands',
+      ],
+    ])('rejects %s at its exact path', async (_label, runtime, field) => {
+      const error = await loadDocumentError(runtimeDocument(runtime));
+
+      expect(error.message).toContain(`steps[0].verification.runtime.${field}`);
+    });
+
+    it('rejects a behavioral command given as a shell string', async () => {
+      const error = await loadDocumentError(
+        runtimeDocument({ ...VALID_RUNTIME, behavioral_commands: ['node check.mjs'] }),
+      );
+
+      expect(error.message).toContain('steps[0].verification.runtime.behavioral_commands[0]');
+      expect(error.message).toMatch(/argument array/i);
+    });
+
+    it('rejects an empty behavioral command argv', async () => {
+      const error = await loadDocumentError(
+        runtimeDocument({ ...VALID_RUNTIME, behavioral_commands: [[]] }),
+      );
+
+      expect(error.message).toContain('steps[0].verification.runtime.behavioral_commands[0]');
+    });
+
+    it.each(['services', 'image', 'environment', 'env', 'mounts', 'network', 'hostname', 'compose'])(
+      'rejects the unsupported %s key inside runtime',
+      async (key) => {
+        const error = await loadDocumentError(
+          runtimeDocument({ ...VALID_RUNTIME, [key]: 'anything' }),
+        );
+
+        expect(error.message).toContain('steps[0].verification.runtime');
+        expect(error.message).toContain(key);
+      },
+    );
+
+    it.each(['services', 'image', 'environment', 'mounts', 'network'])(
+      'keeps rejecting the step-level %s key',
+      async (key) => {
+        const error = await loadDocumentError(runtimeDocument(VALID_RUNTIME, { [key]: 'anything' }));
+
+        expect(error.message).toContain('steps[0]');
+        expect(error.message).toContain(key);
+      },
+    );
+
+    it('rejects a runtime block on a plan-level verification section', async () => {
+      const error = await loadDocumentError({
+        ...runtimeDocument(VALID_RUNTIME),
+        verification: { runtime: VALID_RUNTIME },
+      });
+
+      expect(error.message).toContain('verification');
+    });
+  });
+
   describe('final_verification', () => {
     it('requires the section', async () => {
       const error = await loadError('missing-final-verification.yml');

@@ -61,6 +61,15 @@ const STEP = [
   '  test_command: ["npx", "--no-install", "vitest", "run"]',
 ];
 
+/** Appended under the step's `verification:` key; indentation matches `STEP`. */
+const RUNTIME_LINES = [
+  '  runtime:',
+  '    start_command: ["node", "src/server.js"]',
+  '    port: 3000',
+  '    readiness_path: /health',
+  '    behavioral_commands: [["node", "harness-checks/runtime-check.mjs"]]',
+];
+
 const dirs: string[] = [];
 const repos: string[] = [];
 
@@ -279,6 +288,71 @@ describe('candidate execution manifest', () => {
     ];
 
     expect(mutations.every((hash) => hash !== baseline)).toBe(true);
+  });
+
+  it('contains the fixed runtime-verification policy', () => {
+    expect(activePolicy().runtime).toEqual({
+      host: '0.0.0.0',
+      readiness_timeout_seconds: 60,
+      command_timeout_seconds: 600,
+      probe: 'http-get-200',
+      environment: ['HOST', 'PORT', 'HARNESS_APP_URL'],
+      network: 'internal',
+    });
+  });
+
+  it('changes the policy hash for every fixed runtime policy change', () => {
+    const baseline = policyHash(activePolicy());
+    const changed = (mutate: (policy: ReturnType<typeof activePolicy>) => void): string => {
+      const policy = structuredClone(activePolicy());
+      mutate(policy);
+      return policyHash(policy);
+    };
+
+    const mutations = [
+      changed((policy) => {
+        policy.runtime.host = '127.0.0.1';
+      }),
+      changed((policy) => {
+        policy.runtime.readiness_timeout_seconds = 90;
+      }),
+      changed((policy) => {
+        policy.runtime.command_timeout_seconds = 900;
+      }),
+      changed((policy) => {
+        policy.runtime.probe = 'tcp-connect';
+      }),
+      changed((policy) => {
+        policy.runtime.environment = ['HOST', 'PORT'];
+      }),
+      changed((policy) => {
+        policy.runtime.network = 'egress';
+      }),
+    ];
+
+    expect(mutations.every((hash) => hash !== baseline)).toBe(true);
+  });
+
+  it.each([
+    ['the port', (yaml: string) => yaml.replace('port: 3000', 'port: 3001')],
+    ['the readiness path', (yaml: string) => yaml.replace('readiness_path: /health', 'readiness_path: /ready')],
+    ['the start command', (yaml: string) => yaml.replace('"src/server.js"', '"src/main.js"')],
+    [
+      'a behavioral command',
+      (yaml: string) => yaml.replace('runtime-check.mjs', 'other-check.mjs'),
+    ],
+  ])('changes the plan hash when %s in the runtime block changes', async (_label, mutate) => {
+    const dir = await workspace();
+    const manifestPath = join(dir, 'execution-manifest.yml');
+    const step = [...STEP, ...RUNTIME_LINES];
+
+    const baseline = await build(await writePlan(dir, step, 'a.yml'), manifestPath);
+    const changed = await build(
+      await writePlan(dir, step.map(mutate), 'b.yml'),
+      manifestPath,
+    );
+
+    expect(changed.inputs.plan_hash).not.toBe(baseline.inputs.plan_hash);
   });
 
   it('does not touch Git', async () => {
