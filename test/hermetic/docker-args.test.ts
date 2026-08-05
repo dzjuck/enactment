@@ -50,6 +50,24 @@ describe('buildRunArgs', () => {
     ]);
   });
 
+  it('keeps automatic removal by default, including for detached containers', () => {
+    expect(buildRunArgs(base)).toContain('--rm');
+    expect(buildRunArgs({ ...base, detach: true })).toContain('--rm');
+    expect(buildRunArgs({ ...base, autoRemove: true })).toEqual(buildRunArgs(base));
+  });
+
+  it('omits --rm only for an explicitly retained container, changing nothing else', () => {
+    const removed = buildRunArgs({ ...base, detach: true });
+    const retained = buildRunArgs({ ...base, detach: true, autoRemove: false });
+
+    expect(removed).toContain('--rm');
+    expect(retained).not.toContain('--rm');
+    // Byte-identical apart from the one flag: retention must not relax any §5 hardening.
+    expect(retained).toEqual(removed.filter((arg) => arg !== '--rm'));
+    expect(retained[0]).toBe('run');
+    expect(retained).toContain('--detach');
+  });
+
   it('renders the §5 tmpfs specs exactly', () => {
     const specs = buildRunArgs(base).reduce<string[]>(
       (acc, arg, index, all) => (all[index - 1] === '--tmpfs' ? [...acc, arg] : acc),

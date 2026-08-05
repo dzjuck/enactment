@@ -1,8 +1,12 @@
+import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
+
+import { execa } from 'execa';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { IMAGE_PINS } from '../../src/config/pins.js';
 import { AGENT_HOME, type ContainerSpec } from '../../src/docker/args.js';
-import { runContainer } from '../../src/docker/run.js';
+import { containerLogs, removeContainer, runContainer, startContainer } from '../../src/docker/run.js';
 import { imageEnvNames, listContainers } from '../helpers/docker.js';
 
 const IMAGE = IMAGE_PINS.codex.tag;
@@ -119,5 +123,59 @@ describe('runContainer', () => {
     expect(result.status).toBe('timeout');
     expect(result.exitCode).not.toBe(0);
     expect(result.durationMs).toBeLessThan(30_000);
+  });
+});
+
+/** Does the container still exist, whatever state it is in? */
+async function exists(name: string): Promise<boolean> {
+  const { exitCode } = await execa('docker', ['container', 'inspect', name], { reject: false });
+  return exitCode === 0;
+}
+
+async function waitUntilGone(name: string, attempts = 100): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (!(await exists(name))) return true;
+    await delay(50);
+  }
+  return false;
+}
+
+describe('retained containers', () => {
+  it('control: a default detached container is removed by Docker when it exits', async () => {
+    const name = `harness-auto-${randomUUID().slice(0, 8)}`;
+
+    await startContainer(spec(['sh', '-c', 'echo auto-marker; exit 7'], { name }));
+
+    expect(await waitUntilGone(name)).toBe(true);
+  });
+
+  it('keeps an exited autoRemove:false container until it is removed loudly', async () => {
+    const name = `harness-retained-${randomUUID().slice(0, 8)}`;
+
+    await startContainer(
+      spec(['sh', '-c', 'echo retained-marker >&2; exit 7'], { name, autoRemove: false }),
+    );
+
+    // The evidence case: the container crashed, and its logs are still there to read.
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const { stdout } = await execa('docker', [
+        'container',
+        'inspect',
+        '--format',
+        '{{.State.Status}}',
+        name,
+      ]);
+      if (stdout.trim() === 'exited') break;
+      await delay(50);
+    }
+
+    expect(await exists(name)).toBe(true);
+    expect((await containerLogs(name)).stderr).toContain('retained-marker');
+
+    await removeContainer(name);
+    expect(await exists(name)).toBe(false);
+
+    // Removal is idempotent: an already-gone container is success, not a failure.
+    await expect(removeContainer(name)).resolves.toBeUndefined();
   });
 });

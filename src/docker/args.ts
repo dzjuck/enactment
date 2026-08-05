@@ -49,6 +49,15 @@ export interface ContainerSpec {
   interactive?: boolean;
   /** Run in the background: for the proxy, which must outlive a single command. */
   detach?: boolean;
+  /**
+   * Whether Docker removes the container when it exits. Defaults to `true`.
+   *
+   * Only a detached application under runtime verification sets `false`: an application that
+   * crashes on startup would otherwise be removed before `docker logs` runs, which is exactly
+   * the evidence that failure needs. A retained container is removed explicitly and loudly by
+   * its owner (`removeContainer`), never left to a label sweep.
+   */
+  autoRemove?: boolean;
   workdir?: string;
   env?: Record<string, string>;
   labels?: Record<string, string>;
@@ -93,7 +102,7 @@ export function buildRunArgs(spec: ContainerSpec): string[] {
   const env = buildContainerEnv(spec.env);
   const tmpfs = spec.tmpfs ?? DEFAULT_TMPFS;
 
-  const args = ['run', '--rm'];
+  const args = ['run', ...(spec.autoRemove === false ? [] : ['--rm'])];
 
   if (spec.detach === true) args.push('--detach');
   if (spec.interactive === true) args.push('--interactive');
