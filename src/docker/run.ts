@@ -78,6 +78,35 @@ export async function containerLogs(name: string): Promise<{ stdout: string; std
   return { stdout: result.stdout, stderr: result.stderr };
 }
 
+export class ContainerLogsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ContainerLogsError';
+  }
+}
+
+/**
+ * Read a container's logs, loudly.
+ *
+ * `containerLogs` polls for a marker and tolerates a container that is not up yet, so it
+ * cannot distinguish "nothing logged" from "docker logs failed". Runtime verification retains
+ * a crashed application *for* its logs, so silence there would discard the only evidence of
+ * the failure it exists to explain.
+ */
+export async function captureContainerLogs(
+  name: string,
+): Promise<{ stdout: string; stderr: string }> {
+  const result = await execa('docker', ['logs', name], { reject: false, stripFinalNewline: false });
+
+  if (result.exitCode !== 0) {
+    throw new ContainerLogsError(
+      `failed to read logs of container ${name} (${result.exitCode ?? -1}): ${result.stderr}`,
+    );
+  }
+
+  return { stdout: result.stdout, stderr: result.stderr };
+}
+
 async function docker(args: string[]): Promise<void> {
   await execa('docker', args, { reject: false });
 }

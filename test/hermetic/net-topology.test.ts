@@ -27,6 +27,16 @@ describe('phase topology', () => {
     expect(verifier.networks).toEqual([]);
   });
 
+  it('gives the runtime check exactly one internal network and no egress leg', () => {
+    const runtime = phaseTopology('runtime');
+
+    expect(runtime.containerNetwork).toBe('runtime');
+    expect(runtime.networks).toEqual([{ role: 'runtime', internal: true }]);
+    expect(runtime.networks.map((network) => network.role)).not.toContain('egress');
+    expect(runtime.networks.map((network) => network.role)).not.toContain('proxy-egress');
+    expect(runtime.networks.every((network) => network.internal)).toBe(true);
+  });
+
   it('never places two phases on one shared egress-capable network', () => {
     const reachable = Object.values(PHASE_TOPOLOGY).flatMap((topology) =>
       topology.networks.filter((network) => !network.internal).map((network) => network.role),

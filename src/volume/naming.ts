@@ -29,6 +29,14 @@ export function authVolumeName(provider: AuthProvider, attempt: string): string 
   return `${LABEL_PREFIX}-auth-${attempt}-${provider}`;
 }
 
+/**
+ * The application under runtime verification. Its name is also its hostname: the behavioral
+ * checkers reach it over Docker DNS on the attempt's internal runtime network.
+ */
+export function runtimeContainerName(attempt: string): string {
+  return `${LABEL_PREFIX}-app-${attempt}`;
+}
+
 export function networkName(attempt: string, role: string): string {
   return `${LABEL_PREFIX}-net-${attempt}-${role}`;
 }

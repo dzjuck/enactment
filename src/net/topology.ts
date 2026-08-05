@@ -1,4 +1,4 @@
-export type Phase = 'agent' | 'setup' | 'verifier';
+export type Phase = 'agent' | 'setup' | 'verifier' | 'runtime';
 
 export interface NetworkSpec {
   role: string;
@@ -33,6 +33,12 @@ export const PHASE_TOPOLOGY: Record<Phase, PhaseTopology> = {
   verifier: {
     networks: [],
     containerNetwork: 'none',
+  },
+  // The application and its behavioral checkers have to reach each other, and nothing else.
+  // One internal network gives them Docker DNS and no route to the proxy or the internet.
+  runtime: {
+    networks: [{ role: 'runtime', internal: true }],
+    containerNetwork: 'runtime',
   },
 };
 
