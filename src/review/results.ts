@@ -53,6 +53,16 @@ export interface ReviewResult {
   readonly findings: readonly ReviewFinding[];
 }
 
+export interface ReviewScan {
+  readonly before: readonly ReviewFinding[];
+  readonly after: readonly ReviewFinding[];
+}
+
+export interface ParsedReviewResults {
+  readonly scan: ReviewScan;
+  readonly result: ReviewResult;
+}
+
 export class ReviewResultsError extends Error {
   readonly category = 'review_failed' as const;
 
@@ -199,7 +209,39 @@ function compare(left: ReviewFinding, right: ReviewFinding): number {
 
 /** Parse one pinned Semgrep document and return only findings introduced after the change. */
 export function parseReviewResults(document: string, targets: ReviewTargets): ReviewResult {
+  return subtract(normalize(parseOutput(document), targets));
+}
+
+function publicFinding(finding: NormalizedFinding): ReviewFinding {
+  return {
+    ruleId: finding.ruleId,
+    path: finding.path,
+    severity: finding.severity,
+    location: finding.location,
+  };
+}
+
+/** Safe evidence for both scanned sides plus the introduced-finding verdict input. */
+export function parseReviewDocument(
+  document: string,
+  targets: ReviewTargets,
+): ParsedReviewResults {
   const normalized = normalize(parseOutput(document), targets);
+  const scan: ReviewScan = {
+    before: normalized
+      .filter((finding) => finding.side === 'before')
+      .sort(compare)
+      .map(publicFinding),
+    after: normalized
+      .filter((finding) => finding.side === 'after')
+      .sort(compare)
+      .map(publicFinding),
+  };
+
+  return { scan, result: subtract(normalized) };
+}
+
+function subtract(normalized: readonly NormalizedFinding[]): ReviewResult {
   const baselineCounts = new Map<string, number>();
 
   for (const finding of normalized) {
@@ -217,12 +259,7 @@ export function parseReviewResults(document: string, targets: ReviewTargets): Re
       continue;
     }
 
-    findings.push({
-      ruleId: finding.ruleId,
-      path: finding.path,
-      severity: finding.severity,
-      location: finding.location,
-    });
+    findings.push(publicFinding(finding));
   }
 
   return { findings };

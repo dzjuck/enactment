@@ -12,6 +12,11 @@ export function workspaceVolumeName(attempt: string): string {
   return `${LABEL_PREFIX}-ws-${attempt}`;
 }
 
+/** One disposable volume containing only the before/after files selected for review. */
+export function reviewVolumeName(attempt: string): string {
+  return `${LABEL_PREFIX}-review-${attempt}`;
+}
+
 /** One dependency volume per phase (§12): the verifier never reuses the agent's. */
 export function dependencyVolumeName(attempt: string, phase: string): string {
   return `${LABEL_PREFIX}-deps-${attempt}-${phase}`;
