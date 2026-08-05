@@ -254,6 +254,12 @@ export class StateStore {
     mkdirSync(dirname(resolve(path)), { recursive: true });
     const db = new DatabaseSync(path);
 
+    // A concurrent reader must wait out a write transaction rather than fail: `node:sqlite`
+    // defaults to no wait at all, so a `cancel` opened while a run is inside `failPlan` or
+    // `completeAcceptance` — both sub-millisecond — throws "database is locked" instead of
+    // pausing for it. Set before the pragmas below, because switching journal mode takes a
+    // brief exclusive lock of its own.
+    db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA foreign_keys = ON');
     db.exec('PRAGMA journal_mode = WAL');
 
