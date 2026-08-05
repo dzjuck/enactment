@@ -185,7 +185,9 @@ describe('whole-step provider routing', () => {
     expect(result.manifest.agent_runs.agent!.cli_version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
-  it('fails a reported model mismatch before verification and commit', async () => {
+  // Codex only: DESIGN §35 measured Codex silently falling back to another model, and this is
+  // the gate that catches it.
+  it('fails a reported Codex model mismatch before verification and commit', async () => {
     const result = await run('low', { reportedModel: 'unexpected-model' });
 
     expect(result.report.status).toBe('failed');
@@ -193,5 +195,18 @@ describe('whole-step provider routing', () => {
     expect(result.report.commit).toBeUndefined();
     expect(result.report.message).toMatch(/model/i);
     expect(await git(result.repo.dir, ['for-each-ref', 'refs/heads/ai-harness/'])).toBe('');
+  });
+
+  // Claude has no such fallback — a wrong model is a terminal provider error, not a quiet
+  // substitution — so a differing reported name is recorded as evidence and commits normally.
+  it('records a differing reported Claude model and still commits', async () => {
+    const result = await run('medium', { reportedModel: 'claude-sonnet-5-20260514' });
+
+    expect(result.report.status).toBe('succeeded');
+    expect(result.report.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(result.manifest.agent_runs.agent!).toMatchObject({
+      requested_model: 'claude-sonnet-5',
+      reported_model: 'claude-sonnet-5-20260514',
+    });
   });
 });

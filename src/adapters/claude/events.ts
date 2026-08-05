@@ -102,14 +102,17 @@ export function evaluateClaudeResult(
     return { ...common, status: 'failed', failure_category: 'provider_error' };
   }
 
+  // Both model names are recorded, neither is compared. The feasibility gate measured that a
+  // wrong model does not silently fall back the way Codex does — it returns the terminal
+  // api_error concluded above — so there is no fallback signal here to fail closed on, and
+  // matching provider-owned model strings would make an alias or suffix change on their side
+  // an outage on every Claude run.
   const completed =
     terminal !== undefined &&
     terminal.subtype === 'success' &&
     terminal.is_error === false &&
     options.exitCode === 0 &&
-    text.trim() !== '' &&
-    model !== null &&
-    model === options.requestedModel;
+    text.trim() !== '';
 
   return completed
     ? { ...common, status: 'completed' }

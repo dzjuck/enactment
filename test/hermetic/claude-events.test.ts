@@ -132,17 +132,24 @@ describe('Claude terminal contract', () => {
     expect(FAILURE_CATEGORIES).toContain('provider_error');
   });
 
-  it('fails closed on the measured model-fallback signal and records both names', () => {
-    const result = evaluateClaudeResult(
-      parseClaudeEvents(jsonl(init('claude-other'), resultEvent())),
-      { exitCode: 0, requestedModel: 'claude-sonnet-5' },
-    );
+  // The gate measured that Claude has no silent-fallback signal: a wrong model returns a
+  // terminal api_error, which the test above already classifies. So both names are recorded
+  // and neither is judged — comparing provider-owned model strings would turn a harmless
+  // alias or suffix change on their side into an outage on every Claude run.
+  it.each([
+    ['a differing reported model', jsonl(init('claude-sonnet-5-20260514'), resultEvent()), 'claude-sonnet-5-20260514'],
+    ['no reported model at all', jsonl(resultEvent()), null],
+  ] as const)('records both model names without judging them: %s', (_label, stream, reported) => {
+    const result = evaluateClaudeResult(parseClaudeEvents(stream), {
+      exitCode: 0,
+      requestedModel: 'claude-sonnet-5',
+    });
 
     expect(result).toMatchObject({
-      status: 'failed',
-      failure_category: 'agent_failed',
+      status: 'completed',
       requested_model: 'claude-sonnet-5',
-      reported_model: 'claude-other',
+      reported_model: reported,
     });
+    expect(result).not.toHaveProperty('failure_category');
   });
 });

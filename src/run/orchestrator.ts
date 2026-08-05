@@ -521,7 +521,14 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
       // §32: container logs are artifacts, and they pass through redaction like everything else.
       await writeLog(phaseArtifacts, 'agent.log', redact(agentRun.stdout + agentRun.stderr));
 
-      if (agentRun.reportedModel !== null && agentRun.reportedModel !== profile.model) {
+      // Codex only: DESIGN §35 measured `gpt-5.1-codex-max` logging "model metadata not found"
+      // and falling back, which is exactly what this catches. Claude has no such signal — it
+      // refuses instead — so its reported name is evidence, not a gate (§27, `events.ts`).
+      if (
+        descriptor.provider === 'codex' &&
+        agentRun.reportedModel !== null &&
+        agentRun.reportedModel !== profile.model
+      ) {
         throw new PhaseFailure(
           agentPhase,
           'agent_failed',
