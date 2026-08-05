@@ -135,8 +135,65 @@ financial logic, migrations, destructive local behavior, concurrency and credent
 `high`. Risk changes only the review threshold: critical findings always block; warnings are
 recorded for `standard` steps and block `high` steps.
 
-`operational` and `mixed` steps are rejected until their milestone, as are service fields and
-user-defined review commands, rules, suppressions or overrides.
+`operational` and `mixed` steps are rejected, and now denote nothing: proving an application runs
+is an optional property of the two step types above, not a third one. Service fields and
+user-defined review commands, rules, suppressions or overrides are rejected too.
+
+### Verifying that the application actually runs
+
+Either step type may add `verification.runtime`. The harness then starts the application on a
+private, internal, offline network and runs your behavioral commands against it before review:
+
+```yaml
+verification:
+  commands:
+    - ["npx", "--no-install", "tsc", "--noEmit"]
+  runtime:
+    start_command: ["node", "src/server.js"]
+    port: 3000
+    readiness_path: /health
+    behavioral_commands:
+      - ["node", "harness-checks/orders-check.mjs"]
+```
+
+What you declare: `start_command` and every behavioral command are argv arrays, never shell
+strings; `port` is 1–65535; `readiness_path` starts with `/`; at least one behavioral command is
+required. Omit the block and no runtime check runs — that is an authoring choice, and the harness
+cannot tell it from a step that does not need one.
+
+**The application must listen on `0.0.0.0`.** The behavioral checkers run in separate containers
+and reach it by container name over Docker DNS, so a server bound to `127.0.0.1` is unreachable
+and readiness fails on its deadline. The harness sets `HOST` and `PORT`; use them:
+
+| Variable | Set for | Value |
+| --- | --- | --- |
+| `HOST` | the application | `0.0.0.0` |
+| `PORT` | the application | the declared `port` |
+| `HARNESS_APP_URL` | every behavioral command | `http://<app-container>:<port>` |
+
+Nothing else is configurable. Readiness is an HTTP GET requiring status 200, budgeted at 60 s;
+each behavioral command gets 600 s; the network is internal. These are fixed harness policy and
+part of the policy hash, so changing them invalidates an existing approval — a step cannot lower
+or raise them. The only step `timeouts` value that reaches this phase is
+`termination_grace_seconds`, which feeds the container SIGTERM/SIGKILL ladder.
+
+Static and runtime verification share **one** disposable workspace, so a static command may build
+exactly what `start_command` launches. Nothing written during either can be committed: acceptance
+uses the implementation snapshot taken before verification began.
+
+**Keep behavioral checkers outside every agent-writable scope.** A checker committed under
+`implementation_paths` — or, for `code_behavior`, under `test_paths` — is a file the agent may
+rewrite, and a checker the agent can weaken verifies nothing. Put them somewhere else
+(`harness-checks/` in the examples above) and the existing diff validation rejects any agent edit
+to them. The harness does not derive checker paths from arbitrary argv, so it will not reject a
+plan that mis-scopes one; this is an authoring rule you own.
+
+Local dependency services (PostgreSQL, Redis, a mock API), Docker Compose and repository-provided
+Docker configuration remain unsupported — see `DESIGN.md` §26. The application is one process with
+no service dependencies, no host ports, no secrets and no internet access.
+
+Final plan verification runs the static `final_verification.commands` against the finished branch
+and **no runtime check**. Every step that declares one was already gated on it.
 
 Rules the loader enforces: no unknown fields; verification commands are argv arrays, never shell
 strings; `implementation_paths` are relative, free of `..`, and may not name `package.json` or a
@@ -302,6 +359,19 @@ Inside one `run-<n>` directory:
 A `code_behavior` step adds `baseline/`, `tests/`, `red/`, `implementation/` and `green/`
 beneath its run directory.
 
+A step that declared `verification.runtime` adds `runtime/`, and its `run-manifest.json` gains a
+`runtime_check` section carrying the verdict, the readiness target and duration, each behavioral
+command's exit code, and the verifier image ID:
+
+| File | What it holds |
+| --- | --- |
+| `runtime/runtime.json` | Verdict and stage, startup argv, readiness target and duration, per-command results, verifier image ID. |
+| `runtime/application.log` | Everything the application printed — including why it exited, when it did. |
+| `runtime/behavioral.log` | Readiness probe output, then each behavioral command's output in order. |
+
+All three pass the attempt redactor, like every other artifact. `runtime/` is absent for a step
+that declared no runtime block, and `run-manifest.json` then has no `runtime_check` key.
+
 Credentials are redacted at the artifact boundary; the artifact tree should never contain a
 token. The manifest's `*_image_id` fields are the images that actually ran.
 
@@ -402,7 +472,10 @@ parent — stops the plan without changing either side.
 | `red_invalid` | New tests did not fail for an allowed, behavior-related reason. Read `red/verdict.json`. |
 | `closure_violation` | An agent changed a frozen test, runner configuration, setup file, manifest, or lockfile. |
 | `test_contract_disputed` | The implementation agent reported that the frozen tests are wrong. Read `implementation/test-contract-dispute.md`; no commit was created. |
-| `verification_failed` | GREEN or an opaque verification command failed. Read `green/verdict.json` and `verification.json`. |
+| `verification_failed` | GREEN, an opaque verification command, or the runtime check failed. Read `green/verdict.json`, `verification.json` and `runtime/`. |
+| `verification_failed` at phase `runtime`, stage `readiness` | The application never answered `readiness_path` with 200 inside 60 s. Read `runtime/application.log` first: an application that crashed on startup still costs the full budget before this is reported, and its reason is in that file. Check that it binds `0.0.0.0` and the declared `PORT`. |
+| `verification_failed` at phase `runtime`, stage `behavioral` | The application was ready and a behavioral command failed or overran 600 s. Execution stopped at that command; `runtime/behavioral.log` holds its output. |
+| `internal_error` at phase `runtime` | The harness could not perform the check at all — a container could not be created or started, logs could not be read, or evidence could not be written. Not a statement about your code. |
 | `review_blocked` | A critical finding, or any warning on a high-risk step. Read `review/review.json`; one stronger retry is allowed. |
 | `review_failed` | The scanner timed out, exited non-zero, reported an error, or returned invalid JSON. Terminal; repair the reviewer instead of rerolling code. |
 | Report `failed` with a `commit` and a copy-back cleanup error | The work was verified and committed, but the rotated credential could not be saved. Re-authenticate (§6) before the next run. |

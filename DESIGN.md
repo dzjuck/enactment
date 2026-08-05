@@ -1482,6 +1482,7 @@ Store:
 * baseline results;
 * RED results;
 * GREEN results;
+* runtime verdicts and application logs;
 * review findings;
 * source diffs;
 * manifests;
@@ -1874,6 +1875,27 @@ Established against Claude Code `2.1.221` on OrbStack `linux/arm64` before routi
 * **Review needs no new durable state.** The existing text phase records `review`, failures use the
   existing atomic terminal transaction, and reports load summaries from attempt artifacts. Schema
   version remains 2.
+
+### Findings from the Milestone 6 implementation
+
+* **`--rm` and evidence are incompatible for a detached application.** `buildRunArgs` added `--rm`
+  unconditionally, so an application that crashed on startup was removed by Docker before
+  `docker logs` could run — deleting precisely the evidence that failure needs. Retention became
+  explicit (`autoRemove`), paired with a loud removal helper, because a container nothing removes
+  automatically is one whose leak must not be silent.
+* **One deadline, not two racing ones.** The readiness probe owns a deadline and the §5 container
+  ladder backs it. A probe exit of 3 means the deadline expired and is reported as a timeout; any
+  other non-zero exit is the probe itself failing and is reported as a failure. Collapsing both
+  into "timeout" would have been a false statement about what happened.
+* **A failing verdict has to survive a failed teardown.** A leaked container must never erase the
+  `verification_failed` a step is actually about, so a failing runtime check returns its verdict
+  with the cleanup error recorded beside it. On the passing path the leak still fails the step:
+  a run that leaked is not a successful run.
+* **Static and runtime verification need one workspace acquisition, not two.** Restoring the
+  snapshot again for the runtime phase would discard whatever a static command had just built, so
+  the verifier-workspace ownership scope was extracted and both phases run inside it.
+* **The readiness probe's argv is not evidence.** It is the entire fixed probe source; recording it
+  would bury the verdict it sits beside. `runtime.json` records the readiness *target* instead.
 
 ### Conclusion
 
