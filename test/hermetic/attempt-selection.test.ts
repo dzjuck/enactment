@@ -44,6 +44,7 @@ describe('persisted attempt selection', () => {
       'closure_violation',
       'red_invalid',
       'verification_failed',
+      'review_blocked',
     ]);
   });
 
@@ -90,6 +91,7 @@ describe('persisted attempt selection', () => {
     'closure_violation',
     'red_invalid',
     'verification_failed',
+    'review_blocked',
   ] as const)('selects one stronger child after %s', (category) => {
     const failed = attempt({ row: 6, failure: `${category}: injected` });
 
@@ -111,6 +113,7 @@ describe('persisted attempt selection', () => {
     'setup_failed',
     'provider_connectivity_timeout',
     'internal_error',
+    'review_failed',
   ] as const)('does not select a stronger child after %s', (category) => {
     expect(select([attempt({ failure: `${category}: injected` })])?.kind).toBe('normal');
   });

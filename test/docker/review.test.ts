@@ -64,6 +64,7 @@ describe('reviewer phase', () => {
 
     const result = await runReview({
       attempt: newAttemptId(),
+      risk: 'standard',
       changes,
       artifactDir,
       images,

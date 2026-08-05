@@ -91,6 +91,7 @@ describe('offline review execution', () => {
 
     const result = await runReview({
       attempt: 'attempt-1',
+      risk: 'standard',
       changes: added('src/run.js', CRITICAL),
       artifactDir,
       images: IMAGES,
@@ -143,6 +144,7 @@ describe('offline review execution', () => {
 
     const result = await runReview({
       attempt: 'attempt-empty',
+      risk: 'standard',
       changes: { changes: [{ kind: 'deleted', path: deleted.path, previous: deleted }] },
       artifactDir: join(dir, 'empty'),
       images: IMAGES,
@@ -168,6 +170,7 @@ describe('offline review execution', () => {
 
     const error = await runReview({
       attempt: `attempt-${_name}`,
+      risk: 'standard',
       changes: added('src/run.js', CRITICAL),
       artifactDir: join(dir, String(_name)),
       images: IMAGES,
@@ -186,6 +189,7 @@ describe('offline review execution', () => {
 
     const error = await runReview({
       attempt: 'attempt-release',
+      risk: 'standard',
       changes: added('src/run.js', CRITICAL),
       artifactDir,
       images: IMAGES,
@@ -200,5 +204,32 @@ describe('offline review execution', () => {
 
   it('uses a typed review_failed error for scanner execution failures', () => {
     expect(new ReviewRunError('failed').category).toBe('review_failed');
+  });
+
+  it.each([
+    ['standard', 'warning', 'pass'],
+    ['high', 'warning', 'blocked'],
+    ['standard', 'critical', 'blocked'],
+    ['high', 'critical', 'blocked'],
+  ] as const)('%s risk with a %s finding produces %s', async (risk, fixtureName, verdict) => {
+    const source = fixtureName === 'critical' ? CRITICAL : `const crypto = require('crypto');
+module.exports = () => crypto.pseudoRandomBytes(16);
+`;
+    let calls = 0;
+    const result = await runReview({
+      attempt: `attempt-${risk}-${fixtureName}`,
+      risk,
+      changes: added(fixtureName === 'critical' ? 'src/run.js' : 'src/random.js', source),
+      artifactDir: join(dir, `${risk}-${fixtureName}`),
+      images: IMAGES,
+      createVolume: () => Promise.resolve(),
+      removeVolume: () => Promise.resolve(),
+      run: async () =>
+        completed(
+          ++calls === 1 ? '' : await readFile(join(FIXTURES, `${fixtureName}.json`), 'utf8'),
+        ),
+    });
+
+    expect(result).toMatchObject({ risk, verdict });
   });
 });

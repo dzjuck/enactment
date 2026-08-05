@@ -28,7 +28,8 @@ export type AttemptPhase =
   | 'red'
   | 'implementation'
   | 'green'
-  | 'verify';
+  | 'verify'
+  | 'review';
 
 export interface PlanRecord {
   row: number;

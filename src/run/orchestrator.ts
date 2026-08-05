@@ -19,6 +19,7 @@ import type { RuntimeImages } from '../docker/images.js';
 import { acceptChanges } from '../git/accept.js';
 import { exportCommit } from '../git/export.js';
 import { withPhaseNetworks } from '../net/manage.js';
+import { runReview } from '../review/run.js';
 import { proxyEnvironment, withProxy, writeProxyRecords } from '../proxy/container.js';
 import { runVerification } from '../verify/run.js';
 import { baselineArtifact, captureBaseline } from '../verify/baseline.js';
@@ -66,6 +67,7 @@ export const RUN_PHASES = [
   'implementation_diff',
   'green',
   'verify',
+  'review',
   'commit',
 ] as const;
 
@@ -164,6 +166,7 @@ const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
   implementation: 'agent_failed',
   implementation_diff: 'invalid_change',
   verify: 'verification_failed',
+  review: 'review_failed',
   commit: 'internal_error',
 };
 
@@ -195,7 +198,8 @@ const ATTEMPT_PHASE: Record<RunPhase, AttemptPhase> = {
   implementation_diff: 'implementation',
   green: 'green',
   verify: 'verify',
-  commit: 'verify',
+  review: 'review',
+  commit: 'review',
 };
 
 /**
@@ -763,6 +767,37 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
         'verification_failed',
         `verification ${verification.status}`,
       );
+    }
+
+    await phase('review');
+    const review = await runReview({
+      attempt,
+      risk: step.risk,
+      changes: validated,
+      artifactDir: join(options.artifactDir, 'review'),
+      images,
+      graceSeconds: timeouts.termination_grace_seconds,
+      redact,
+    });
+    manifest.review = {
+      risk: review.risk,
+      verdict: review.verdict,
+      counts: review.counts,
+      reviewer_image_id: review.reviewerImageId,
+      scanned_paths: review.scannedPaths,
+      duration_ms: review.durationMs,
+    };
+
+    if (review.verdict === 'blocked') {
+      const blocking = review.findings.filter(
+        (finding) => finding.severity === 'critical' || step.risk === 'high',
+      );
+      const shown = blocking
+        .slice(0, 10)
+        .map((finding) => `${finding.ruleId} at ${finding.path}`)
+        .join('; ');
+      const omitted = blocking.length > 10 ? `; ${String(blocking.length - 10)} more` : '';
+      throw new PhaseFailure('review', 'review_blocked', `review blocked: ${shown}${omitted}`);
     }
 
     await phase('commit');

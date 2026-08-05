@@ -67,6 +67,14 @@ export interface PlanAttemptReport {
   state: AttemptRecord['state'];
   commit?: string;
   diagnosis?: DiagnosisResult;
+  review?: ReviewSummary;
+}
+
+export interface ReviewSummary {
+  risk: 'standard' | 'high';
+  verdict: 'pass' | 'blocked';
+  critical: number;
+  warnings: number;
 }
 
 export interface PlanFailure {
@@ -152,6 +160,34 @@ function savedDiagnosis(attempt: AttemptRecord): DiagnosisResult | undefined {
   }
 }
 
+function savedReview(attempt: AttemptRecord): ReviewSummary | undefined {
+  const path = join(attempt.artifactPath, 'review', 'review.json');
+  if (!existsSync(path)) return undefined;
+  try {
+    const value = JSON.parse(readFileSync(path, 'utf8')) as {
+      risk?: unknown;
+      verdict?: unknown;
+      counts?: { critical?: unknown; warning?: unknown };
+    };
+    if (
+      (value.risk !== 'standard' && value.risk !== 'high') ||
+      (value.verdict !== 'pass' && value.verdict !== 'blocked') ||
+      typeof value.counts?.critical !== 'number' ||
+      typeof value.counts.warning !== 'number'
+    ) {
+      return undefined;
+    }
+    return {
+      risk: value.risk,
+      verdict: value.verdict,
+      critical: value.counts.critical,
+      warnings: value.counts.warning,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function advisoryFor(attempt: AttemptRecord, diagnosis: DiagnosisResult): string {
   const failure = attemptFailure(attempt);
   return [
@@ -215,6 +251,7 @@ export async function runPlan(
         status: row.status,
         attempts: store.attempts(row.row).map((attempt) => {
           const diagnosis = diagnosisResults.get(attempt.row) ?? savedDiagnosis(attempt);
+          const review = savedReview(attempt);
           return {
             id: attempt.attemptId,
             kind: attempt.kind,
@@ -222,6 +259,7 @@ export async function runPlan(
             state: attempt.state,
             ...(attempt.commit === undefined ? {} : { commit: attempt.commit }),
             ...(diagnosis === undefined ? {} : { diagnosis }),
+            ...(review === undefined ? {} : { review }),
           };
         }),
         commit: row.commit,

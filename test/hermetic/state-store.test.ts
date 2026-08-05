@@ -197,7 +197,7 @@ describe('attempts', () => {
     expect(attempt.state).toBe('running');
     expect(attempt.ordinal).toBe(1);
 
-    for (const phase of ['baseline', 'tests', 'red', 'implementation', 'green'] as const) {
+    for (const phase of ['baseline', 'tests', 'red', 'implementation', 'green', 'verify', 'review'] as const) {
       store.setAttemptPhase(attempt.row, phase);
     }
     store.setAttemptCandidate(attempt.row, `sha256:${'c'.repeat(64)}`, `sha256:${'k'.repeat(64)}`);
@@ -208,7 +208,7 @@ describe('attempts', () => {
     const persisted = reopened.attemptByRow(attempt.row);
     expect(persisted).toMatchObject({
       state: 'accepting',
-      phase: 'green',
+      phase: 'review',
       attemptId: 'attempt-1',
       profileId: 'codex-fast',
       kind: 'normal',

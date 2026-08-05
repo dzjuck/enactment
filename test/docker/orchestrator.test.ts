@@ -35,6 +35,7 @@ const M1_PHASES = [
   'agent',
   'diff',
   'verify',
+  'review',
   'commit',
 ] as const satisfies readonly RunPhase[];
 
@@ -186,6 +187,26 @@ async function run(
   return { report, artifacts };
 }
 
+async function reviewPlan(risk: 'standard' | 'high'): Promise<string> {
+  const file = join(await artifactDir(), `plan-${risk}.yml`);
+  await writeFile(
+    file,
+    planDocument([
+      'type: task',
+      'complexity: low',
+      `risk: ${risk}`,
+      'id: review-probe',
+      'observable_behavior: Write the review probe.',
+      'implementation_paths:',
+      '  - src/review-probe.js',
+      'verification:',
+      '  commands:',
+      '    - ["node", "--check", "src/review-probe.js"]',
+    ]),
+  );
+  return file;
+}
+
 /** Poll the child's phase log until it enters `phase`, so the interrupt is not a race. */
 async function reachedPhase(phasesFile: string, phase: RunPhase): Promise<void> {
   for (let attempt = 0; attempt < 600; attempt += 1) {
@@ -219,6 +240,9 @@ describe('orchestrator', () => {
         'prompt.txt',
         'agent-events.jsonl',
         'verification.json',
+        'review/scan.json',
+        'review/review.json',
+        'review/reviewer.log',
         'source-diff.json',
         'proxy-records.jsonl',
       ]),
@@ -234,6 +258,8 @@ describe('orchestrator', () => {
     expect(seen).toEqual(RUN_PHASES.filter((phase) => seen.includes(phase)));
     expect(seen.indexOf('connectivity')).toBeLessThan(seen.indexOf('agent'));
     expect(seen.indexOf('agent')).toBeLessThan(seen.indexOf('verify'));
+    expect(seen.indexOf('verify')).toBeLessThan(seen.indexOf('review'));
+    expect(seen.indexOf('review')).toBeLessThan(seen.indexOf('commit'));
     expect(seen.indexOf('verify')).toBeLessThan(seen.indexOf('commit'));
   }, 900_000);
 
@@ -299,7 +325,7 @@ describe('orchestrator', () => {
     expect(report.status).toBe('succeeded');
 
     const phases = events.flatMap((event) => (event.kind === 'phase' ? [event.phase] : []));
-    expect(phases).toEqual(['preparing', 'implementation', 'verify']);
+    expect(phases).toEqual(['preparing', 'implementation', 'verify', 'review']);
 
     const tail = events.slice(phases.length);
     expect(tail.map((event) => event.kind)).toEqual(['candidate', 'accepting']);
@@ -416,5 +442,56 @@ describe('orchestrator', () => {
     expect(report.status).toBe('failed');
 
     await expectNoResources(report.attempt);
+  }, 900_000);
+
+  it.each([
+    [
+      'standard warning',
+      'standard',
+      `const crypto = require('crypto');\nmodule.exports = () => crypto.pseudoRandomBytes(16);\n`,
+      'succeeded',
+      undefined,
+    ],
+    [
+      'high-risk warning',
+      'high',
+      `const crypto = require('crypto');\nmodule.exports = () => crypto.pseudoRandomBytes(16);\n`,
+      'failed',
+      'review_blocked',
+    ],
+    [
+      'standard critical',
+      'standard',
+      `const { spawn } = require('child_process');\nspawn('ls', ['-la'], { shell: true });\n`,
+      'failed',
+      'review_blocked',
+    ],
+  ] as const)('gates a %s finding before acceptance', async (_case, risk, content, status, category) => {
+    const events: StepEvent[] = [];
+    const { report, artifacts } = await run({
+      planFile: await reviewPlan(risk),
+      injection: {
+        codex: stub,
+        agentEnv: {
+          ...stubEnv(),
+          STUB_WRITE_PATH: 'src/review-probe.js',
+          STUB_WRITE_CONTENT: content,
+        },
+      },
+      onEvent: (event) => void events.push(event),
+    });
+
+    expect(report.status).toBe(status);
+    expect(report.category).toBe(category);
+    const review = JSON.parse(
+      await readFile(join(artifacts, 'review', 'review.json'), 'utf8'),
+    ) as { risk: string; verdict: string };
+    expect(review.risk).toBe(risk);
+    expect(review.verdict).toBe(status === 'succeeded' ? 'pass' : 'blocked');
+    if (status === 'failed') {
+      expect(report.commit).toBeUndefined();
+      expect(events.map((event) => event.kind)).not.toContain('candidate');
+      expect(report.message).toMatch(/opt\.ai-harness\.rules\..+src\/review-probe\.js/);
+    }
   }, 900_000);
 });

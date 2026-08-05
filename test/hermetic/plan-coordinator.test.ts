@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -407,9 +407,9 @@ describe('stronger retry', () => {
             return {
               status: 'failed',
               attempt: options.attempt,
-              failedPhase: 'agent',
-              category: 'invalid_change',
-              message: 'outside scope',
+              failedPhase: 'review',
+              category: 'review_blocked',
+              message: 'review blocked: opt.rules.exec at src/first-step.js',
             };
           }
           seen.pop();
@@ -433,7 +433,8 @@ describe('stronger retry', () => {
     expect(seen[1]?.parentCommit).toBe(seen[0]?.parentCommit);
     expect(seen[1]?.artifactDir).not.toBe(seen[0]?.artifactDir);
     expect(seen[1]?.advisoryContext).toContain('Check the allowed source scope.');
-    expect(seen[1]?.advisoryContext).toContain('invalid_change');
+    expect(seen[1]?.advisoryContext).toContain('review_blocked');
+    expect(seen[1]?.advisoryContext).toContain('opt.rules.exec at src/first-step.js');
     expect(report.state).toBe('completed');
     expect(report.steps[0]?.attempts).toMatchObject([
       { kind: 'normal', profile: 'codex-fast', state: 'failed' },
@@ -488,6 +489,7 @@ describe('stronger retry', () => {
     'setup_failed',
     'provider_connectivity_timeout',
     'internal_error',
+    'review_failed',
   ] as const)('does not diagnose or retry %s', async (category) => {
     const { approved, store, artifactsRoot } = await harness(['first-step']);
     let executions = 0;
@@ -617,6 +619,50 @@ describe('plan artifacts and reports', () => {
     expect(stored.head).toBe(first.head);
     expect(stored.steps[0]?.commit).toBe(first.steps[0]?.commit);
     expect(stored.finalVerification?.status).toBe('pass');
+  });
+
+  it('loads each attempt review summary from its artifact without embedding source', async () => {
+    const { repo, approved, store, artifactsRoot } = await harness(['first-step']);
+    const seen: StepExecutionOptions[] = [];
+    const accept = committingExecutor(repo, seen);
+
+    const report = await runPlan(
+      { approved, store, artifactsRoot },
+      {
+        execute: async (options) => {
+          await mkdir(join(options.artifactDir, 'review'), { recursive: true });
+          await writeFile(
+            join(options.artifactDir, 'review', 'review.json'),
+            JSON.stringify({
+              reviewerImageId: IMAGES.reviewer.id,
+              scannedPaths: { before: [], after: ['src/first-step.js'] },
+              findings: [
+                {
+                  ruleId: 'warning.rule',
+                  path: 'src/first-step.js',
+                  severity: 'warning',
+                  location: { start: { line: 1, column: 1 }, end: { line: 1, column: 2 } },
+                },
+              ],
+              durationMs: 5,
+              risk: 'standard',
+              verdict: 'pass',
+              counts: { critical: 0, warning: 1 },
+            }),
+          );
+          return accept(options);
+        },
+        verifyFinal: passingFinal,
+      },
+    );
+
+    expect(report.steps[0]?.attempts[0]?.review).toEqual({
+      risk: 'standard',
+      verdict: 'pass',
+      critical: 0,
+      warnings: 1,
+    });
+    expect(JSON.stringify(report)).not.toContain('source');
   });
 
   it('returns the stored report for a completed plan without running anything again', async () => {

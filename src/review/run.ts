@@ -5,6 +5,7 @@ import { pack } from 'tar-stream';
 
 import type { ValidatedChangeSet } from '../diff/validate.js';
 import type { RuntimeImages } from '../docker/images.js';
+import type { StepRisk } from '../plan/schema.js';
 import { runContainer, type RunOptions, type RunResult } from '../docker/run.js';
 import { CleanupError, releaseAll } from '../run/cleanup.js';
 import { OwnershipError } from '../run/ownership.js';
@@ -32,10 +33,14 @@ export interface ReviewExecutionResult {
   };
   readonly findings: readonly ReviewFinding[];
   readonly durationMs: number;
+  readonly risk: StepRisk;
+  readonly verdict: 'pass' | 'blocked';
+  readonly counts: { readonly critical: number; readonly warning: number };
 }
 
 export interface ReviewOptions {
   readonly attempt: string;
+  readonly risk: StepRisk;
   readonly changes: ValidatedChangeSet;
   readonly artifactDir: string;
   readonly images: RuntimeImages;
@@ -67,6 +72,13 @@ async function packTargets(targets: ReviewTargets): Promise<Buffer> {
   });
 
   for (const side of ['before', 'after'] as const) {
+    await new Promise<void>((resolve, reject) => {
+      archive.entry(
+        { name: `${side}/`, type: 'directory', mode: 0o755 },
+        Buffer.alloc(0),
+        (error) => (error === undefined || error === null ? resolve() : reject(error)),
+      );
+    });
     for (const target of targets[side]) {
       await new Promise<void>((resolve, reject) => {
         archive.entry(
@@ -115,7 +127,10 @@ function executionResult(
   images: RuntimeImages,
   findings: readonly ReviewFinding[],
   durationMs: number,
+  risk: StepRisk,
 ): ReviewExecutionResult {
+  const critical = findings.filter((finding) => finding.severity === 'critical').length;
+  const warning = findings.length - critical;
   return {
     reviewerImageId: images.reviewer.id,
     scannedPaths: {
@@ -124,6 +139,9 @@ function executionResult(
     },
     findings,
     durationMs,
+    risk,
+    verdict: critical > 0 || (risk === 'high' && warning > 0) ? 'blocked' : 'pass',
+    counts: { critical, warning },
   };
 }
 
@@ -133,7 +151,7 @@ export async function runReview(options: ReviewOptions): Promise<ReviewExecution
   const redact = options.redact ?? ((text: string) => text);
 
   if (targets.before.length === 0 && targets.after.length === 0) {
-    const result = executionResult(targets, options.images, [], 0);
+    const result = executionResult(targets, options.images, [], 0, options.risk);
     await writeArtifacts(options.artifactDir, { before: [], after: [] }, result, '', redact);
     return result;
   }
@@ -217,6 +235,7 @@ export async function runReview(options: ReviewOptions): Promise<ReviewExecution
     options.images,
     parsed.result.findings,
     outcome.scan.durationMs,
+    options.risk,
   );
   await writeArtifacts(options.artifactDir, parsed.scan, result, outcome.scan.stderr, redact);
   return result;

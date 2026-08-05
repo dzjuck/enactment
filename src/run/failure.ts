@@ -15,6 +15,8 @@ export const FAILURE_CATEGORIES = [
   'setup_timeout',
   'setup_failed',
   'verification_failed',
+  'review_blocked',
+  'review_failed',
   'invalid_change',
   'internal_error',
 ] as const;
@@ -28,6 +30,7 @@ export const RETRYABLE_FAILURE_CATEGORIES: ReadonlySet<FailureCategory> = new Se
   'closure_violation',
   'red_invalid',
   'verification_failed',
+  'review_blocked',
 ]);
 
 export class PhaseFailure extends Error {
