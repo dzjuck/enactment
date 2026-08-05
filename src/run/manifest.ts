@@ -12,6 +12,7 @@ export interface RuntimeSection {
   codex_image_id: string;
   claude_image_id: string;
   verifier_image_id: string;
+  reviewer_image_id: string;
   setup_image_id: string;
   proxy_image_id: string;
 }
@@ -96,6 +97,7 @@ export function runtimeSection(images: RuntimeImages): RuntimeSection {
     codex_image_id: images.codex.id,
     claude_image_id: images.claude.id,
     verifier_image_id: images.verifier.id,
+    reviewer_image_id: images.reviewer.id,
     setup_image_id: images.setup.id,
     proxy_image_id: images.proxy.id,
   };

@@ -18,6 +18,7 @@ const IMAGES: RuntimeImages = {
   claude: { role: 'claude', id: digits(5) },
   verifier: { role: 'verifier', id: digits(2) },
   setup: { role: 'setup', id: digits(3) },
+  reviewer: { role: 'reviewer', id: digits(5) },
   proxy: { role: 'proxy', id: digits(4) },
 };
 

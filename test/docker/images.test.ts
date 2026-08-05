@@ -5,6 +5,7 @@ import { CODEX_HOME_PATH } from '../../src/adapters/codex/policy.js';
 import { CLAUDE_VERSION, CODEX_VERSION, IMAGE_PINS, IMAGE_ROLES } from '../../src/config/pins.js';
 import { buildImage, resolveImageId } from '../../src/docker/images.js';
 import { runContainer } from '../../src/docker/run.js';
+import { REVIEW_RULES_DIR } from '../../src/review/policy.js';
 import { imageEnvNames, runInImage } from '../helpers/docker.js';
 
 beforeAll(async () => {
@@ -109,6 +110,29 @@ describe('runtime images', () => {
       'sh',
       '-c',
       'env | grep -iE "codex|openai|api_key" || true',
+    ]);
+    expect(authEnv.stdout).toBe('');
+  });
+
+  it('builds a reviewer image with the vendored rules and no provider binary or auth path', async () => {
+    const rules = await runInImage(IMAGE_PINS.reviewer.tag, [
+      'sh',
+      '-c',
+      `ls ${REVIEW_RULES_DIR}/*.yaml | wc -l`,
+    ]);
+    expect(Number(rules.stdout.trim())).toBeGreaterThan(0);
+
+    const providers = await runInImage(IMAGE_PINS.reviewer.tag, [
+      'sh',
+      '-c',
+      'command -v codex; command -v claude; ls -d /home/agent/.codex /run/agent-auth /run/claude-auth 2>/dev/null',
+    ]);
+    expect(providers.stdout).toBe('');
+
+    const authEnv = await runInImage(IMAGE_PINS.reviewer.tag, [
+      'sh',
+      '-c',
+      'env | grep -iE "token|api_key|semgrep_app" || true',
     ]);
     expect(authEnv.stdout).toBe('');
   });

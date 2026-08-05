@@ -22,9 +22,19 @@ import {
   CODEX_VERSION,
   HARNESS_VERSION,
   IMAGE_ROLES,
+  SEMGREP_IMAGE,
+  SEMGREP_VERSION,
 } from '../config/pins.js';
 import { installCommand, type LifecycleScriptPolicy } from '../deps/cache-key.js';
 import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
+import {
+  REVIEW_AFTER_ROOT,
+  REVIEW_ARGS,
+  REVIEW_BEFORE_ROOT,
+  REVIEW_SEVERITY_MAP,
+  REVIEW_TIMEOUT_SECONDS,
+  type ReviewSeverity,
+} from '../review/policy.js';
 import {
   NORMAL_ROUTES,
   PROFILE_IDS,
@@ -87,6 +97,7 @@ const manifestSchema = z.strictObject({
       codex_image_id: sha256,
       claude_image_id: sha256,
       verifier_image_id: sha256,
+      reviewer_image_id: sha256,
       setup_image_id: sha256,
       proxy_image_id: sha256,
     }),
@@ -108,8 +119,21 @@ interface ProviderContract {
   policy: unknown;
 }
 
+/** DESIGN.md §29: what the offline reviewer runs, approved as policy rather than task input. */
+export interface ReviewContract {
+  scanner: 'semgrep';
+  version: string;
+  image: string;
+  args: string[];
+  roots: { before: string; after: string };
+  severity_map: Record<string, ReviewSeverity>;
+  timeout_seconds: number;
+  network: 'none';
+}
+
 export interface Policy {
   providers: { codex: ProviderContract; claude: ProviderContract };
+  review: ReviewContract;
   routing: {
     profiles: AgentProfile[];
     normal_routes: Record<StepComplexity, ProfileId>;
@@ -148,6 +172,16 @@ export function activePolicy(): Policy {
           diagnosis_tools: CLAUDE_DIAGNOSIS_TOOLS,
         },
       },
+    },
+    review: {
+      scanner: 'semgrep',
+      version: SEMGREP_VERSION,
+      image: SEMGREP_IMAGE,
+      args: [...REVIEW_ARGS],
+      roots: { before: REVIEW_BEFORE_ROOT, after: REVIEW_AFTER_ROOT },
+      severity_map: { ...REVIEW_SEVERITY_MAP },
+      timeout_seconds: REVIEW_TIMEOUT_SECONDS,
+      network: 'none',
     },
     routing: {
       profiles: PROFILE_IDS.map((id) => ({ ...PROFILES[id] })),
@@ -211,6 +245,7 @@ export async function buildManifest(options: BuildManifestOptions): Promise<Exec
       codex_image_id: images.codex.id,
       claude_image_id: images.claude.id,
       verifier_image_id: images.verifier.id,
+      reviewer_image_id: images.reviewer.id,
       setup_image_id: images.setup.id,
       proxy_image_id: images.proxy.id,
     },

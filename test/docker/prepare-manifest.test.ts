@@ -74,6 +74,7 @@ describe('prepare against the real daemon', () => {
         codex_image_id: images.codex.id,
         claude_image_id: images.claude.id,
         verifier_image_id: images.verifier.id,
+        reviewer_image_id: images.reviewer.id,
         setup_image_id: images.setup.id,
         proxy_image_id: images.proxy.id,
       },

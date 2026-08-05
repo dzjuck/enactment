@@ -21,6 +21,7 @@ const IMAGES: RuntimeImages = {
   claude: { role: 'claude', id: `sha256:${'b'.repeat(64)}` },
   verifier: { role: 'verifier', id: `sha256:${'c'.repeat(64)}` },
   setup: { role: 'setup', id: `sha256:${'d'.repeat(64)}` },
+  reviewer: { role: 'reviewer', id: `sha256:${'9'.repeat(64)}` },
   proxy: { role: 'proxy', id: `sha256:${'e'.repeat(64)}` },
 };
 

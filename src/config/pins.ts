@@ -35,16 +35,35 @@ export const TYPES_NODE_VERSION = '24.10.1';
 export const NODE_BASE_IMAGE =
   'node:22-bookworm-slim@sha256:f32b81066cde10a75dbac96646099533316d94bac4150c55da1636e1f0ffdc46';
 
+/**
+ * DESIGN.md §29: the V1 reviewer is a pinned offline static scanner. Semgrep Community
+ * Edition, by immutable index digest — a floating tag would change what a manifest approved.
+ */
+export const SEMGREP_VERSION = '1.172.0';
+export const SEMGREP_IMAGE =
+  'semgrep/semgrep:1.172.0@sha256:65dcd4408adda7c183a6b4550cb1e9b19f7f627a6fbb7e0559bd466bedc44d7b';
+
+/**
+ * Provenance of the vendored rules. The rule *content* lives in the reviewer image, so a rule
+ * edit changes `reviewer_image_id` and re-approval is already required; these constants exist
+ * so the vendored copy can be traced back to an exact upstream tree.
+ */
+export const SEMGREP_RULES_REPOSITORY = 'https://github.com/semgrep/semgrep-rules';
+export const SEMGREP_RULES_COMMIT = '40b8c63f75dc7c22c8a77482d73bfb864b146f7e';
+/** The selected subtree: language-level Node/JS security rules, no framework packs. */
+export const SEMGREP_RULES_PATH = 'javascript/lang/security';
+
 /** DESIGN.md §5/§36: fixed numeric identity, so `--user` and tmpfs ownership agree. */
 export const AGENT_UID = 1001;
 export const AGENT_GID = 1001;
 
-export type ImageRole = 'codex' | 'claude' | 'verifier' | 'setup' | 'proxy';
+export type ImageRole = 'codex' | 'claude' | 'verifier' | 'reviewer' | 'setup' | 'proxy';
 
 export const IMAGE_ROLES: readonly ImageRole[] = [
   'codex',
   'claude',
   'verifier',
+  'reviewer',
   'setup',
   'proxy',
 ];
@@ -88,6 +107,17 @@ export const IMAGE_PINS: Record<ImageRole, ImagePin> = {
     tag: `ai-harness/verifier:${HARNESS_VERSION}`,
     context: 'images/verifier',
     buildArgs: { ...COMMON_BUILD_ARGS },
+  },
+  // The only role that is not a Node image: the scanner and its vendored rules, nothing else.
+  reviewer: {
+    role: 'reviewer',
+    tag: `ai-harness/reviewer:${HARNESS_VERSION}`,
+    context: 'images/reviewer',
+    buildArgs: {
+      SEMGREP_IMAGE,
+      AGENT_UID: String(AGENT_UID),
+      AGENT_GID: String(AGENT_GID),
+    },
   },
   setup: {
     role: 'setup',

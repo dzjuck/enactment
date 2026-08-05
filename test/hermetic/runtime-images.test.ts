@@ -18,6 +18,8 @@ import {
   IMAGE_PINS,
   IMAGE_ROLES,
   NODE_BASE_IMAGE,
+  SEMGREP_IMAGE,
+  SEMGREP_VERSION,
   type ImageRole,
 } from '../../src/config/pins.js';
 import { DependencyCache, ensureDependencySnapshot } from '../../src/deps/setup.js';
@@ -124,8 +126,8 @@ function storedArtifact(): Promise<StoredArtifact> {
 }
 
 describe('runtime image resolution', () => {
-  it('exposes the exact five runtime image roles without an agent alias', () => {
-    expect(IMAGE_ROLES).toEqual(['codex', 'claude', 'verifier', 'setup', 'proxy']);
+  it('exposes the exact six runtime image roles without an agent alias', () => {
+    expect(IMAGE_ROLES).toEqual(['codex', 'claude', 'verifier', 'reviewer', 'setup', 'proxy']);
     expect(IMAGE_PINS).not.toHaveProperty('agent');
   });
 
@@ -174,11 +176,23 @@ describe('image build arguments', () => {
       await buildImage(role, exec);
 
       const argv = (invocations[0] ?? []).join(' ');
-      expect(argv).toContain(`BASE_IMAGE=${NODE_BASE_IMAGE}`);
+      // The reviewer is the one role that is not a Node image: it is the pinned scanner.
+      expect(argv).toContain(
+        role === 'reviewer' ? `SEMGREP_IMAGE=${SEMGREP_IMAGE}` : `BASE_IMAGE=${NODE_BASE_IMAGE}`,
+      );
       expect(argv).toContain(`AGENT_UID=${String(AGENT_UID)}`);
       expect(argv).toContain(`AGENT_GID=${String(AGENT_GID)}`);
       expect(argv).toContain(`--tag ${IMAGE_PINS[role].tag}`);
     }
+  });
+
+  it('builds the reviewer image from an immutable scanner digest, never a floating tag', async () => {
+    const { invocations, exec } = recordingExec(() => Promise.resolve(''));
+
+    await buildImage('reviewer', exec);
+
+    expect(SEMGREP_IMAGE).toContain(`:${SEMGREP_VERSION}@sha256:`);
+    expect((invocations[0] ?? []).join(' ')).toContain(`SEMGREP_IMAGE=${SEMGREP_IMAGE}`);
   });
 
   it('builds the Codex image with the pinned Codex version', async () => {
@@ -356,12 +370,13 @@ describe('phases execute the supplied runtime image set', () => {
 });
 
 describe('runtimeSection', () => {
-  it('records exactly the five executed image IDs', () => {
+  it('records exactly the six executed image IDs', () => {
     expect(runtimeSection(IMAGES)).toEqual({
       harness_version: expect.any(String),
       codex_image_id: IDS.codex,
       claude_image_id: IDS.claude,
       verifier_image_id: IDS.verifier,
+      reviewer_image_id: IDS.reviewer,
       setup_image_id: IDS.setup,
       proxy_image_id: IDS.proxy,
     });

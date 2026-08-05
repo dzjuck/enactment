@@ -39,6 +39,7 @@ const IMAGES: RuntimeImages = {
   claude: { role: 'claude', id: `sha256:${'e'.repeat(64)}` },
   verifier: { role: 'verifier', id: `sha256:${'b'.repeat(64)}` },
   setup: { role: 'setup', id: `sha256:${'c'.repeat(64)}` },
+  reviewer: { role: 'reviewer', id: `sha256:${'8'.repeat(64)}` },
   proxy: { role: 'proxy', id: `sha256:${'d'.repeat(64)}` },
 };
 
@@ -123,6 +124,7 @@ describe('candidate execution manifest', () => {
       codex_image_id: IMAGES.codex.id,
       claude_image_id: IMAGES.claude.id,
       verifier_image_id: IMAGES.verifier.id,
+      reviewer_image_id: IMAGES.reviewer.id,
       setup_image_id: IMAGES.setup.id,
       proxy_image_id: IMAGES.proxy.id,
     });
@@ -324,7 +326,7 @@ describe('execution manifest loading', () => {
       (yaml: string) => yaml.replace(/plan_hash: sha256:[0-9a-f]+/, 'plan_hash: deadbeef'),
       'plan_hash',
     ],
-    ['an unknown field', (yaml: string) => `${yaml}    reviewer: claude\n`, 'reviewer'],
+    ['an unknown field', (yaml: string) => `${yaml}    scanner: claude\n`, 'scanner'],
     [
       'an unknown version',
       (yaml: string) => yaml.replace('version: 1', 'version: 2'),
@@ -339,6 +341,20 @@ describe('execution manifest loading', () => {
 
     await expect(loadManifest(manifestPath)).rejects.toThrow(ManifestConfigError);
     await expect(loadManifest(manifestPath)).rejects.toThrow(new RegExp(mentioned));
+  });
+
+  it('rejects an old five-image manifest rather than defaulting the reviewer image', async () => {
+    const dir = await workspace();
+    const planFile = await writePlan(dir);
+    const manifestPath = join(dir, 'execution-manifest.yml');
+    await writeManifest(manifestPath, await build(planFile, manifestPath));
+    await writeFile(
+      manifestPath,
+      (await readFile(manifestPath, 'utf8')).replace(/\s*reviewer_image_id: sha256:[0-9a-f]+/, ''),
+    );
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(ManifestConfigError);
+    await expect(loadManifest(manifestPath)).rejects.toThrow(/reviewer_image_id/);
   });
 
   it('rejects a plan whose bytes no longer match the approved hash', async () => {
@@ -406,7 +422,7 @@ describe('execution manifest approval', () => {
     expect((error as ApprovalError).reason).toBe('base_unresolvable');
   });
 
-  it.each(['codex', 'claude'] as const)(
+  it.each(['codex', 'claude', 'reviewer'] as const)(
     'rejects a changed %s runtime image ID before anything executes',
     async (role) => {
       const { repo, manifestPath } = await approved();

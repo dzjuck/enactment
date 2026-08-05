@@ -30,6 +30,7 @@ const IMAGES: RuntimeImages = {
   claude: { role: 'claude', id: `sha256:${'e'.repeat(64)}` },
   verifier: { role: 'verifier', id: `sha256:${'b'.repeat(64)}` },
   setup: { role: 'setup', id: `sha256:${'c'.repeat(64)}` },
+  reviewer: { role: 'reviewer', id: `sha256:${'9'.repeat(64)}` },
   proxy: { role: 'proxy', id: `sha256:${'d'.repeat(64)}` },
 };
 
@@ -169,6 +170,7 @@ const passingFinal = (): Promise<FinalVerificationResult> =>
       codex_image_id: IMAGES.codex.id,
       claude_image_id: IMAGES.claude.id,
       verifier_image_id: IMAGES.verifier.id,
+      reviewer_image_id: IMAGES.reviewer.id,
       setup_image_id: IMAGES.setup.id,
       proxy_image_id: IMAGES.proxy.id,
     },

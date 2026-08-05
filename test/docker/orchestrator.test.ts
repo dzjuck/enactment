@@ -347,6 +347,7 @@ describe('orchestrator', () => {
     expect(manifest.runtime.codex_image_id).toMatch(/^sha256:/);
     expect(manifest.runtime.claude_image_id).toMatch(/^sha256:/);
     expect(manifest.runtime.verifier_image_id).toMatch(/^sha256:/);
+    expect(manifest.runtime.reviewer_image_id).toMatch(/^sha256:/);
     expect(manifest.runtime.setup_image_id).toMatch(/^sha256:/);
     expect(manifest.runtime.proxy_image_id).toMatch(/^sha256:/);
   }, 900_000);
@@ -365,6 +366,7 @@ describe('orchestrator', () => {
     // Every role the injection did not replace is still the production identity.
     expect(manifest.runtime.claude_image_id).toBe(production.claude.id);
     expect(manifest.runtime.verifier_image_id).toBe(production.verifier.id);
+    expect(manifest.runtime.reviewer_image_id).toBe(production.reviewer.id);
     expect(manifest.runtime.setup_image_id).toBe(production.setup.id);
     expect(manifest.runtime.proxy_image_id).toBe(production.proxy.id);
   }, 900_000);
