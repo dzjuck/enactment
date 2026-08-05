@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { compileClaudePolicy } from '../../src/adapters/claude/policy.js';
-import { runClaudeAgent } from '../../src/adapters/claude/run.js';
 import { compileCodexPolicy } from '../../src/adapters/codex/policy.js';
-import { runCodexAgent } from '../../src/adapters/codex/run.js';
 import { providerDescriptor } from '../../src/adapters/provider.js';
 import {
   CLAUDE_PROVIDER_ALLOWLIST,
@@ -32,7 +30,6 @@ describe('provider descriptor', () => {
     expect(descriptor.image(IMAGES)).toBe(IMAGES.codex);
     expect(descriptor.authProvider).toBe('codex');
     expect(descriptor.copyBackAuth).toBe(true);
-    expect(descriptor.runner).toBe(runCodexAgent);
     expect(descriptor.compile('Do the task.')).toEqual(
       compileCodexPolicy({
         prompt: 'Do the task.',
@@ -52,7 +49,8 @@ describe('provider descriptor', () => {
     expect(descriptor.image(IMAGES)).toBe(IMAGES.claude);
     expect(descriptor.authProvider).toBe('claude');
     expect(descriptor.copyBackAuth).toBe(false);
-    expect(descriptor.runner).toBe(runClaudeAgent);
+    // The compiled policy is exactly what the Claude runner rebuilds from the same profile
+    // and prompt, which is why the runner does not need the compiled object handed to it.
     expect(descriptor.compile('Do the task.')).toEqual(
       compileClaudePolicy({
         mode: 'coding',

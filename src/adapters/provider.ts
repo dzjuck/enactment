@@ -16,6 +16,14 @@ import { runCodexAgent } from './codex/run.js';
 
 export interface ProviderRunOptions {
   prompt: string;
+  /**
+   * The policy this attempt compiled, seeded and recorded as `inputs.policy_hash`.
+   *
+   * Codex reads it because `AgentRunOptions` carries prompt and workdir only — model and
+   * effort exist nowhere else in that call. A runner that already receives model, effort and
+   * mode recompiles the identical policy from them instead, which is why Claude does not read
+   * this field; `provider-descriptor.test.ts` pins that the two agree.
+   */
   policy: CompiledAgentPolicy;
   network: string;
   env: Record<string, string>;
@@ -47,7 +55,6 @@ export interface ProviderDescriptor {
   copyBackAuth: boolean;
   image(images: RuntimeImages): RuntimeImage;
   compile(prompt: string): CompiledAgentPolicy;
-  runner: typeof runCodexAgent | typeof runClaudeAgent;
   run(options: ProviderRunOptions): Promise<ProviderRunResult>;
 }
 
@@ -69,7 +76,6 @@ export function providerDescriptor(profile: AgentProfile): ProviderDescriptor {
           model: profile.model,
           reasoningEffort: profile.effort,
         }),
-      runner: runCodexAgent,
       run: async (options) => {
         const result = await runCodexAgent(options);
         return {
@@ -99,7 +105,6 @@ export function providerDescriptor(profile: AgentProfile): ProviderDescriptor {
         model: profile.model,
         effort: profile.effort,
       }),
-    runner: runClaudeAgent,
     run: async (options) => {
       const result = await runClaudeAgent({
         mode: 'coding',
