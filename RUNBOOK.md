@@ -171,6 +171,10 @@ and readiness fails on its deadline. The harness sets `HOST` and `PORT`; use the
 | `PORT` | the application | the declared `port` |
 | `HARNESS_APP_URL` | every behavioral command | `http://<app-container>:<port>` |
 
+An application that exits before it becomes ready does not consume that budget: the harness
+watches the container from the host — the checkers have no Docker socket and cannot — and fails
+the step within seconds, with the reason in the report and `runtime/application.log`.
+
 Nothing else is configurable. Readiness is an HTTP GET requiring status 200, budgeted at 60 s;
 each behavioral command gets 600 s; the network is internal. These are fixed harness policy and
 part of the policy hash, so changing them invalidates an existing approval — a step cannot lower
@@ -473,7 +477,8 @@ parent — stops the plan without changing either side.
 | `closure_violation` | An agent changed a frozen test, runner configuration, setup file, manifest, or lockfile. |
 | `test_contract_disputed` | The implementation agent reported that the frozen tests are wrong. Read `implementation/test-contract-dispute.md`; no commit was created. |
 | `verification_failed` | GREEN, an opaque verification command, or the runtime check failed. Read `green/verdict.json`, `verification.json` and `runtime/`. |
-| `verification_failed` at phase `runtime`, stage `readiness` | The application never answered `readiness_path` with 200 inside 60 s. Read `runtime/application.log` first: an application that crashed on startup still costs the full budget before this is reported, and its reason is in that file. Check that it binds `0.0.0.0` and the declared `PORT`. |
+| `verification_failed` at phase `runtime`, stage `readiness`, reason "the application exited" | The application process died before it ever answered. Reported within seconds, not after the readiness budget: the harness watches the container from the host. `runtime/application.log` holds its output. |
+| `verification_failed` at phase `runtime`, stage `readiness` | The application stayed up but never answered `readiness_path` with 200 inside 60 s. Check that it binds `0.0.0.0` and the declared `PORT` — a server on `127.0.0.1` is unreachable from the checker's container and looks exactly like this. |
 | `verification_failed` at phase `runtime`, stage `behavioral` | The application was ready and a behavioral command failed or overran 600 s. Execution stopped at that command; `runtime/behavioral.log` holds its output. |
 | `internal_error` at phase `runtime` | The harness could not perform the check at all — a container could not be created or started, logs could not be read, or evidence could not be written. Not a statement about your code. |
 | `review_blocked` | A critical finding, or any warning on a high-risk step. Read `review/review.json`; one stronger retry is allowed. |

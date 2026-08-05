@@ -19,6 +19,7 @@ import {
   RUNTIME_ARTIFACT_DIR,
   RUNTIME_RESULT_FILE,
 } from '../../src/verify/runtime.js';
+import { RUNTIME_READINESS_TIMEOUT_SECONDS } from '../../src/verify/runtime-policy.js';
 import { newAttemptId, runtimeContainerName } from '../../src/volume/naming.js';
 import { planDocument } from '../helpers/plan.js';
 import { commitAll, createM2Repo, git, removePlanBranches, removeRepo, type TargetRepo } from '../helpers/repo.js';
@@ -425,6 +426,40 @@ describe('runtime-gated task step', () => {
         await readFile(join(artifacts, RUNTIME_ARTIFACT_DIR, BEHAVIORAL_LOG_FILE), 'utf8'),
       ).toContain('behavioral expectation not met');
       await expectNoResources(attempt);
+    },
+    900_000,
+  );
+
+  it(
+    'names the reason when the application exits before it is ready',
+    async () => {
+      const plan = await taskPlan({ runtime: {} });
+      const started = Date.now();
+      const { report, artifacts } = await run(
+        plan,
+        taskEnv("console.error('cannot bind: configuration missing');\nprocess.exit(1);\n"),
+      );
+      const elapsed = Date.now() - started;
+
+      expect(report.status).toBe('failed');
+      expect(report.failedPhase).toBe('runtime');
+      expect(report.category).toBe('verification_failed');
+      // The operator should not have to open an artifact to learn what happened.
+      expect(report.message).toMatch(/exited/i);
+
+      const manifest = JSON.parse(await readFile(join(artifacts, 'run-manifest.json'), 'utf8')) as {
+        runtime_check?: { status: string; stage?: string; reason?: string };
+      };
+      expect(manifest.runtime_check?.status).toBe('fail');
+      expect(manifest.runtime_check?.stage).toBe('readiness');
+      expect(manifest.runtime_check?.reason).toMatch(/exited/i);
+
+      expect(
+        await readFile(join(artifacts, RUNTIME_ARTIFACT_DIR, APPLICATION_LOG_FILE), 'utf8'),
+      ).toContain('cannot bind: configuration missing');
+
+      // A dead application must not cost the whole readiness budget.
+      expect(elapsed).toBeLessThan(RUNTIME_READINESS_TIMEOUT_SECONDS * 1000);
     },
     900_000,
   );

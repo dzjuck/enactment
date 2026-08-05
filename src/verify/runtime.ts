@@ -1,5 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+
+import { execa } from 'execa';
 
 import type { ContainerSpec, Mount } from '../docker/args.js';
 import type { RuntimeImages } from '../docker/images.js';
@@ -9,6 +12,7 @@ import {
   removeContainer,
   runContainer,
   startContainer,
+  stopContainer,
   type RunOptions,
   type RunResult,
   type RunStatus,
@@ -17,7 +21,11 @@ import { withPhaseNetworks } from '../net/manage.js';
 import type { RuntimeVerification } from '../plan/schema.js';
 import { CleanupError, describeError, releaseAll } from '../run/cleanup.js';
 import { OwnershipError } from '../run/ownership.js';
-import { attemptLabels, runtimeContainerName } from '../volume/naming.js';
+import {
+  attemptLabels,
+  runtimeContainerName,
+  runtimeReadinessContainerName,
+} from '../volume/naming.js';
 import {
   RUNTIME_COMMAND_TIMEOUT_SECONDS,
   RUNTIME_HOST,
@@ -62,12 +70,16 @@ export interface RuntimeReadinessResult {
   exitCode: number;
   status: RunStatus;
   durationMs: number;
+  /** The application container was gone before it ever answered. */
+  applicationExited?: boolean;
 }
 
 export interface RuntimeCheckResult {
   status: 'pass' | 'fail' | 'timeout';
   /** Where a non-passing check stopped. Absent on the passing path. */
   stage?: RuntimeStage;
+  /** Present when the stage alone would not explain the verdict. */
+  reason?: string;
   startCommand: string[];
   /** What the behavioral checkers receive as `HARNESS_APP_URL`. */
   url: string;
@@ -103,6 +115,10 @@ export interface RuntimeCheckOptions {
   run?: (spec: ContainerSpec, options: RunOptions) => Promise<RunResult>;
   captureLogs?: (name: string) => Promise<{ stdout: string; stderr: string }>;
   removeContainer?: (name: string) => Promise<void>;
+  /** Host-side liveness of the application container; the probe cannot see it. */
+  isRunning?: (name: string) => Promise<boolean>;
+  /** Ends the readiness probe early. Best-effort: the container ladder is the real deadline. */
+  terminate?: (name: string) => Promise<void>;
 }
 
 /**
@@ -155,6 +171,66 @@ const attempt = () =>
 /** The probe's own deadline expired, as opposed to the probe failing for another reason. */
 const READINESS_DEADLINE_EXIT_CODE = 3;
 
+/** How often the host checks that the application is still alive while readiness polls. */
+export const APPLICATION_POLL_INTERVAL_MS = 250;
+
+const APPLICATION_EXITED_REASON =
+  'the application exited before it became ready; see application.log';
+
+/** Host-side liveness. A container that no longer exists is not running either. */
+async function applicationIsRunning(name: string): Promise<boolean> {
+  const { exitCode, stdout } = await execa(
+    'docker',
+    ['container', 'inspect', '--format', '{{.State.Running}}', name],
+    { reject: false },
+  );
+
+  return exitCode === 0 && stdout.trim() === 'true';
+}
+
+/**
+ * Watch the application while readiness polls, and stop the probe the moment it is gone.
+ *
+ * The probe container has the network and nothing else — no Docker socket, by design — so it
+ * cannot tell "not listening yet" from "already dead" and would poll a corpse for its whole
+ * budget. Only the host can see the difference, so the host is what watches.
+ *
+ * Terminating the probe is an optimization, not a correctness requirement: if the kill fails,
+ * the §5 container ladder still ends the probe at its deadline. What matters is that the
+ * *reason* is recorded either way.
+ */
+function watchApplication(
+  application: string,
+  probeContainer: string,
+  isRunning: (name: string) => Promise<boolean>,
+  terminate: (name: string) => Promise<void>,
+  settled: () => boolean,
+): { exited: () => boolean; done: Promise<void> } {
+  let exited = false;
+
+  const done = (async () => {
+    while (!settled()) {
+      if (await isRunning(application)) {
+        await delay(APPLICATION_POLL_INTERVAL_MS);
+        continue;
+      }
+
+      // Recorded before the kill is attempted: the application is gone whether or not the
+      // probe can be stopped early.
+      exited = true;
+      try {
+        await terminate(probeContainer);
+      } catch {
+        // Deliberately swallowed. The deadline is the backstop, and a failure to shorten a
+        // wait is not a fact about the code under test.
+      }
+      return;
+    }
+  })();
+
+  return { exited: () => exited, done };
+}
+
 function commandResult(argv: readonly string[], run: RunResult): RuntimeCommandResult {
   return {
     argv: [...argv],
@@ -184,6 +260,10 @@ export async function runRuntimeCheck(
   const run = options.run ?? runContainer;
   const captureLogs = options.captureLogs ?? captureContainerLogs;
   const release = options.removeContainer ?? removeContainer;
+  const isRunning = options.isRunning ?? applicationIsRunning;
+  // Tolerant on purpose: this only shortens a wait, and `runContainer` removes the probe
+  // container itself either way.
+  const terminate = options.terminate ?? stopContainer;
   const redact = options.redact ?? ((text: string) => text);
   const graceSeconds = options.graceSeconds ?? DEFAULT_GRACE_SECONDS;
 
@@ -216,7 +296,8 @@ export async function runRuntimeCheck(
       });
       started = true;
 
-      const readinessRun = await run(
+      const probeContainer = runtimeReadinessContainerName(options.attempt);
+      const probe = run(
         {
           image: options.images.verifier.id,
           argv: [
@@ -227,17 +308,37 @@ export async function runRuntimeCheck(
             String(RUNTIME_READINESS_TIMEOUT_SECONDS),
           ],
           network,
+          name: probeContainer,
           labels: attemptLabels(options.attempt, 'runtime-readiness'),
           env: { [RUNTIME_URL_VARIABLE]: url },
         },
         { timeoutSeconds: RUNTIME_READINESS_TIMEOUT_SECONDS, graceSeconds },
       );
 
+      let probeSettled = false;
+      const watch = watchApplication(
+        application,
+        probeContainer,
+        isRunning,
+        terminate,
+        () => probeSettled,
+      );
+
+      let readinessRun: RunResult;
+      try {
+        readinessRun = await probe;
+      } finally {
+        probeSettled = true;
+      }
+      await watch.done;
+
+      const applicationExited = watch.exited();
       const readiness: RuntimeReadinessResult = {
         url: readinessUrl,
         exitCode: readinessRun.exitCode,
         status: readinessRun.status,
         durationMs: readinessRun.durationMs,
+        ...(applicationExited ? { applicationExited } : {}),
       };
       behavioralLog += outputOf(`readiness probe ${readinessUrl}`, readinessRun);
 
@@ -251,7 +352,16 @@ export async function runRuntimeCheck(
         verifierImage: options.images.verifier.id,
       };
 
-      if (readinessRun.status === 'timeout' || readinessRun.exitCode === READINESS_DEADLINE_EXIT_CODE) {
+      if (applicationExited) {
+        // The most specific fact wins the verdict: this is not a deadline that expired, it is
+        // a process that died. The probe's own outcome stays recorded beside it.
+        result.status = 'fail';
+        result.stage = 'readiness';
+        result.reason = APPLICATION_EXITED_REASON;
+      } else if (
+        readinessRun.status === 'timeout' ||
+        readinessRun.exitCode === READINESS_DEADLINE_EXIT_CODE
+      ) {
         result.status = 'timeout';
         result.stage = 'readiness';
       } else if (readinessRun.exitCode !== 0) {

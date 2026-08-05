@@ -17,6 +17,7 @@ import {
   runRuntimeCheck,
   type RuntimeCheckResult,
 } from '../../src/verify/runtime.js';
+import { RUNTIME_READINESS_TIMEOUT_SECONDS } from '../../src/verify/runtime-policy.js';
 import { ATTEMPT_LABEL, newAttemptId, runtimeContainerName } from '../../src/volume/naming.js';
 import {
   createWorkspaceVolume,
@@ -251,20 +252,25 @@ describe('runtime check', () => {
   );
 
   it(
-    'failure control: an application that exits immediately leaves its reason in the log',
+    'failure control: an application that exits immediately fails fast, with its reason logged',
     async () => {
-      const { result, artifactDir } = await check(
-        { 'src/server.js': CRASHING_SERVER, 'harness-checks/orders.js': CHECKER },
-        // The readiness budget is fixed policy; the container ladder is what this shortens.
-        { runtime: runtime({ readiness_path: '/health' }) },
-      );
+      const started = Date.now();
+      const { result, artifactDir } = await check({
+        'src/server.js': CRASHING_SERVER,
+        'harness-checks/orders.js': CHECKER,
+      });
+      const elapsed = Date.now() - started;
 
-      expect(result.status).toBe('timeout');
+      expect(result.status).toBe('fail');
       expect(result.stage).toBe('readiness');
+      expect(result.readiness.applicationExited).toBe(true);
       expect(result.commands).toEqual([]);
       expect(await artifact(artifactDir, APPLICATION_LOG_FILE)).toContain(
         'cannot bind: configuration missing',
       );
+
+      // The point of the fix: a dead application is not worth a 60-second readiness budget.
+      expect(elapsed).toBeLessThan(RUNTIME_READINESS_TIMEOUT_SECONDS * 1000);
     },
     300_000,
   );

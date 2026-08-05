@@ -24,7 +24,12 @@ import {
   RUNTIME_COMMAND_TIMEOUT_SECONDS,
   RUNTIME_READINESS_TIMEOUT_SECONDS,
 } from '../../src/verify/runtime-policy.js';
-import { ATTEMPT_LABEL, ROLE_LABEL, runtimeContainerName } from '../../src/volume/naming.js';
+import {
+  ATTEMPT_LABEL,
+  ROLE_LABEL,
+  runtimeContainerName,
+  runtimeReadinessContainerName,
+} from '../../src/volume/naming.js';
 
 const { dockerCalls, dockerFailure, fakeExeca } = vi.hoisted(() => {
   const recorded: string[][] = [];
@@ -135,8 +140,26 @@ function check(overrides: Overrides = {}): Promise<RuntimeCheckResult> {
     removeContainer: async () => {
       recorder.events.push('remove');
     },
+    // Deliberately not recorded in `events`: polling is concurrent with the probe, so it
+    // carries no ordering meaning and would only add noise to the sequence assertions.
+    isRunning: async () => true,
+    terminate: async (name) => {
+      recorder.events.push(`terminate:${name}`);
+    },
     ...overrides,
   });
+}
+
+/**
+ * A probe that does not settle until something terminates it — which is what a real one does
+ * while polling a dead application: it waits out its whole deadline.
+ */
+function heldProbe(): { probe: Promise<RunResult>; release: (result: RunResult) => void } {
+  let release: (result: RunResult) => void = () => undefined;
+  const probe = new Promise<RunResult>((resolve) => {
+    release = resolve;
+  });
+  return { probe, release };
 }
 
 /** Behavioral outcomes by index, readiness first. */
@@ -244,6 +267,109 @@ describe('readiness', () => {
     expect(result.status).toBe('fail');
     expect(result.stage).toBe('readiness');
     expect(recorder.ran).toHaveLength(1);
+  });
+
+  it('names the readiness container per attempt, so it can be terminated by name', async () => {
+    await check();
+
+    expect(runtimeReadinessContainerName(ATTEMPT)).toBe('ai-harness-ready-attempt-1');
+    expect(recorder.ran[0]?.spec.name).toBe(runtimeReadinessContainerName(ATTEMPT));
+  });
+
+  it('does not terminate the probe while the application is still running', async () => {
+    await check();
+
+    expect(recorder.events.some((event) => event.startsWith('terminate:'))).toBe(false);
+  });
+});
+
+/**
+ * The probe cannot see the application container — it has no Docker socket, only the network.
+ * Waiting out a 60-second budget for a process that is already dead is the harness's job to
+ * avoid, and only the host can observe that.
+ */
+describe('an application that exits before it is ready', () => {
+  it('stops the probe as soon as the application is gone, and says so', async () => {
+    const { probe, release } = heldProbe();
+
+    const result = await check({
+      isRunning: async () => false,
+      terminate: async (name) => {
+        recorder.events.push(`terminate:${name}`);
+        release(ok({ exitCode: 137, stderr: 'terminated' }));
+      },
+      run: async (spec, options) => {
+        recorder.ran.push({ spec, options });
+        return recorder.ran.length === 1 ? probe : ok();
+      },
+    });
+
+    expect(result.status).toBe('fail');
+    expect(result.stage).toBe('readiness');
+    expect(result.readiness.applicationExited).toBe(true);
+    expect(result.reason).toMatch(/exited/i);
+
+    // No behavioral command runs, and the readiness container was killed by name.
+    expect(recorder.ran).toHaveLength(1);
+    expect(result.commands).toEqual([]);
+    expect(recorder.events).toContain(`terminate:${runtimeReadinessContainerName(ATTEMPT)}`);
+  });
+
+  it('still captures the application logs that explain why it exited', async () => {
+    const { probe, release } = heldProbe();
+
+    await check({
+      isRunning: async () => false,
+      terminate: async () => release(ok({ exitCode: 137 })),
+      run: async (spec, options) => {
+        recorder.ran.push({ spec, options });
+        return recorder.ran.length === 1 ? probe : ok();
+      },
+      captureLogs: async () => ({ stdout: '', stderr: 'cannot bind: configuration missing\n' }),
+    });
+
+    expect(await readArtifact(APPLICATION_LOG_FILE)).toContain('cannot bind');
+  });
+
+  it('lets the deadline back it up when the probe cannot be terminated early', async () => {
+    const { probe, release } = heldProbe();
+
+    const result = await check({
+      isRunning: async () => false,
+      terminate: async () => {
+        // The kill is an optimization; the container ladder is still the real deadline.
+        release(ok({ exitCode: 137, status: 'timeout' }));
+        throw new Error('kill refused');
+      },
+      run: async (spec, options) => {
+        recorder.ran.push({ spec, options });
+        return recorder.ran.length === 1 ? probe : ok();
+      },
+    });
+
+    // The more specific fact wins the verdict; the probe's own outcome is still recorded.
+    expect(result.status).toBe('fail');
+    expect(result.stage).toBe('readiness');
+    expect(result.readiness.applicationExited).toBe(true);
+    expect(result.readiness.status).toBe('timeout');
+  });
+
+  it('records the reason in runtime.json', async () => {
+    const { probe, release } = heldProbe();
+
+    await check({
+      isRunning: async () => false,
+      terminate: async () => release(ok({ exitCode: 137 })),
+      run: async (spec, options) => {
+        recorder.ran.push({ spec, options });
+        return recorder.ran.length === 1 ? probe : ok();
+      },
+    });
+
+    const stored = JSON.parse(await readArtifact(RUNTIME_RESULT_FILE)) as RuntimeCheckResult;
+    expect(stored.status).toBe('fail');
+    expect(stored.reason).toMatch(/exited/i);
+    expect(stored.readiness.applicationExited).toBe(true);
   });
 });
 

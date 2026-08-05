@@ -1000,6 +1000,11 @@ restore implementation snapshot and clean dependencies
 → remove the container, then the network, then the volumes
 ```
 
+Readiness has two outcomes that are not the same thing. If the application stays up and never
+answers, the readiness deadline expires. If it exits first, the harness observes that from the
+host — the probe container has no Docker socket and cannot — ends the probe and reports the exit
+rather than waiting out the budget.
+
 Static and runtime verification share one disposable workspace and dependency volume, so a static
 command may build what `start_command` launches. The application and the checkers receive no
 provider authentication, no proxy and no egress, and nothing they write can be accepted:
@@ -1896,6 +1901,13 @@ Established against Claude Code `2.1.221` on OrbStack `linux/arm64` before routi
   the verifier-workspace ownership scope was extracted and both phases run inside it.
 * **The readiness probe's argv is not evidence.** It is the entire fixed probe source; recording it
   would bury the verdict it sits beside. `runtime.json` records the readiness *target* instead.
+* **The probe cannot see the process it is waiting for, so the host watches it.** The probe
+  container has the runtime network and nothing else — no Docker socket, by design — so it cannot
+  distinguish "not listening yet" from "already dead" and polled a corpse for the whole 60-second
+  budget. The harness now watches the application container from the host while readiness runs and
+  terminates the probe the moment it exits. Measured: 61 s → under 1 s. The kill is an
+  optimization and the container ladder remains the real deadline; what is load-bearing is that
+  an exited application is reported as *exited*, not as a deadline that expired.
 
 ### Conclusion
 

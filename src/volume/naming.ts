@@ -37,6 +37,14 @@ export function runtimeContainerName(attempt: string): string {
   return `${LABEL_PREFIX}-app-${attempt}`;
 }
 
+/**
+ * The readiness probe. Named because the harness may have to terminate it early: only the
+ * host can see that the application container has exited, and the probe has no Docker socket.
+ */
+export function runtimeReadinessContainerName(attempt: string): string {
+  return `${LABEL_PREFIX}-ready-${attempt}`;
+}
+
 export function networkName(attempt: string, role: string): string {
   return `${LABEL_PREFIX}-net-${attempt}-${role}`;
 }

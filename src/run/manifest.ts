@@ -71,6 +71,8 @@ export function usageSection(usage: UsageSection): UsageSection {
 export interface RuntimeCheckSection {
   status: RuntimeCheckResult['status'];
   stage?: RuntimeCheckResult['stage'];
+  /** Present when the stage alone would not explain the verdict. */
+  reason?: string;
   url: string;
   readiness_url: string;
   readiness_ms: number;
@@ -84,6 +86,7 @@ export function runtimeCheckSection(result: RuntimeCheckResult): RuntimeCheckSec
   return {
     status: result.status,
     stage: result.stage,
+    reason: result.reason,
     url: result.url,
     readiness_url: result.readinessUrl,
     readiness_ms: result.readiness.durationMs,

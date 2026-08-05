@@ -824,7 +824,10 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
         throw new PhaseFailure(
           'runtime',
           'verification_failed',
-          `runtime ${runtimeCheck.stage ?? 'check'} ${runtimeCheck.status}`,
+          // The reason is carried into the report so an operator learns what happened without
+          // having to open an artifact first.
+          `runtime ${runtimeCheck.stage ?? 'check'} ${runtimeCheck.status}` +
+            (runtimeCheck.reason === undefined ? '' : `: ${runtimeCheck.reason}`),
         );
       }
 
