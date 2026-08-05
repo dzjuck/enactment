@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { CODEX_PROVIDER_ALLOWLIST, CODEX_VERSION, HARNESS_VERSION } from '../config/pins.js';
+import { HARNESS_VERSION } from '../config/pins.js';
 import type { RuntimeImages } from '../docker/images.js';
 import type { BaselineArtifact } from '../verify/baseline.js';
 import type { GreenVerdict } from '../verify/green.js';
@@ -62,21 +62,26 @@ export function usageSection(usage: UsageSection): UsageSection {
 
 export interface NetworkPolicySection {
   allowed_hosts: string[];
-  /** The version the list was discovered against; §7 makes the list version-specific. */
-  codex_version: string;
+  /**
+   * The provider CLI version this list was discovered against; §7 makes the list
+   * version-specific. Named for no provider in particular, because the attempt records
+   * whichever one it ran — a Claude attempt reporting a `codex_version` is wrong evidence.
+   */
+  cli_version: string;
   network_policy_hash: string;
 }
 
+/** Both arguments are required: a default would let one provider inherit the other's. */
 export function networkPolicySection(
-  hosts: readonly string[] = CODEX_PROVIDER_ALLOWLIST,
-  codexVersion: string = CODEX_VERSION,
+  hosts: readonly string[],
+  cliVersion: string,
 ): NetworkPolicySection {
   const allowed_hosts = [...hosts];
-  const canonical = JSON.stringify({ allowed_hosts, codex_version: codexVersion });
+  const canonical = JSON.stringify({ allowed_hosts, cli_version: cliVersion });
 
   return {
     allowed_hosts,
-    codex_version: codexVersion,
+    cli_version: cliVersion,
     network_policy_hash: `sha256:${createHash('sha256').update(canonical).digest('hex')}`,
   };
 }
