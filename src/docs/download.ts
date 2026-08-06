@@ -62,44 +62,24 @@ export interface DocumentationDownloadResult {
  * whole reason there is no hand-written CONNECT client and no new image to approve. Nothing
  * from the plan is interpolated into this source: the cap and the URLs arrive as argv.
  *
- * Every rule enforced here is re-checked on the host, so a buggy or substituted container
- * cannot widen it. Each source produces exactly one NDJSON line, and the script always exits
- * 0: a non-zero exit means the harness could not run the download at all.
+ * The container fetches; the host decides. The byte cap is the only rule enforced here, because
+ * it is the only one that has to stop a response in flight — every content rule is applied on
+ * the host, where the bytes themselves are the evidence and no container claim is trusted.
+ *
+ * Each source produces exactly one NDJSON line, and the script always exits 0: a non-zero exit
+ * means the harness could not run the download at all.
  */
 export const DOWNLOADER_SOURCE = `
 const { createHash } = require('node:crypto');
-const { createWriteStream } = require('node:fs');
-const { readFile, rm } = require('node:fs/promises');
-const { Readable, Transform } = require('node:stream');
-const { pipeline } = require('node:stream/promises');
+const { Readable } = require('node:stream');
 const cap = Number(process.argv[1]);
 const urls = process.argv.slice(2);
 const emit = (record) => process.stdout.write(JSON.stringify(record) + '\\n');
 
-class SourceRuleError extends Error {
-  constructor(reason) {
-    super(reason);
-    this.reason = reason;
-  }
-}
-
-const binarySignatures = [
-  Buffer.from('%PDF-'),
-  Buffer.from([0x50, 0x4b, 0x03, 0x04]),
-  Buffer.from([0x50, 0x4b, 0x05, 0x06]),
-  Buffer.from([0x1f, 0x8b]),
-  Buffer.from('BZh'),
-  Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]),
-  Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]),
-];
-const startsWith = (body, signature) =>
-  body.length >= signature.length && body.subarray(0, signature.length).equals(signature);
-
 (async () => {
   let total = 0;
 
-  for (const [index, url] of urls.entries()) {
-    const temporary = '/tmp/documentation-source-' + String(index);
+  for (const url of urls) {
     try {
       const response = await fetch(url, { redirect: 'manual' });
 
@@ -116,57 +96,37 @@ const startsWith = (body, signature) =>
 
       if (response.body === null) throw new Error('response has no body');
 
+      // Breaking out of the iterator destroys the stream, so an oversized source stops being
+      // read rather than being read and then rejected. The cap bounds what is held here.
+      const chunks = [];
       let sourceBytes = 0;
-      const hash = createHash('sha256');
-      const meter = new Transform({
-        transform(chunk, _encoding, callback) {
-          const bytes = Buffer.from(chunk);
-          if (total + sourceBytes + bytes.length > cap) {
-            callback(new SourceRuleError('too_large'));
-            return;
-          }
-          sourceBytes += bytes.length;
-          hash.update(bytes);
-          callback(null, bytes);
-        },
-      });
-
-      await pipeline(
-        Readable.fromWeb(response.body),
-        meter,
-        createWriteStream(temporary, { flags: 'wx', mode: 0o600 }),
-      );
+      let capped = false;
+      for await (const chunk of Readable.fromWeb(response.body)) {
+        if (total + sourceBytes + chunk.length > cap) {
+          capped = true;
+          break;
+        }
+        sourceBytes += chunk.length;
+        chunks.push(chunk);
+      }
+      if (capped) {
+        emit({ url, ok: false, reason: 'too_large' });
+        continue;
+      }
       total += sourceBytes;
 
-      const body = await readFile(temporary);
-      let text;
-      try {
-        text = new TextDecoder('utf-8', { fatal: true }).decode(body);
-      } catch {
-        throw new SourceRuleError('not_utf8');
-      }
-      if (text.includes('\\0') || binarySignatures.some((signature) => startsWith(body, signature))) {
-        throw new SourceRuleError('binary_content');
-      }
-      const head = text.trimStart().slice(0, 20).toLowerCase();
-      if (head.startsWith('<!doctype html') || head.startsWith('<html')) {
-        throw new SourceRuleError('html_content');
-      }
-
+      const body = Buffer.concat(chunks);
       emit({
         url,
         ok: true,
         status: 200,
         contentType: response.headers.get('content-type'),
         bytes: sourceBytes,
-        hash: hash.digest('hex'),
+        hash: createHash('sha256').update(body).digest('hex'),
         body: body.toString('base64'),
       });
     } catch (error) {
-      if (error instanceof SourceRuleError) emit({ url, ok: false, reason: error.reason });
-      else emit({ url, ok: false, reason: 'fetch_failed', detail: String((error && error.message) || error) });
-    } finally {
-      await rm(temporary, { force: true });
+      emit({ url, ok: false, reason: 'fetch_failed', detail: String((error && error.message) || error) });
     }
   }
 })();
@@ -321,15 +281,6 @@ function rejectFailure(source: DocumentationSource, record: DownloadRecord): nev
       source.url,
       `${source.url} could not be fetched: ${String(record.detail)}`,
     );
-  }
-
-  if (reason === 'not_utf8' || reason === 'binary_content' || reason === 'html_content') {
-    const messages = {
-      not_utf8: 'is not UTF-8 text',
-      binary_content: 'is binary content',
-      html_content: 'is an HTML page',
-    } as const;
-    throw new DocumentationSourceError(reason, source.url, `${source.url} ${messages[reason]}`);
   }
 
   throw new DocumentationDownloadError(

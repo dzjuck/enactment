@@ -142,19 +142,6 @@ export async function writeBundle(
   }));
 
   const targets = entries.map((entry) => resolveStoragePath(bundleRoot, entry.path));
-  for (const [index, target] of targets.entries()) {
-    const conflict = targets.findIndex(
-      (other, otherIndex) =>
-        otherIndex < index &&
-        (other === target || other.startsWith(`${target}${sep}`) || target.startsWith(`${other}${sep}`)),
-    );
-    if (conflict !== -1) {
-      throw new DocumentationError(
-        'invalid_path',
-        `documentation path "${entries[index]?.path ?? ''}" conflicts with "${entries[conflict]?.path ?? ''}"`,
-      );
-    }
-  }
 
   await mkdir(filesDirFor(bundleRoot), { recursive: true });
   for (const [index, entry] of entries.entries()) {
