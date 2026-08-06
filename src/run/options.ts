@@ -12,6 +12,7 @@ export const CLI_USAGE = [
   '  harness prepare <plan.yml> --repo <path> --output <execution-manifest.yml>',
   '  harness run <execution-manifest.yml> --repo <path> [--artifacts <dir>]',
   '  harness cancel <execution-manifest.yml> --repo <path> [--artifacts <dir>]',
+  '  harness docs <plan.yml>',
 ].join('\n');
 
 /** Harness state locations only. Nothing here reaches the container contract. */
@@ -45,13 +46,23 @@ export interface CancelCommand extends StateLocations {
   artifactDir: string;
 }
 
-export type Command = PrepareCommand | RunCommand | CancelCommand;
+/**
+ * DESIGN.md §18: authorized before the plan is final, and writing beside the plan file, so it
+ * needs neither `--repo` nor an approval.
+ */
+export interface DocsCommand extends StateLocations {
+  kind: 'docs';
+  planFile: string;
+}
+
+export type Command = PrepareCommand | RunCommand | CancelCommand | DocsCommand;
 
 /** Which options each command accepts. An option outside its command's set is an error. */
 const ACCEPTED = {
   prepare: ['repo', 'output'],
   run: ['repo', 'artifacts'],
   cancel: ['repo', 'artifacts'],
+  docs: [],
 } as const;
 
 function stateLocations(env: NodeJS.ProcessEnv): StateLocations {
@@ -79,7 +90,7 @@ function stateLocations(env: NodeJS.ProcessEnv): StateLocations {
 export function parseCommand(argv: string[], env: NodeJS.ProcessEnv = process.env): Command {
   const [name, ...rest] = argv;
 
-  if (name !== 'prepare' && name !== 'run' && name !== 'cancel') {
+  if (name !== 'prepare' && name !== 'run' && name !== 'cancel' && name !== 'docs') {
     throw new CliUsageError(`unknown command "${name ?? ''}"\n${CLI_USAGE}`);
   }
 
@@ -102,11 +113,15 @@ export function parseCommand(argv: string[], env: NodeJS.ProcessEnv = process.en
   const [file, ...surplus] = parsed.positionals;
   if (file === undefined) {
     throw new CliUsageError(
-      `${name} needs a ${name === 'prepare' ? 'plan' : 'manifest'} file\n${CLI_USAGE}`,
+      `${name} needs a ${name === 'prepare' || name === 'docs' ? 'plan' : 'manifest'} file\n${CLI_USAGE}`,
     );
   }
   if (surplus.length > 0) {
     throw new CliUsageError(`unexpected argument "${surplus[0] ?? ''}"\n${CLI_USAGE}`);
+  }
+
+  if (name === 'docs') {
+    return { kind: 'docs', planFile: file, ...stateLocations(env) };
   }
 
   const repoPath = parsed.values.repo;

@@ -2,6 +2,21 @@ import { join } from 'node:path';
 
 import { ArtifactStore } from '../artifacts/store.js';
 import type { RuntimeImages } from '../docker/images.js';
+import { resolveRuntimeImages } from '../docker/images.js';
+import {
+  bundleRootFor,
+  contextDirFor,
+  documentationHash,
+  readProvenance,
+  verifyBundle,
+  writeBundle,
+} from '../docs/bundle.js';
+import {
+  runDocumentationDownload,
+  type DocumentationDownloadOptions,
+  type DocumentationDownloadResult,
+} from '../docs/download.js';
+import { loadPlan } from '../plan/load.js';
 import {
   ApprovalError,
   buildManifest,
@@ -13,12 +28,13 @@ import { stateDirectory } from '../state/paths.js';
 import { StateStore } from '../state/store.js';
 import { sweepHarness } from './cleanup.js';
 import { runPlan, type CoordinatorOptions, type PlanReport } from './coordinator.js';
-import type { CancelCommand, Command, PrepareCommand, RunCommand } from './options.js';
+import type { CancelCommand, Command, DocsCommand, PrepareCommand, RunCommand } from './options.js';
 
 export interface ProductionDependencies {
   sweep?: () => Promise<void>;
   resolveImages?: () => Promise<RuntimeImages>;
   coordinate?: (options: CoordinatorOptions) => Promise<PlanReport>;
+  download?: (options: DocumentationDownloadOptions) => Promise<DocumentationDownloadResult>;
 }
 
 export interface CommandResult {
@@ -171,6 +187,66 @@ async function cancel(command: CancelCommand): Promise<CommandResult> {
   }
 }
 
+/**
+ * Produce the documentation bundle a plan declares, or report the one that is already there.
+ *
+ * Idempotent and all-or-nothing: a complete, untouched bundle is reused without starting a
+ * container, and anything else — missing, edited, extra or downloaded for different sources —
+ * is an error naming the only fix. There is no partial repair, because refreshing documentation
+ * is whole-bundle deletion (DESIGN.md §18). Attempt-scoped like every non-`run` command: it
+ * labels and tears down its own resources and never performs the global startup sweep.
+ */
+async function docs(
+  command: DocsCommand,
+  dependencies: ProductionDependencies,
+): Promise<CommandResult> {
+  const { plan } = await loadPlan(command.planFile);
+  const bundleRoot = bundleRootFor(command.planFile);
+
+  if (plan.documentation === undefined) {
+    return {
+      report: {
+        documentation: null,
+        sources: [],
+        message: `${command.planFile} declares no documentation sources`,
+      },
+      exitCode: 0,
+    };
+  }
+
+  const existing = await verifyBundle(bundleRoot, plan.documentation);
+
+  const report = async (fetched: boolean, proxyRecords?: unknown[]): Promise<CommandResult> => ({
+    report: {
+      documentation: bundleRoot,
+      hash: await documentationHash(contextDirFor(bundleRoot)),
+      sources: (await readProvenance(bundleRoot)).sources.map((source) => ({
+        path: source.path,
+        url: source.url,
+        hash: source.hash,
+        bytes: source.bytes,
+        fetched,
+      })),
+      ...(proxyRecords === undefined ? {} : { proxy_records: proxyRecords }),
+    },
+    exitCode: 0,
+  });
+
+  if (existing.present) return report(false);
+
+  const download = dependencies.download ?? runDocumentationDownload;
+  const images = await (dependencies.resolveImages ?? (() => resolveRuntimeImages()))();
+  const result = await download({ sources: plan.documentation.sources, images });
+
+  const fetchedAt = new Date().toISOString();
+  await writeBundle(
+    bundleRoot,
+    result.sources.map((source) => ({ ...source, fetchedAt })),
+  );
+
+  return report(true, result.proxyRecords);
+}
+
 /** Dispatch one parsed command, turning any failure into a report and a non-zero exit. */
 export async function execute(
   command: Command,
@@ -180,6 +256,7 @@ export async function execute(
   try {
     if (command.kind === 'prepare') return await prepare(command, dependencies);
     if (command.kind === 'cancel') return await cancel(command);
+    if (command.kind === 'docs') return await docs(command, dependencies);
     return await run(command, dependencies, signal);
   } catch (error) {
     return failure(error);
