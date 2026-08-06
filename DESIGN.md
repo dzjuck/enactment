@@ -619,7 +619,8 @@ workspace does not have fails on scope validation, and the response is a plan am
 
 ```text
 step fails on a dependency-manifest change
-→ operator commits the exact package and lockfile change
+→ operator commits the exact package and lockfile change on a branch of their own,
+  created at the plan branch tip so the amendment stays a continuation
 → amended plan prepared with that commit as its base
 → approval
 → execution resumes from the amended plan's first step
@@ -1439,11 +1440,11 @@ Concretely:
 
 ```bash
 harness run <old-manifest> --repo <path>      # optional: finishes an interrupted acceptance
-harness cancel <old-manifest> --repo <path>   # releases the repository path
+harness cancel <old-manifest> --repo <path>   # releases the repository path; reports the base
 # rewrite the plan: new plan ID, remaining steps only
 harness prepare plan-r2.yml --repo <path> \
   --base ai-harness/<previous-plan-id> \
-  --output execution-manifest-r2.yml
+  --output execution-manifest-r2.yml     # --base: the cancel report's head, or its base if none
 harness run execution-manifest-r2.yml --repo <path>
 ```
 
@@ -1453,22 +1454,61 @@ its SHA at prepare time, so naming the plan branch reads the branch itself rathe
 `plans.head_commit`, which lags it when a process died mid-acceptance.
 
 Accepted history remains immutable because the amended plan never touches it. It has its own plan
-ID and therefore its own branch (§14), created at the previous revision's tip and advanced from
-there.
+ID and therefore its own branch (§14), created at the base by its first acceptance and advanced
+from there.
 
 Corrections use compensating steps. That is an authoring convention, not a mechanism: a step that
 undoes earlier work is an ordinary step of the amended plan.
 
+### Choosing the base
+
+A plan branch exists only once the plan has accepted a step (§14), so there are two cases and
+`cancel` reports which one applies by naming both the branch head and the base:
+
+* **the plan accepted at least one step** — amend from the plan branch tip,
+  `--base ai-harness/<previous-plan-id>`;
+* **the plan accepted nothing** — there is no plan branch to name. Amend from the cancelled plan's
+  own approved base, which is what it would have built on.
+
+`cancel` reads that head from the ref, not from `plans.head_commit`. The database column lags the
+branch exactly when an acceptance was interrupted between its commit and its database write — the
+same lag that makes `--base` take a commit-ish — and a discriminator that reported no head there
+would send the operator to the old base and drop an accepted commit out of the amendment.
+
+The base must contain the previous revision's tip, or the amendment is a new line of work rather
+than a continuation: the earlier commits stay reachable only from their own branch, and the newest
+branch is no longer the whole story. The harness does not enforce this. It has no concept of a
+previous revision — that is exactly what keeps this design free of revision state — so linear
+continuation is the operator's to preserve.
+
+That constraint decides where an operator's own commits go. A dependency change (§13) must be
+committed on a branch the operator creates **at the plan branch tip**, and `--base` points at it.
+Committing it on the base branch instead produces a base that does not contain the accepted work.
+It is never committed onto `ai-harness/<plan-id>`: those refs are harness-owned (§14).
+
 ### What the operator owns
 
 Trimming completed steps out of the amended plan. The harness does not diff plan revisions and
-does not know which authored step produced which commit. Leaving a completed step in reruns it,
-which fails loudly — a `code_behavior` step whose implementation already exists cannot produce
-valid RED — rather than corrupting anything.
+does not know which authored step produced which commit. `prepare` warns when a declared step ID is
+already carried by an `AI-Harness-Step` trailer reachable from the base, naming the ID and the
+commit, and the operator decides — running the manifest is still the approval.
+
+It warns rather than refuses because the two errors are not symmetric. A missed warning costs one
+agent run that then fails loudly: a `code_behavior` step whose implementation already exists cannot
+produce valid RED, and a `task` step that reproduces existing work commits nothing, which
+acceptance rejects as an empty change set. A false refusal stops legitimate work and demands a
+semantically meaningless rename — and false refusals accumulate, because a reviewed revision branch
+is eventually merged into the base branch and every step ID it carries stays reachable from there
+forever, where ordinary slugs like `persist-runs` collide across genuinely unrelated plans.
 
 Finishing an interrupted acceptance before cancelling. A candidate that was verified but never
 committed is lost when the plan is cancelled, so running the old manifest once first is worth it:
 reconciliation completes that acceptance and the commit reaches the branch.
+
+That run is unavailable in one case. When the amendment is forced by a changed policy or image
+hash, approval validation rejects the old manifest before the coordinator reconciles anything, so
+an interrupted candidate cannot be recovered and is lost with the cancel. `cancel` itself still
+works, because it validates only the plan.
 
 Keeping the old manifest file until the plan is cancelled, because `cancel` identifies a plan by
 its manifest.
@@ -1749,13 +1789,17 @@ Adds:
 * `prepare --base <commit-ish>`, resolved to a full SHA at prepare time, so an approved plan can
   build on a previous revision's plan branch instead of on the repository head;
 * the amendment procedure of §30 — cancel, rewrite, prepare from the plan branch tip, approve, run
-  — as the single answer to a blocked plan;
+  — as the single answer to a blocked plan, including the case of a plan that accepted nothing and
+  so has no branch to amend from;
+* a `base` field on the `cancel` report, and a head read from the ref rather than the database, so
+  the commit to amend from is named rather than derived;
 * step insertion, removal, reordering and rewriting, by rewriting the plan;
 * compensating steps as ordinary steps of an amended plan;
 * dependency changes (§13) and test-contract repair (§25) as amendment procedures rather than as
   protocols of their own;
-* a prepare-time guard rejecting a step ID already carried by an `AI-Harness-Step` trailer
-  reachable from the base commit, which catches an amended plan that still lists a completed step.
+* a prepare-time warning naming any step ID already carried by an `AI-Harness-Step` trailer
+  reachable from the base commit, which surfaces an amended plan that still lists a completed step
+  at the moment the operator is deciding whether to approve it.
 
 Working result:
 
