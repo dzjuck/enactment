@@ -11,6 +11,7 @@ export const PROVENANCE_FILE = 'provenance.json';
 export const INDEX_FILE = 'index.md';
 
 export type DocumentationReason =
+  | 'bundle_missing'
   | 'invalid_path'
   | 'provenance_missing'
   | 'provenance_malformed'

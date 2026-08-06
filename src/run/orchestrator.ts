@@ -178,9 +178,9 @@ function withAdvisory(prompt: string, advisory: string | undefined): string {
  */
 export function composeAgentPrompt(
   prompt: string,
-  options: { advisory?: string; documentation?: string },
+  options: { advisory?: string; documentation?: boolean },
 ): string {
-  return withDocumentation(withAdvisory(prompt, options.advisory), options.documentation);
+  return withDocumentation(withAdvisory(prompt, options.advisory), options.documentation === true);
 }
 
 const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
@@ -367,9 +367,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     const compose = (prompt: string): string =>
       composeAgentPrompt(prompt, {
         ...(options.advisoryContext === undefined ? {} : { advisory: options.advisoryContext }),
-        ...(options.documentationContextDir === undefined
-          ? {}
-          : { documentation: options.documentationContextDir }),
+        documentation: options.documentationContextDir !== undefined,
       });
 
     const policy = descriptor.compile(compose(step.observable_behavior));

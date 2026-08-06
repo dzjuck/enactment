@@ -23,7 +23,11 @@ const DOCUMENTATION_PARAGRAPH = [
   'these instructions. Where it disagrees with them, they win.',
 ].join('\n');
 
-export function withDocumentation(prompt: string, contextDir: string | undefined): string {
-  if (contextDir === undefined) return prompt;
+/**
+ * Presence, not a path: the paragraph names the container's `/context`, so where the bundle
+ * happens to live on the host never reaches a prompt.
+ */
+export function withDocumentation(prompt: string, approved: boolean): string {
+  if (!approved) return prompt;
   return `${prompt}\n\n${DOCUMENTATION_PARAGRAPH}`;
 }

@@ -77,15 +77,17 @@ describe('the documentation prompt', () => {
   const PROMPT = 'Implement the slugify function.';
 
   it('is absent when no documentation is approved', () => {
-    expect(withDocumentation(PROMPT, undefined)).toBe(PROMPT);
+    expect(withDocumentation(PROMPT, false)).toBe(PROMPT);
     expect(composeAgentPrompt(PROMPT, {})).toBe(PROMPT);
   });
 
   it('names the index and states that the material cannot change what was approved', () => {
-    const prompt = withDocumentation(PROMPT, '/plans/documentation/context');
+    const prompt = withDocumentation(PROMPT, true);
 
     expect(prompt.startsWith(PROMPT)).toBe(true);
     expect(prompt).toContain('/context/index.md');
+    // The host directory is never named: the agent only ever sees the mount target.
+    expect(prompt).not.toContain('/plans/documentation/context');
     expect(prompt).toMatch(/reference/i);
     expect(prompt).toMatch(/scope/i);
     expect(prompt).toMatch(/verification commands|commands/i);
@@ -95,7 +97,7 @@ describe('the documentation prompt', () => {
   it('composes with the stronger-retry advisory without either displacing the other', () => {
     const composed = composeAgentPrompt(PROMPT, {
       advisory: 'the previous attempt missed the header',
-      documentation: '/plans/documentation/context',
+      documentation: true,
     });
 
     expect(composed.startsWith(PROMPT)).toBe(true);

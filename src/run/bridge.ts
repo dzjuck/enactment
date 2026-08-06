@@ -4,7 +4,7 @@ import { execa } from 'execa';
 
 import { ArtifactStore } from '../artifacts/store.js';
 import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
-import { bundleRootFor, contextDirFor, verifyBundle } from '../docs/bundle.js';
+import { bundleRootFor, contextDirFor, DocumentationError, verifyBundle } from '../docs/bundle.js';
 import { idempotencyKey } from '../git/idempotency.js';
 import { loadPlan } from '../plan/load.js';
 import type { Plan, PlanStep } from '../plan/schema.js';
@@ -87,12 +87,20 @@ export async function runSinglePlanStep(
     const { plan, hash: planHash } = await loadPlan(options.planFile);
     const step = singlePlanStep(plan);
     // No approved manifest on this path, so the bundle beside the plan is verified here
-    // instead. Production takes the same directory from `validateManifest`.
-    const bundleRoot = bundleRootFor(options.planFile);
-    const documentationContextDir =
-      plan.documentation !== undefined && (await verifyBundle(bundleRoot, plan.documentation)).present
-        ? contextDirFor(bundleRoot)
-        : undefined;
+    // instead. Production takes the same directory from `validateManifest`. A declared bundle
+    // that is not there stops the run: an agent that silently gets no `/context` is a step
+    // running against different inputs than the plan describes.
+    let documentationContextDir: string | undefined;
+    if (plan.documentation !== undefined) {
+      const bundleRoot = bundleRootFor(options.planFile);
+      if (!(await verifyBundle(bundleRoot, plan.documentation)).present) {
+        throw new DocumentationError(
+          'bundle_missing',
+          `${options.planFile} declares documentation but ${bundleRoot} does not exist; run "harness docs ${options.planFile}" first`,
+        );
+      }
+      documentationContextDir = contextDirFor(bundleRoot);
+    }
     const parentCommit = await git(options.repoPath, ['rev-parse', 'HEAD']);
     const baseBranch = await git(options.repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
     // One immutable image set for the whole run: every container is started from it, and the
