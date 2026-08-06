@@ -39,7 +39,20 @@ async function storedToken(): Promise<{ file: string; token: string }> {
   return { file, token: await loadClaudeToken(file) };
 }
 
-function run(attempt: string, token: string, mode: string, events = cannedClaudeEvents()) {
+/**
+ * A budget generous enough that a loaded daemon cannot turn a completed run into a timeout.
+ * It is a ceiling, not a wait: only the cases that deliberately hang ever reach it.
+ */
+const COMPLETES_SECONDS = 60;
+const HANGS_SECONDS = 2;
+
+function run(
+  attempt: string,
+  token: string,
+  mode: string,
+  events = cannedClaudeEvents(),
+  timeoutSeconds = COMPLETES_SECONDS,
+) {
   return runAuthenticatedClaudeAgent({
     attempt,
     token,
@@ -50,7 +63,7 @@ function run(attempt: string, token: string, mode: string, events = cannedClaude
     network: 'none',
     env: { STUB_CLAUDE_MODE: mode, STUB_CLAUDE_EVENTS: events },
     mounts: [],
-    timeoutSeconds: 2,
+    timeoutSeconds,
     graceSeconds: 1,
     artifactDir: join(dirs[0] ?? tmpdir(), `artifacts-${attempt}`),
     images,
@@ -61,7 +74,7 @@ describe('authenticated Claude adapter', () => {
   it('loads the token through the fixed launcher without exposing it in Docker metadata', async () => {
     const { token } = await storedToken();
     const attempt = newAttemptId();
-    const pending = run(attempt, token, 'hang');
+    const pending = run(attempt, token, 'hang', cannedClaudeEvents(), HANGS_SECONDS);
 
     let containers: string[] = [];
     for (let count = 0; count < 30 && containers.length === 0; count += 1) {
@@ -78,15 +91,18 @@ describe('authenticated Claude adapter', () => {
   });
 
   it.each([
-    ['success', 'events', cannedClaudeEvents(), 'completed'],
-    ['failure', 'provider-error', '', 'failed'],
-    ['timeout', 'hang', '', 'timeout'],
-    ['parse error', 'events', 'not-json', 'throws'],
-  ])('deletes the auth volume after %s', async (_label, mode, events, expected) => {
+    ['success', 'events', cannedClaudeEvents(), 'completed', COMPLETES_SECONDS],
+    ['failure', 'provider-error', '', 'failed', COMPLETES_SECONDS],
+    // The only row that spends its budget, so it is the only one that keeps a short one.
+    ['timeout', 'hang', '', 'timeout', HANGS_SECONDS],
+    ['parse error', 'events', 'not-json', 'throws', COMPLETES_SECONDS],
+  ])('deletes the auth volume after %s', async (_label, mode, events, expected, seconds) => {
     const { file, token } = await storedToken();
     const before = await readFile(file);
     const attempt = newAttemptId();
-    const outcome = await run(attempt, token, mode, events).catch((cause: unknown) => cause);
+    const outcome = await run(attempt, token, mode, events, seconds).catch(
+      (cause: unknown) => cause,
+    );
 
     if (expected === 'throws') expect(outcome).toBeInstanceOf(Error);
     else expect(outcome).toMatchObject({ status: expected });

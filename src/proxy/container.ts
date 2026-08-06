@@ -1,6 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 
 import { execa } from 'execa';
 
@@ -56,14 +55,74 @@ export function proxyEnvironment(handle: ProxyHandle): Record<string, string> {
   };
 }
 
-async function waitUntilListening(name: string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const logs = await containerLogs(name);
-    if (logs.stderr.includes('proxy listening')) return;
-    await delay(50);
-  }
+/** What `src/proxy/main.ts` prints once it is accepting connections. */
+export const PROXY_READY_MARKER = 'proxy listening';
 
-  throw new ProxyContainerError(`proxy container ${name} did not start listening`);
+export const PROXY_READY_TIMEOUT_SECONDS = 30;
+
+/**
+ * Wait for the proxy to announce itself, attached to its log stream.
+ *
+ * The earlier shape polled `containerLogs` up to 100 times at 50 ms. Each poll spawned a whole
+ * `docker logs` process, so the real interval was several times the nominal one, and the cost
+ * was paid twice per tests-first step — once per agent phase. Following the stream costs one
+ * process for the whole wait, and notices the marker the moment it is written.
+ *
+ * The marker is matched against everything received so far rather than per chunk, because a
+ * stream boundary can fall inside it.
+ */
+export async function waitUntilListening(
+  name: string,
+  timeoutSeconds: number = PROXY_READY_TIMEOUT_SECONDS,
+): Promise<void> {
+  const child = execa('docker', ['logs', '--follow', name], { reject: false, buffer: false });
+
+  return new Promise<void>((resolve, reject) => {
+    let seen = '';
+    let settled = false;
+    let ended = 0;
+
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      child.kill();
+      if (error === undefined) resolve();
+      else reject(error);
+    };
+
+    const deadline = setTimeout(() => {
+      finish(
+        new ProxyContainerError(
+          `proxy container ${name} did not start listening within ${String(timeoutSeconds)}s`,
+        ),
+      );
+    }, timeoutSeconds * 1000);
+
+    const consume = (chunk: Buffer | string): void => {
+      seen += String(chunk);
+      if (seen.includes(PROXY_READY_MARKER)) finish();
+    };
+
+    // Both streams: the marker is on stderr today, and a wait that only ever watched one of
+    // them would turn a harmless logging change into a 30-second hang.
+    for (const stream of [child.stdout, child.stderr]) {
+      stream?.on('data', consume);
+      stream?.on('end', () => {
+        ended += 1;
+        // Both streams closed without the marker: the container is gone, and waiting out the
+        // deadline would only delay a failure that has already happened.
+        if (ended === 2) {
+          finish(
+            new ProxyContainerError(
+              `proxy container ${name} exited without reporting that it was listening`,
+            ),
+          );
+        }
+      });
+      stream?.on('error', (error: Error) => finish(error));
+    }
+  });
 }
 
 async function connectNetwork(network: string, container: string): Promise<void> {

@@ -315,6 +315,30 @@ describe('an application that exits before it is ready', () => {
     expect(recorder.events).toContain(`terminate:${runtimeReadinessContainerName(ATTEMPT)}`);
   });
 
+  it('keeps trying to stop the probe until the container it names exists', async () => {
+    const { probe, release } = heldProbe();
+    let attempts = 0;
+
+    const result = await check({
+      isRunning: async () => false,
+      terminate: async () => {
+        attempts += 1;
+        // `docker run` creates its container asynchronously, so an early kill finds nothing
+        // to kill and Docker reports that as success. One attempt is therefore not enough:
+        // giving up after it leaves the probe polling a dead application for its whole budget.
+        if (attempts >= 3) release(ok({ exitCode: 137 }));
+      },
+      run: async (spec, options) => {
+        recorder.ran.push({ spec, options });
+        return recorder.ran.length === 1 ? probe : ok();
+      },
+    });
+
+    expect(attempts).toBeGreaterThanOrEqual(3);
+    expect(result.status).toBe('fail');
+    expect(result.readiness.applicationExited).toBe(true);
+  });
+
   it('still captures the application logs that explain why it exited', async () => {
     const { probe, release } = heldProbe();
 
@@ -352,6 +376,22 @@ describe('an application that exits before it is ready', () => {
     expect(result.stage).toBe('readiness');
     expect(result.readiness.applicationExited).toBe(true);
     expect(result.readiness.status).toBe('timeout');
+  });
+
+  /**
+   * The watcher and the probe race by construction. A probe that already answered has settled
+   * the question, so a liveness poll that lands afterwards must not overturn it.
+   */
+  it('does not overturn a readiness check the probe already passed', async () => {
+    const result = await check({ isRunning: async () => false });
+
+    expect(result.status).toBe('pass');
+    expect(result.stage).toBeUndefined();
+    expect(result.reason).toBeUndefined();
+    expect(result.readiness.applicationExited).toBeUndefined();
+    // Readiness passed, so the behavioral commands still run; if the application died after
+    // answering, that is their failure to report, with the exit in application.log.
+    expect(result.commands).toHaveLength(2);
   });
 
   it('records the reason in runtime.json', async () => {

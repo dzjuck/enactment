@@ -218,11 +218,21 @@ function watchApplication(
       // Recorded before the kill is attempted: the application is gone whether or not the
       // probe can be stopped early.
       exited = true;
-      try {
-        await terminate(probeContainer);
-      } catch {
-        // Deliberately swallowed. The deadline is the backstop, and a failure to shorten a
-        // wait is not a fact about the code under test.
+
+      // Retried until the probe actually settles, not attempted once. `docker run` creates
+      // its container asynchronously, so a kill issued while the application is crashing on
+      // startup can arrive before there is anything to kill — and Docker reports removing a
+      // container that does not exist as success. Measured: a single attempt let the probe
+      // poll a dead application for its full 60-second budget on a loaded daemon.
+      while (!settled()) {
+        try {
+          await terminate(probeContainer);
+        } catch {
+          // Deliberately swallowed. The deadline is the backstop, and a failure to shorten a
+          // wait is not a fact about the code under test.
+        }
+        if (settled()) return;
+        await delay(APPLICATION_POLL_INTERVAL_MS);
       }
       return;
     }
@@ -332,7 +342,11 @@ export async function runRuntimeCheck(
       }
       await watch.done;
 
-      const applicationExited = watch.exited();
+      // Only when readiness did *not* succeed. The watcher and the probe race by
+      // construction — a poll issued before the probe settled can land after it — so an
+      // application that answered and then exited would otherwise have its passing readiness
+      // check overturned by the liveness poll that followed it.
+      const applicationExited = watch.exited() && readinessRun.exitCode !== 0;
       const readiness: RuntimeReadinessResult = {
         url: readinessUrl,
         exitCode: readinessRun.exitCode,

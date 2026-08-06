@@ -22,6 +22,18 @@ export function dependencyVolumeName(attempt: string, phase: string): string {
   return `${LABEL_PREFIX}-deps-${attempt}-${phase}`;
 }
 
+/**
+ * The attempt's seeded dependency tree, cloned once per phase.
+ *
+ * Attempt-scoped rather than cache-key-scoped: a template shared across attempts would be a
+ * long-lived resource outside the label sweep, and two runs with the same cache key would race
+ * to seed it. Seeding once per attempt keeps the existing ownership model and still replaces
+ * every extraction after the first with a copy inside the VM.
+ */
+export function dependencyTemplateVolumeName(attempt: string): string {
+  return `${LABEL_PREFIX}-deps-template-${attempt}`;
+}
+
 export type AuthProvider = 'codex' | 'claude';
 
 /** Provider-scoped credential volume. A diagnosis can coexist with a Codex attempt. */

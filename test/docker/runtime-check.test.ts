@@ -254,12 +254,10 @@ describe('runtime check', () => {
   it(
     'failure control: an application that exits immediately fails fast, with its reason logged',
     async () => {
-      const started = Date.now();
       const { result, artifactDir } = await check({
         'src/server.js': CRASHING_SERVER,
         'harness-checks/orders.js': CHECKER,
       });
-      const elapsed = Date.now() - started;
 
       expect(result.status).toBe('fail');
       expect(result.stage).toBe('readiness');
@@ -270,7 +268,8 @@ describe('runtime check', () => {
       );
 
       // The point of the fix: a dead application is not worth a 60-second readiness budget.
-      expect(elapsed).toBeLessThan(RUNTIME_READINESS_TIMEOUT_SECONDS * 1000);
+      // Measured on the probe's own duration, so a loaded daemon cannot make it lie.
+      expect(result.readiness.durationMs).toBeLessThan(RUNTIME_READINESS_TIMEOUT_SECONDS * 1000);
     },
     300_000,
   );

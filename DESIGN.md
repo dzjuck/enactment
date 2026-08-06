@@ -1908,6 +1908,17 @@ Established against Claude Code `2.1.221` on OrbStack `linux/arm64` before routi
   terminates the probe the moment it exits. Measured: 61 s → under 1 s. The kill is an
   optimization and the container ladder remains the real deadline; what is load-bearing is that
   an exited application is reported as *exited*, not as a deadline that expired.
+* **Killing a container that does not exist yet reports success.** `docker run` creates its
+  container asynchronously, so a kill issued while the application is crashing on startup can
+  arrive before there is anything to kill — and Docker calls removing an absent container
+  success, so the attempt looks like it worked. A single attempt therefore let the probe run its
+  whole budget on a loaded daemon while the fast path silently did nothing; the kill is retried
+  until the probe actually settles.
+* **A wall-clock assertion is not a latency assertion.** The first version of the fast-fail test
+  measured the whole pipeline run against the readiness budget, so it passed on an idle machine
+  and failed under load for reasons unrelated to what it claimed. Bounding the *recorded*
+  readiness duration is the same claim without the daemon's load in it — and it is what caught
+  the race above.
 
 ### Conclusion
 

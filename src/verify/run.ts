@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { StoredArtifact } from '../artifacts/store.js';
-import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
+import { cloneDependencyVolume, createDependencyVolume, dependencyMount } from '../deps/volume.js';
 import type { Mount } from '../docker/args.js';
 import type { RuntimeImages } from '../docker/images.js';
 import { runContainer, type RunStatus } from '../docker/run.js';
@@ -47,6 +47,12 @@ export interface VerifierWorkspaceOptions {
   /** The immutable implementation snapshot — the only acceptance candidate (§15). */
   snapshot: StoredArtifact;
   dependencySnapshot: Buffer;
+  /**
+   * The attempt's seeded dependency template. When present the phase volume is cloned from
+   * it rather than extracted again, which is the same tree by a cheaper route; without it the
+   * snapshot is extracted, which is what a caller holding only a snapshot gets.
+   */
+  dependencyTemplate?: string;
   images: RuntimeImages;
   /** Injectable acquisition steps, so each stage of the rollback window is testable. */
   createDependencies?: (
@@ -80,7 +86,11 @@ export async function withVerifierWorkspace<T>(
   options: VerifierWorkspaceOptions,
   use: (workspace: VerifierWorkspace) => Promise<T>,
 ): Promise<T> {
-  const acquireDependencies = options.createDependencies ?? acquireVerifierDependencies;
+  const acquireDependencies =
+    options.createDependencies ??
+    (options.dependencyTemplate === undefined
+      ? acquireVerifierDependencies
+      : cloneVerifierDependencies(options.dependencyTemplate));
   const restore = options.restore ?? restoreWorkspace;
   const release = options.removeVolume ?? removeVolume;
 
@@ -299,6 +309,14 @@ export async function runVerification(
   await writeVerificationArtifact(options.artifactDir, result, options.redact);
 
   return result;
+}
+
+/** Clones the attempt's template instead of re-extracting its snapshot. */
+function cloneVerifierDependencies(
+  template: string,
+): (scope: string, snapshot: Buffer, images: RuntimeImages, owner: string) => Promise<string> {
+  return (scope, _snapshot, images, owner) =>
+    cloneDependencyVolume(template, scope, 'verifier', images, owner);
 }
 
 /** Adapts the dependency-volume signature to the acquisition step's argument order. */

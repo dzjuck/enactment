@@ -12,7 +12,11 @@ import { authMount, copyBackAuth, createAuthVolume } from '../auth/volume.js';
 import { claudeTokenSecrets, loadClaudeToken } from '../auth/claude-token.js';
 import { dependencyCacheKey, installCommand, lockfileHash } from '../deps/cache-key.js';
 import { DependencyCache, ensureDependencySnapshot } from '../deps/setup.js';
-import { createDependencyVolume, dependencyMount } from '../deps/volume.js';
+import {
+  cloneDependencyVolume,
+  createDependencyTemplate,
+  dependencyMount,
+} from '../deps/volume.js';
 import { manifestFromTar, sourceDiff } from '../diff/source-diff.js';
 import { DiffValidationError, validateChanges } from '../diff/validate.js';
 import type { RuntimeImages } from '../docker/images.js';
@@ -321,10 +325,16 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     teardown.push(() => removeVolume(workspace));
     await initSyntheticGit(workspace, images, attemptLabels(attempt, 'synthetic-git'));
 
-    const agentDependencies = await createDependencyVolume(
+    // Seeded once and cloned per phase. The tar is a host buffer, so extracting it costs a
+    // transfer across the Docker API; every phase after the first now copies inside the VM
+    // instead. Each phase still gets its own pristine volume, which is what §12 requires.
+    const dependencyTemplate = await createDependencyTemplate(attempt, dependencySnapshot, images);
+    teardown.push(() => removeVolume(dependencyTemplate));
+
+    const agentDependencies = await cloneDependencyVolume(
+      dependencyTemplate,
       attempt,
       'agent',
-      dependencySnapshot,
       images,
     );
     teardown.push(() => removeVolume(agentDependencies));
@@ -393,6 +403,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
             attempt,
             snapshot: preAgent,
             dependencySnapshot,
+            dependencyTemplate,
             commands: [],
             testCommand: step.verification.test_command,
             artifactDir: join(baselineDir, `attempt-${String(baselineAttempt)}`),
@@ -462,15 +473,23 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
             let outcome: { value: Awaited<ReturnType<typeof descriptor.run>> } | { error: unknown };
 
             try {
-              await providerSmokeTest({
-                url: `https://${descriptor.allowlist[0] ?? ''}/`,
-                network: networks.egress ?? '',
-                env: proxied,
-                timeoutSeconds: timeouts.connectivity_smoke_seconds,
-                images,
-                provider: descriptor.provider,
-                labels: attemptLabels(attempt, 'connectivity'),
-              });
+              // The smoke test asks whether the *provider* is reachable. When the provider
+              // has been substituted there is no provider to reach, and asking anyway made
+              // the stubbed suites depend on live egress to chatgpt.com — twice per
+              // tests-first step. `providerSmokeTest` itself stays covered against a local
+              // origin in `test/docker/smoke-timeout.test.ts`, and injection is test-only and
+              // unreachable from the CLI (see `RunInjection`).
+              if (injectedImage === undefined) {
+                await providerSmokeTest({
+                  url: `https://${descriptor.allowlist[0] ?? ''}/`,
+                  network: networks.egress ?? '',
+                  env: proxied,
+                  timeoutSeconds: timeouts.connectivity_smoke_seconds,
+                  images,
+                  provider: descriptor.provider,
+                  labels: attemptLabels(attempt, 'connectivity'),
+                });
+              }
 
               await phase(agentPhase);
               outcome = {
@@ -619,6 +638,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
           attempt,
           snapshot: testsRun.snapshot,
           dependencySnapshot,
+          dependencyTemplate,
           commands: [],
           testCommand: step.verification.test_command,
           artifactDir: redDir,
@@ -714,6 +734,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
           attempt,
           snapshot: implementation,
           dependencySnapshot,
+          dependencyTemplate,
           commands: [],
           testCommand: step.verification.test_command,
           artifactDir: greenDir,
@@ -760,7 +781,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     // One acquisition for both checks: a static command may build exactly what
     // `start_command` launches, and a second restore would discard that build output.
     const verified = await withVerifierWorkspace(
-      { attempt, snapshot: implementation, dependencySnapshot, images },
+      { attempt, snapshot: implementation, dependencySnapshot, dependencyTemplate, images },
       async (workspace) => {
         const commands = await runWorkspaceCommands({
           attempt,

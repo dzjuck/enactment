@@ -434,12 +434,10 @@ describe('runtime-gated task step', () => {
     'names the reason when the application exits before it is ready',
     async () => {
       const plan = await taskPlan({ runtime: {} });
-      const started = Date.now();
       const { report, artifacts } = await run(
         plan,
         taskEnv("console.error('cannot bind: configuration missing');\nprocess.exit(1);\n"),
       );
-      const elapsed = Date.now() - started;
 
       expect(report.status).toBe('failed');
       expect(report.failedPhase).toBe('runtime');
@@ -448,7 +446,7 @@ describe('runtime-gated task step', () => {
       expect(report.message).toMatch(/exited/i);
 
       const manifest = JSON.parse(await readFile(join(artifacts, 'run-manifest.json'), 'utf8')) as {
-        runtime_check?: { status: string; stage?: string; reason?: string };
+        runtime_check?: { status: string; stage?: string; reason?: string; readiness_ms: number };
       };
       expect(manifest.runtime_check?.status).toBe('fail');
       expect(manifest.runtime_check?.stage).toBe('readiness');
@@ -458,8 +456,12 @@ describe('runtime-gated task step', () => {
         await readFile(join(artifacts, RUNTIME_ARTIFACT_DIR, APPLICATION_LOG_FILE), 'utf8'),
       ).toContain('cannot bind: configuration missing');
 
-      // A dead application must not cost the whole readiness budget.
-      expect(elapsed).toBeLessThan(RUNTIME_READINESS_TIMEOUT_SECONDS * 1000);
+      // A dead application must not cost the whole readiness budget. Measured on the recorded
+      // readiness duration, not on the run's wall clock: the latter includes the agent, setup
+      // and verification phases, so under a loaded daemon it says nothing about this claim.
+      expect(manifest.runtime_check?.readiness_ms).toBeLessThan(
+        RUNTIME_READINESS_TIMEOUT_SECONDS * 1000,
+      );
     },
     900_000,
   );
@@ -485,6 +487,23 @@ describe('runtime-gated task step', () => {
       } finally {
         await execa('docker', ['rm', '--force', application], { reject: false });
       }
+    },
+    900_000,
+  );
+
+  it(
+    'reaches no provider when the agent is a stub, so the suite needs no internet',
+    async () => {
+      const plan = await taskPlan({ runtime: {} });
+      const { report, artifacts } = await run(plan, taskEnv());
+
+      expect(report.status).toBe('succeeded');
+
+      // The proxy records every CONNECT it is asked for. A stubbed provider is not a provider,
+      // so nothing should have been asked for at all — the smoke test is the only caller, and
+      // its live TLS call to chatgpt.com made this suite quietly depend on the network.
+      const records = await readFile(join(artifacts, 'proxy-records.jsonl'), 'utf8');
+      expect(records.trim()).toBe('');
     },
     900_000,
   );

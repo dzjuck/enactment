@@ -290,6 +290,9 @@ describe('phases execute the supplied runtime image set', () => {
       egressNetwork: 'egress',
       outwardNetwork: 'outward',
       images: IMAGES,
+      // This suite asserts which image each phase runs, not how readiness is detected;
+      // `waitUntilListening` has its own suite in `proxy-readiness.test.ts`.
+      waitReady: () => Promise.resolve(),
     });
 
     expect(imagesRun()).toEqual([IMAGES.proxy.id]);
@@ -334,6 +337,7 @@ describe('phases execute the supplied runtime image set', () => {
       egressNetwork: 'egress',
       outwardNetwork: 'outward',
       images: IMAGES,
+      waitReady: () => Promise.resolve(),
     });
     await providerSmokeTest({
       url: 'https://chatgpt.com/',
