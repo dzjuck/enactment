@@ -211,10 +211,81 @@ const step = z
   .looseObject({ type: stepType })
   .pipe(z.discriminatedUnion('type', [taskStep, codeBehaviorStep]));
 
+/**
+ * DESIGN.md §18: a hand-authored plan declares exact source URLs. The block is part of the plan's
+ * raw bytes, so approving the plan approves the sources; the downloader derives its exact-hostname
+ * proxy allowlist from these URLs.
+ */
+const documentationUrl = z.string().superRefine((value, ctx) => {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    ctx.addIssue({ code: 'custom', message: `"${value}" is not an absolute URL` });
+    return;
+  }
+
+  if (url.protocol !== 'https:') {
+    ctx.addIssue({ code: 'custom', message: `"${value}" must use https` });
+  }
+  if (url.username !== '' || url.password !== '') {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'must not carry embedded credentials; documentation sources are unauthenticated',
+    });
+  }
+  if (url.hash !== '') {
+    ctx.addIssue({ code: 'custom', message: `"${value}" must not carry a fragment` });
+  }
+});
+
+const documentationPath = z
+  .string()
+  .min(1, 'must not be empty')
+  .superRefine((value, ctx) => {
+    if (value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `"${value}" is an absolute path; documentation paths are bundle-relative`,
+      });
+    }
+    if (value.split(/[\\/]/).includes('..')) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `"${value}" traverses out of the bundle with ".."`,
+      });
+    }
+  });
+
+const documentation = z
+  .strictObject({
+    sources: z
+      .array(z.strictObject({ url: documentationUrl, path: documentationPath }))
+      .min(1, 'must declare at least one source'),
+  })
+  .superRefine((value, ctx) => {
+    const seen = new Set<string>();
+
+    for (const [index, source] of value.sources.entries()) {
+      if (seen.has(source.path)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['sources', index, 'path'],
+          message: `duplicate documentation path "${source.path}"`,
+        });
+      }
+      seen.add(source.path);
+    }
+  });
+
+export type DocumentationConfig = z.infer<typeof documentation>;
+export type DocumentationSource = DocumentationConfig['sources'][number];
+
 export const planSchema = z
   .strictObject({
     version: z.literal(1),
     id: slug,
+    documentation: documentation.optional(),
     // Position is the dependency chain: step N depends on step N-1. M3 runs one step at a
     // time, so nothing more than an order is needed.
     steps: z.array(step).min(1, 'must declare at least one step'),

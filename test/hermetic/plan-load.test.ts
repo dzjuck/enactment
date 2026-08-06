@@ -415,6 +415,119 @@ describe('loadPlan', () => {
     });
   });
 
+  describe('documentation', () => {
+    function documentationDocument(documentation: unknown): Record<string, unknown> {
+      return { ...planDocument('low'), documentation };
+    }
+
+    it('loads a documentation block with every source preserved exactly', async () => {
+      const { plan } = await loadPlan(fixture('documentation.yml'));
+
+      expect(plan.documentation).toEqual({
+        sources: [
+          { url: 'https://open-meteo.com/en/docs/openapi.json', path: 'open-meteo/openapi.json' },
+          { url: 'https://example.com/api/reference.md', path: 'example/reference.md' },
+        ],
+      });
+    });
+
+    it('leaves documentation undefined on plans that declare none', async () => {
+      const { plan } = await loadPlan(fixture('valid.yml'));
+
+      expect(plan.documentation).toBeUndefined();
+      expect(plan).not.toHaveProperty('documentation');
+    });
+
+    it('rejects an empty source list', async () => {
+      const error = await loadDocumentError(documentationDocument({ sources: [] }));
+
+      expect(error.message).toContain('documentation.sources');
+      expect(error.message).toMatch(/at least one source/i);
+    });
+
+    it('rejects an unknown key inside documentation', async () => {
+      const error = await loadDocumentError(
+        documentationDocument({
+          sources: [{ url: 'https://example.com/a.json', path: 'a.json' }],
+          max_age_days: 30,
+        }),
+      );
+
+      expect(error.message).toContain('documentation');
+      expect(error.message).toContain('max_age_days');
+    });
+
+    it.each(['headers', 'auth', 'follow_redirects'])(
+      'rejects the unsupported %s key inside a source',
+      async (key) => {
+        const error = await loadDocumentError(
+          documentationDocument({
+            sources: [{ url: 'https://example.com/a.json', path: 'a.json', [key]: 'anything' }],
+          }),
+        );
+
+        expect(error.message).toContain('documentation.sources[0]');
+        expect(error.message).toContain(key);
+      },
+    );
+
+    it.each([
+      ['a plain http URL', 'http://example.com/a.json', /https/i],
+      ['embedded credentials', 'https://user:pass@example.com/a.json', /credential/i],
+      ['a fragment', 'https://example.com/a.json#section', /fragment/i],
+      ['a non-URL string', 'not a url', /url/i],
+    ])('rejects %s', async (_label, url, message) => {
+      const error = await loadDocumentError(documentationDocument({ sources: [{ url, path: 'a.json' }] }));
+
+      expect(error.message).toContain('documentation.sources[0].url');
+      expect(error.message).toMatch(message);
+    });
+
+    it.each([
+      ['an absolute path', '/etc/passwd', /absolute/i],
+      ['a traversing path', '../outside/a.json', /\.\./],
+      ['an empty path', '', /empty/i],
+    ])('rejects %s', async (_label, path, message) => {
+      const error = await loadDocumentError(
+        documentationDocument({ sources: [{ url: 'https://example.com/a.json', path }] }),
+      );
+
+      expect(error.message).toContain('documentation.sources[0].path');
+      expect(error.message).toMatch(message);
+    });
+
+    it('rejects two sources storing to the same path', async () => {
+      const error = await loadDocumentError(
+        documentationDocument({
+          sources: [
+            { url: 'https://example.com/a.json', path: 'api/spec.json' },
+            { url: 'https://example.com/b.json', path: 'api/spec.json' },
+          ],
+        }),
+      );
+
+      expect(error.message).toContain('documentation.sources[1].path');
+      expect(error.message).toMatch(/duplicate/i);
+    });
+
+    it('covers documentation values in the plan hash', async () => {
+      const base = documentationDocument({
+        sources: [{ url: 'https://example.com/a.json', path: 'a.json' }],
+      });
+      const changedUrl = documentationDocument({
+        sources: [{ url: 'https://example.com/b.json', path: 'a.json' }],
+      });
+      const changedPath = documentationDocument({
+        sources: [{ url: 'https://example.com/a.json', path: 'b.json' }],
+      });
+
+      const baseHash = (await loadPlan(await writeDocument(base))).hash;
+
+      expect((await loadPlan(await writeDocument(changedUrl))).hash).not.toBe(baseHash);
+      expect((await loadPlan(await writeDocument(changedPath))).hash).not.toBe(baseHash);
+    });
+  });
+
   describe('final_verification', () => {
     it('requires the section', async () => {
       const error = await loadError('missing-final-verification.yml');

@@ -1,0 +1,23 @@
+version: 1
+id: documentation-plan
+documentation:
+  sources:
+    - url: https://open-meteo.com/en/docs/openapi.json
+      path: open-meteo/openapi.json
+    - url: https://example.com/api/reference.md
+      path: example/reference.md
+steps:
+  - type: task
+    complexity: low
+    risk: standard
+    id: call-forecast
+    observable_behavior: |
+      Fetch a forecast from the documented API.
+    implementation_paths:
+      - src/forecast.js
+    verification:
+      commands:
+        - ["npx", "--no-install", "vitest", "run"]
+final_verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]
