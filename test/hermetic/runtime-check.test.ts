@@ -583,6 +583,23 @@ describe('runtime cleanup failures', () => {
     expect(result.cleanupError).toContain('container removal refused');
   });
 
+  it('keeps a failing verdict when the network leaks with the container', async () => {
+    // The realistic pair: a container that could not be removed is what still holds an
+    // endpoint on the network, so the network cannot be removed either.
+    dockerFailure.match = 'network rm';
+    dockerFailure.stderr = 'network has active endpoints';
+
+    const result = await check({
+      run: runs([ok(), ok({ exitCode: 4 })]),
+      removeContainer: () => Promise.reject(new Error('container removal refused')),
+    });
+
+    expect(result.status).toBe('fail');
+    expect(result.stage).toBe('behavioral');
+    expect(result.cleanupError).toContain('container removal refused');
+    expect(result.cleanupError).toContain('active endpoints');
+  });
+
   it('keeps an infrastructure failure primary when cleanup also fails', async () => {
     const failure = await check({
       run: () => Promise.reject(new Error('cannot create container')),

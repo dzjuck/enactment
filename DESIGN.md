@@ -1006,9 +1006,11 @@ host — the probe container has no Docker socket and cannot — ends the probe 
 rather than waiting out the budget.
 
 Static and runtime verification share one disposable workspace and dependency volume, so a static
-command may build what `start_command` launches. The application and the checkers receive no
-provider authentication, no proxy and no egress, and nothing they write can be accepted:
-acceptance uses the pre-verification implementation snapshot.
+command may build what `start_command` launches. The runtime containers mount both read-only,
+because a checker the application can rewrite before it runs verifies nothing; `/tmp` is the
+writable tmpfs, and an application that needs a path to write must use it. The application and the
+checkers receive no provider authentication, no proxy and no egress, and nothing they write can be
+accepted: acceptance uses the pre-verification implementation snapshot.
 
 ---
 
@@ -1895,7 +1897,17 @@ Established against Claude Code `2.1.221` on OrbStack `linux/arm64` before routi
 * **A failing verdict has to survive a failed teardown.** A leaked container must never erase the
   `verification_failed` a step is actually about, so a failing runtime check returns its verdict
   with the cleanup error recorded beside it. On the passing path the leak still fails the step:
-  a run that leaked is not a successful run.
+  a run that leaked is not a successful run. The rule has to hold for the *whole* teardown, not
+  just the container: the phase-network scope removes its network after the check returns and
+  throws if it cannot, which put the verdict back at risk in exactly the case that produces both
+  failures at once — the container that could not be removed is what still holds an endpoint on
+  the network. Both cleanup errors are now recorded on the same surviving verdict.
+* **A shared writable workspace makes the gate bypassable.** The application and its behavioral
+  checkers run against one workspace, so an application that can write to it can rewrite the
+  checker that is about to judge it — measured against a server that tried. The runtime
+  containers therefore mount the workspace and dependencies read-only and write to the `/tmp`
+  tmpfs. Static verification keeps its writable mounts, so builds are unaffected; the cost is
+  that an application which writes into its own tree must be pointed at `/tmp` for the check.
 * **Static and runtime verification need one workspace acquisition, not two.** Restoring the
   snapshot again for the runtime phase would discard whatever a static command had just built, so
   the verifier-workspace ownership scope was extracted and both phases run inside it.

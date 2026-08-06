@@ -70,6 +70,11 @@ export async function restoreWorkspace(
   snapshot: StoredArtifact,
   images: RuntimeImages,
   labels?: Record<string, string>,
+  /**
+   * Pre-create `node_modules` so the dependency volume has a mount point inside the workspace.
+   * Docker would create it itself, but not when the workspace is mounted read-only — which is
+   * how the runtime containers mount it, so that the application cannot rewrite its checker.
+   */
   options: { dependencyMountpoint?: boolean } = {},
 ): Promise<void> {
   const bytes = await readFile(snapshot.path);

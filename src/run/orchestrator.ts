@@ -839,9 +839,11 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     if (runtimeCheck !== undefined) {
       manifest.runtime_check = runtimeCheckSection(runtimeCheck);
 
+      // A leak that happened alongside a failed check is recorded in the manifest above and
+      // swept below; it does not become the reason the step failed. A leak beside a *passing*
+      // check raises its own cleanup error out of `runRuntimeCheck`, so there is nothing to
+      // check for here.
       if (runtimeCheck.status !== 'pass') {
-        // A leak that happened alongside a failed check is recorded in the manifest and swept
-        // below; it does not become the reason the step failed.
         throw new PhaseFailure(
           'runtime',
           'verification_failed',
@@ -850,10 +852,6 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
           `runtime ${runtimeCheck.stage ?? 'check'} ${runtimeCheck.status}` +
             (runtimeCheck.reason === undefined ? '' : `: ${runtimeCheck.reason}`),
         );
-      }
-
-      if (runtimeCheck.cleanupError !== undefined) {
-        throw new PhaseFailure('runtime', 'internal_error', runtimeCheck.cleanupError);
       }
     }
 

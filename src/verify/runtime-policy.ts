@@ -16,8 +16,9 @@ export const RUNTIME_HOST = '0.0.0.0';
 /**
  * How long readiness may take, in total, across the whole poll loop.
  *
- * An application that exits immediately fails on this deadline rather than on process exit;
- * V1 accepts the wait, and `application.log` carries the reason.
+ * It bounds an application that stays up and never answers. One that exits first does not
+ * spend this budget: the harness watches the container from the host, ends the probe and
+ * reports the exit, with the reason in `application.log`.
  */
 export const RUNTIME_READINESS_TIMEOUT_SECONDS = 60;
 

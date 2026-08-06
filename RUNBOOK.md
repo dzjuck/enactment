@@ -185,6 +185,14 @@ Static and runtime verification share **one** disposable workspace, so a static 
 exactly what `start_command` launches. Nothing written during either can be committed: acceptance
 uses the implementation snapshot taken before verification began.
 
+**The application and the checkers mount that workspace read-only**, including `node_modules`.
+Anything they must write goes to `/tmp`, which is a writable tmpfs, and disappears with the
+container. This is what makes the gate real: on a writable workspace the application could rewrite
+the behavioral checker that is about to judge it. Practical consequence — an application that
+writes into its own tree (a SQLite file, a log, a cache directory) must be pointed at `/tmp` for
+this check, or it fails at startup and reads as a readiness failure. Static commands still run
+against a writable workspace, so builds are unaffected.
+
 **Keep behavioral checkers outside every agent-writable scope.** A checker committed under
 `implementation_paths` — or, for `code_behavior`, under `test_paths` — is a file the agent may
 rewrite, and a checker the agent can weaken verifies nothing. Put them somewhere else

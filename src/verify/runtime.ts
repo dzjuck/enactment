@@ -284,202 +284,226 @@ export async function runRuntimeCheck(
   const readinessUrl = `${url}${options.runtime.readiness_path}`;
   const mounts = options.mounts.map((mount) => ({ ...mount, readonly: true }));
 
-  return withPhaseNetworks(options.attempt, 'runtime', async (networks) => {
-    const network = networks.runtime;
-    if (network === undefined) {
-      throw new RuntimeInfrastructureError('the runtime phase created no network');
-    }
+  // Held outside the network scope: that scope removes the network *after* the callback
+  // returns, and throws if it cannot — which would replace a failing verdict with the leak it
+  // happened beside. A container that could not be removed is exactly what keeps an endpoint
+  // on the network, so the two failures arrive together in practice.
+  let verdict: RuntimeCheckResult | undefined;
 
-    let outcome: { value: RuntimeCheckResult } | { error: unknown };
-    let applicationLog = '';
-    let behavioralLog = '';
-    let started = false;
+  try {
+    return await withPhaseNetworks(options.attempt, 'runtime', async (networks) => {
+      const network = networks.runtime;
+      if (network === undefined) {
+        throw new RuntimeInfrastructureError('the runtime phase created no network');
+      }
 
-    try {
-      await start({
-        image: options.images.verifier.id,
-        argv: [...options.runtime.start_command],
-        network,
-        name: application,
-        autoRemove: false,
-        mounts,
-        labels: attemptLabels(options.attempt, 'runtime-app'),
-        env: { HOST: RUNTIME_HOST, PORT: String(options.runtime.port) },
-      });
-      started = true;
+      let outcome: { value: RuntimeCheckResult } | { error: unknown };
+      let applicationLog = '';
+      let behavioralLog = '';
+      let started = false;
 
-      const probeContainer = runtimeReadinessContainerName(options.attempt);
-      const probe = run(
-        {
-          image: options.images.verifier.id,
-          argv: [
-            'node',
-            '-e',
-            READINESS_PROBE_SOURCE,
-            readinessUrl,
-            String(RUNTIME_READINESS_TIMEOUT_SECONDS),
-          ],
-          network,
-          name: probeContainer,
-          labels: attemptLabels(options.attempt, 'runtime-readiness'),
-          env: { [RUNTIME_URL_VARIABLE]: url },
-        },
-        { timeoutSeconds: RUNTIME_READINESS_TIMEOUT_SECONDS, graceSeconds },
-      );
-
-      let probeSettled = false;
-      const watch = watchApplication(
-        application,
-        probeContainer,
-        isRunning,
-        terminate,
-        () => probeSettled,
-      );
-
-      let readinessRun: RunResult;
       try {
-        readinessRun = await probe;
-      } finally {
-        probeSettled = true;
-      }
-      await watch.done;
+        await start({
+          image: options.images.verifier.id,
+          argv: [...options.runtime.start_command],
+          network,
+          name: application,
+          autoRemove: false,
+          mounts,
+          labels: attemptLabels(options.attempt, 'runtime-app'),
+          env: { HOST: RUNTIME_HOST, PORT: String(options.runtime.port) },
+        });
+        started = true;
 
-      // Only when readiness did *not* succeed. The watcher and the probe race by
-      // construction — a poll issued before the probe settled can land after it — so an
-      // application that answered and then exited would otherwise have its passing readiness
-      // check overturned by the liveness poll that followed it.
-      const applicationExited = watch.exited() && readinessRun.exitCode !== 0;
-      const readiness: RuntimeReadinessResult = {
-        url: readinessUrl,
-        exitCode: readinessRun.exitCode,
-        status: readinessRun.status,
-        durationMs: readinessRun.durationMs,
-        ...(applicationExited ? { applicationExited } : {}),
-      };
-      behavioralLog += outputOf(`readiness probe ${readinessUrl}`, readinessRun);
-
-      const result: RuntimeCheckResult = {
-        status: 'pass',
-        startCommand: [...options.runtime.start_command],
-        url,
-        readinessUrl,
-        readiness,
-        commands: [],
-        verifierImage: options.images.verifier.id,
-      };
-
-      if (applicationExited) {
-        // The most specific fact wins the verdict: this is not a deadline that expired, it is
-        // a process that died. The probe's own outcome stays recorded beside it.
-        result.status = 'fail';
-        result.stage = 'readiness';
-        result.reason = APPLICATION_EXITED_REASON;
-      } else if (
-        readinessRun.status === 'timeout' ||
-        readinessRun.exitCode === READINESS_DEADLINE_EXIT_CODE
-      ) {
-        result.status = 'timeout';
-        result.stage = 'readiness';
-      } else if (readinessRun.exitCode !== 0) {
-        result.status = 'fail';
-        result.stage = 'readiness';
-      }
-
-      for (const argv of result.status === 'pass' ? options.runtime.behavioral_commands : []) {
-        const behavioral = await run(
+        const probeContainer = runtimeReadinessContainerName(options.attempt);
+        const probe = run(
           {
             image: options.images.verifier.id,
-            argv: [...argv],
+            argv: [
+              'node',
+              '-e',
+              READINESS_PROBE_SOURCE,
+              readinessUrl,
+              String(RUNTIME_READINESS_TIMEOUT_SECONDS),
+            ],
             network,
-            mounts,
-            labels: attemptLabels(options.attempt, 'runtime-check'),
+            name: probeContainer,
+            labels: attemptLabels(options.attempt, 'runtime-readiness'),
             env: { [RUNTIME_URL_VARIABLE]: url },
           },
-          { timeoutSeconds: RUNTIME_COMMAND_TIMEOUT_SECONDS, graceSeconds },
+          { timeoutSeconds: RUNTIME_READINESS_TIMEOUT_SECONDS, graceSeconds },
         );
 
-        result.commands.push(commandResult(argv, behavioral));
-        behavioralLog += outputOf(argv.join(' '), behavioral);
+        let probeSettled = false;
+        const watch = watchApplication(
+          application,
+          probeContainer,
+          isRunning,
+          terminate,
+          () => probeSettled,
+        );
 
-        if (behavioral.status === 'timeout') {
+        let readinessRun: RunResult;
+        try {
+          readinessRun = await probe;
+        } finally {
+          probeSettled = true;
+        }
+        await watch.done;
+
+        // Only when readiness did *not* succeed. The watcher and the probe race by
+        // construction — a poll issued before the probe settled can land after it — so an
+        // application that answered and then exited would otherwise have its passing readiness
+        // check overturned by the liveness poll that followed it.
+        const applicationExited = watch.exited() && readinessRun.exitCode !== 0;
+        const readiness: RuntimeReadinessResult = {
+          url: readinessUrl,
+          exitCode: readinessRun.exitCode,
+          status: readinessRun.status,
+          durationMs: readinessRun.durationMs,
+          ...(applicationExited ? { applicationExited } : {}),
+        };
+        behavioralLog += outputOf(`readiness probe ${readinessUrl}`, readinessRun);
+
+        const result: RuntimeCheckResult = {
+          status: 'pass',
+          startCommand: [...options.runtime.start_command],
+          url,
+          readinessUrl,
+          readiness,
+          commands: [],
+          verifierImage: options.images.verifier.id,
+        };
+
+        if (applicationExited) {
+          // The most specific fact wins the verdict: this is not a deadline that expired, it is
+          // a process that died. The probe's own outcome stays recorded beside it.
+          result.status = 'fail';
+          result.stage = 'readiness';
+          result.reason = APPLICATION_EXITED_REASON;
+        } else if (
+          readinessRun.status === 'timeout' ||
+          readinessRun.exitCode === READINESS_DEADLINE_EXIT_CODE
+        ) {
           result.status = 'timeout';
-          result.stage = 'behavioral';
-          break;
+          result.stage = 'readiness';
+        } else if (readinessRun.exitCode !== 0) {
+          result.status = 'fail';
+          result.stage = 'readiness';
         }
 
-        if (behavioral.exitCode !== 0) {
-          result.status = 'fail';
-          result.stage = 'behavioral';
-          break;
+        for (const argv of result.status === 'pass' ? options.runtime.behavioral_commands : []) {
+          const behavioral = await run(
+            {
+              image: options.images.verifier.id,
+              argv: [...argv],
+              network,
+              mounts,
+              labels: attemptLabels(options.attempt, 'runtime-check'),
+              env: { [RUNTIME_URL_VARIABLE]: url },
+            },
+            { timeoutSeconds: RUNTIME_COMMAND_TIMEOUT_SECONDS, graceSeconds },
+          );
+
+          result.commands.push(commandResult(argv, behavioral));
+          behavioralLog += outputOf(argv.join(' '), behavioral);
+
+          if (behavioral.status === 'timeout') {
+            result.status = 'timeout';
+            result.stage = 'behavioral';
+            break;
+          }
+
+          if (behavioral.exitCode !== 0) {
+            result.status = 'fail';
+            result.stage = 'behavioral';
+            break;
+          }
+        }
+
+        outcome = { value: result };
+      } catch (error) {
+        outcome = {
+          error: new RuntimeInfrastructureError(
+            `runtime check could not run: ${describeError(error)}`,
+            { cause: error },
+          ),
+        };
+      }
+
+      // Evidence before teardown: the retained container exists precisely so that an
+      // application which crashed on startup can still explain itself.
+      if (started) {
+        try {
+          const logs = await captureLogs(application);
+          applicationLog = `${logs.stdout}${logs.stderr}`;
+        } catch (error) {
+          if (!('error' in outcome)) {
+            outcome = {
+              error: new RuntimeInfrastructureError(
+                `runtime check could not capture application logs: ${describeError(error)}`,
+                { cause: error },
+              ),
+            };
+          }
         }
       }
 
-      outcome = { value: result };
-    } catch (error) {
-      outcome = {
-        error: new RuntimeInfrastructureError(
-          `runtime check could not run: ${describeError(error)}`,
-          { cause: error },
-        ),
-      };
-    }
+      const cleanupErrors = started ? await releaseAll([() => release(application)]) : [];
 
-    // Evidence before teardown: the retained container exists precisely so that an
-    // application which crashed on startup can still explain itself.
-    if (started) {
+      // Artifacts are written even for a failed check: the failure is what the evidence is for.
       try {
-        const logs = await captureLogs(application);
-        applicationLog = `${logs.stdout}${logs.stderr}`;
+        await writeArtifacts(options.artifactDir, redact, {
+          result: 'value' in outcome ? outcome.value : undefined,
+          applicationLog,
+          behavioralLog,
+        });
       } catch (error) {
         if (!('error' in outcome)) {
           outcome = {
             error: new RuntimeInfrastructureError(
-              `runtime check could not capture application logs: ${describeError(error)}`,
+              `runtime check could not write its evidence: ${describeError(error)}`,
               { cause: error },
             ),
           };
         }
       }
-    }
 
-    const cleanupErrors = started ? await releaseAll([() => release(application)]) : [];
+      if (cleanupErrors.length > 0) {
+        const cleanup = new CleanupError(cleanupErrors);
 
-    // Artifacts are written even for a failed check: the failure is what the evidence is for.
-    try {
-      await writeArtifacts(options.artifactDir, redact, {
-        result: 'value' in outcome ? outcome.value : undefined,
-        applicationLog,
-        behavioralLog,
-      });
-    } catch (error) {
-      if (!('error' in outcome)) {
-        outcome = {
-          error: new RuntimeInfrastructureError(
-            `runtime check could not write its evidence: ${describeError(error)}`,
-            { cause: error },
-          ),
-        };
-      }
-    }
+        if ('error' in outcome) {
+          throw new OwnershipError(`runtime application ${application}`, outcome.error, cleanup);
+        }
 
-    if (cleanupErrors.length > 0) {
-      const cleanup = new CleanupError(cleanupErrors);
+        // A check that already failed keeps its verdict; the leak is recorded, not substituted.
+        if (outcome.value.status !== 'pass') {
+          verdict = { ...outcome.value, cleanupError: cleanup.message };
+          return verdict;
+        }
 
-      if ('error' in outcome) {
-        throw new OwnershipError(`runtime application ${application}`, outcome.error, cleanup);
+        throw cleanup;
       }
 
-      // A check that already failed keeps its verdict; the leak is recorded, not substituted.
-      if (outcome.value.status !== 'pass') {
-        return { ...outcome.value, cleanupError: cleanup.message };
-      }
-
-      throw cleanup;
+      if ('error' in outcome) throw outcome.error;
+      verdict = outcome.value;
+      return verdict;
+    });
+  } catch (error) {
+    // Only a failing verdict is rescued. A passing one is not: a run that leaked is not a
+    // successful run, which is the rule the container path above already applies.
+    if (error instanceof CleanupError && verdict !== undefined && verdict.status !== 'pass') {
+      return {
+        ...verdict,
+        cleanupError:
+          verdict.cleanupError === undefined
+            ? error.message
+            : `${verdict.cleanupError}; ${error.message}`,
+      };
     }
 
-    if ('error' in outcome) throw outcome.error;
-    return outcome.value;
-  });
+    throw error;
+  }
 }
 
 async function writeArtifacts(
