@@ -324,7 +324,7 @@ export async function runPlan(
     store.setPlanState(plan.row, 'failed');
     return await finish({
       failure: {
-        message: `${branch} already exists but this plan has accepted nothing; the harness never adopts a ref it did not create`,
+        message: `${branch} already exists but this plan has accepted nothing; the harness never adopts a ref it did not create — an amended plan needs its own plan ID`,
       },
     });
   }

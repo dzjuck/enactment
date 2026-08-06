@@ -35,6 +35,7 @@ import {
 } from '../docs/bundle.js';
 import { DOCUMENTATION_CONTRACT } from '../docs/policy.js';
 import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
+import { acceptedStepIds, type AcceptedStep } from '../git/idempotency.js';
 import {
   REVIEW_AFTER_ROOT,
   REVIEW_ARGS,
@@ -308,13 +309,25 @@ async function resolveBaseCommit(repoPath: string, base?: string): Promise<Resol
   return { commit, branch: base };
 }
 
+export interface PreparedManifest {
+  manifest: ExecutionManifest;
+  /**
+   * Declared steps the approved base already carries (DESIGN.md §30).
+   *
+   * Reported rather than refused: a missed warning costs one agent run that then fails loudly,
+   * while a false refusal — step IDs stay reachable forever once a revision branch is merged —
+   * would stop legitimate work and demand a meaningless rename.
+   */
+  alreadyAccepted: AcceptedStep[];
+}
+
 /**
  * Resolve everything an approval covers into one candidate manifest.
  *
  * Read-only: it resolves the approved base — a named commit-ish or the repository head — and
  * the local image IDs, and writes nothing but the manifest the caller then saves.
  */
-export async function buildManifest(options: BuildManifestOptions): Promise<ExecutionManifest> {
+export async function buildManifest(options: BuildManifestOptions): Promise<PreparedManifest> {
   const { plan, hash: planHash } = await loadPlan(options.planFile);
   const base = await (options.resolveBase ?? resolveBaseCommit)(options.repoPath, options.base);
   const images = await (options.resolveImages ?? (() => resolveRuntimeImages()))();
@@ -332,24 +345,37 @@ export async function buildManifest(options: BuildManifestOptions): Promise<Exec
     documentationHash = bundle.hash;
   }
 
+  // Newest first, so a step ID carried by several commits is reported against the last one to
+  // accept it — the one an operator would look at.
+  const carriers = new Map<string, string>();
+  for (const accepted of await acceptedStepIds(options.repoPath, base.commit)) {
+    if (!carriers.has(accepted.stepId)) carriers.set(accepted.stepId, accepted.commit);
+  }
+
   return {
-    version: 1,
-    plan_file: relative(dirname(resolve(options.manifestPath)), resolve(options.planFile)),
-    repository: { base_branch: base.branch, base_commit: base.commit },
-    inputs: {
-      plan_hash: planHash,
-      policy_hash: policyHash(activePolicy()),
-      ...(documentationHash === undefined ? {} : { documentation_hash: documentationHash }),
+    manifest: {
+      version: 1,
+      plan_file: relative(dirname(resolve(options.manifestPath)), resolve(options.planFile)),
+      repository: { base_branch: base.branch, base_commit: base.commit },
+      inputs: {
+        plan_hash: planHash,
+        policy_hash: policyHash(activePolicy()),
+        ...(documentationHash === undefined ? {} : { documentation_hash: documentationHash }),
+      },
+      runtime: {
+        harness_version: HARNESS_VERSION,
+        codex_image_id: images.codex.id,
+        claude_image_id: images.claude.id,
+        verifier_image_id: images.verifier.id,
+        reviewer_image_id: images.reviewer.id,
+        setup_image_id: images.setup.id,
+        proxy_image_id: images.proxy.id,
+      },
     },
-    runtime: {
-      harness_version: HARNESS_VERSION,
-      codex_image_id: images.codex.id,
-      claude_image_id: images.claude.id,
-      verifier_image_id: images.verifier.id,
-      reviewer_image_id: images.reviewer.id,
-      setup_image_id: images.setup.id,
-      proxy_image_id: images.proxy.id,
-    },
+    alreadyAccepted: plan.steps.flatMap((step) => {
+      const commit = carriers.get(step.id);
+      return commit === undefined ? [] : [{ stepId: step.id, commit }];
+    }),
   };
 }
 

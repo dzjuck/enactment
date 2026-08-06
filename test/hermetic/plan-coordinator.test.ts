@@ -101,12 +101,14 @@ async function harness(
   const manifestPath = join(dir, 'execution-manifest.yml');
   await writeManifest(
     manifestPath,
-    await buildManifest({
-      planFile,
-      manifestPath,
-      repoPath: repo.dir,
-      resolveImages: () => Promise.resolve(IMAGES),
-    }),
+    (
+      await buildManifest({
+        planFile,
+        manifestPath,
+        repoPath: repo.dir,
+        resolveImages: () => Promise.resolve(IMAGES),
+      })
+    ).manifest,
   );
 
   const approved = await validateManifest(await loadManifest(manifestPath), {
@@ -385,6 +387,10 @@ describe('plan failure', () => {
     expect(started).toBe(false);
     expect(report.state).toBe('failed');
     expect(report.failure?.message).toMatch(/ai-harness\/demo-plan/);
+    // The amendment rule (§30), because reusing a predecessor's plan ID is how an operator
+    // reaches this: it stays the same failure, with no category of its own.
+    expect(report.failure?.message).toMatch(/amended plan needs its own plan ID/);
+    expect(report.failure?.category).toBeUndefined();
   });
 });
 

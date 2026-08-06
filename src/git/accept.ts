@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { execa } from 'execa';
 
 import type { Change } from '../diff/source-diff.js';
-import { findCommitByKey } from './idempotency.js';
+import { findCommitByKey, TRAILERS } from './idempotency.js';
 
 export class AcceptError extends Error {
   constructor(message: string) {
@@ -14,13 +14,7 @@ export class AcceptError extends Error {
   }
 }
 
-/** DESIGN.md §14. */
-export const TRAILERS = {
-  plan: 'AI-Harness-Plan',
-  step: 'AI-Harness-Step',
-  attempt: 'AI-Harness-Attempt',
-  idempotencyKey: 'AI-Harness-Idempotency-Key',
-};
+export { TRAILERS };
 
 const COMMIT_ENV = {
   GIT_AUTHOR_NAME: 'AI Harness',

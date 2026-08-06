@@ -63,12 +63,16 @@ function failure(error: unknown): CommandResult {
  *
  * Read-only apart from the manifest it writes: no sweep, no container, no plan state. Running
  * the manifest is the approval, so nothing here may leave a trace that looks like one.
+ *
+ * Warnings ride on the same report because this is where approval happens (DESIGN.md §30): an
+ * amended plan that still lists a completed step is named at the exact moment the operator is
+ * deciding whether to run the manifest.
  */
 async function prepare(
   command: PrepareCommand,
   dependencies: ProductionDependencies,
 ): Promise<CommandResult> {
-  const manifest = await buildManifest({
+  const { manifest, alreadyAccepted } = await buildManifest({
     planFile: command.planFile,
     manifestPath: command.output,
     repoPath: command.repoPath,
@@ -80,7 +84,23 @@ async function prepare(
 
   await writeManifest(command.output, manifest);
 
-  return { report: { prepared: command.output, ...manifest }, exitCode: 0 };
+  const warnings = alreadyAccepted.map((accepted) => ({
+    step: accepted.stepId,
+    commit: accepted.commit,
+    message:
+      `step "${accepted.stepId}" is already carried by commit ${accepted.commit}, which the ` +
+      `approved base ${manifest.repository.base_commit} can reach; remove the step if it is ` +
+      'already done, or rename it if this is different work',
+  }));
+
+  return {
+    report: {
+      prepared: command.output,
+      ...manifest,
+      ...(warnings.length === 0 ? {} : { warnings }),
+    },
+    exitCode: 0,
+  };
 }
 
 /**

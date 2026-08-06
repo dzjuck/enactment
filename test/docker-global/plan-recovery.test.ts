@@ -176,7 +176,7 @@ describe('a SIGKILLed plan run', () => {
 
     await writeManifest(
       manifestPath,
-      await buildManifest({ planFile, manifestPath, repoPath: repo.dir }),
+      (await buildManifest({ planFile, manifestPath, repoPath: repo.dir })).manifest,
     );
 
     const killed = execa('node', [runnerScript], {

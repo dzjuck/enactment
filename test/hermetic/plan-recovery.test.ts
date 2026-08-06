@@ -95,12 +95,14 @@ async function harness(stepIds = ['first-step', 'second-step']): Promise<Harness
   const manifestPath = join(dir, 'execution-manifest.yml');
   await writeManifest(
     manifestPath,
-    await buildManifest({
-      planFile,
-      manifestPath,
-      repoPath: repo.dir,
-      resolveImages: () => Promise.resolve(IMAGES),
-    }),
+    (
+      await buildManifest({
+        planFile,
+        manifestPath,
+        repoPath: repo.dir,
+        resolveImages: () => Promise.resolve(IMAGES),
+      })
+    ).manifest,
   );
 
   const approved = await validateManifest(await loadManifest(manifestPath), {

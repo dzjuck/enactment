@@ -2,6 +2,15 @@ import { createHash } from 'node:crypto';
 
 import { execa } from 'execa';
 
+/** DESIGN.md §14. Defined here rather than beside acceptance, because reading them back is
+ * this module's job and acceptance imports it, not the other way round. */
+export const TRAILERS = {
+  plan: 'AI-Harness-Plan',
+  step: 'AI-Harness-Step',
+  attempt: 'AI-Harness-Attempt',
+  idempotencyKey: 'AI-Harness-Idempotency-Key',
+};
+
 export interface IdempotencyInputs {
   /** Identity of the approved execution manifest. */
   manifestHash: string;
@@ -32,6 +41,57 @@ export function idempotencyKey(inputs: IdempotencyInputs): string {
   });
 
   return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
+}
+
+export interface AcceptedStep {
+  stepId: string;
+  /** The commit whose trailer carries it. */
+  commit: string;
+}
+
+/**
+ * Every step ID an `AI-Harness-Step` trailer carries, reachable from `commit`, newest first.
+ *
+ * This is what tells an operator that an amended plan still lists a step the base already
+ * accepted (DESIGN.md §30). It reads trailers rather than commit messages, so prose that
+ * merely mentions the trailer text is not a match, and it is scoped to one commit's ancestry,
+ * so work on a sibling branch is not the base's history.
+ *
+ * A git failure yields nothing rather than throwing. The production caller has already proven
+ * the commit exists in the repository, and the product is a warning: refusing to prepare a
+ * manifest because an advisory scan could not run would be a worse failure than the one it
+ * exists to prevent.
+ */
+export async function acceptedStepIds(
+  repoPath: string,
+  commit: string,
+): Promise<AcceptedStep[]> {
+  const { stdout, exitCode } = await execa(
+    'git',
+    [
+      '-C',
+      repoPath,
+      'log',
+      commit,
+      `--format=%H%x09%(trailers:key=${TRAILERS.step},valueonly,separator=%x2C)`,
+    ],
+    { reject: false },
+  );
+
+  if (exitCode !== 0) return [];
+
+  const accepted: AcceptedStep[] = [];
+  for (const line of stdout.split('\n')) {
+    const [sha, values] = line.split('\t');
+    if (sha === undefined || values === undefined) continue;
+
+    for (const stepId of values.split(',')) {
+      const trimmed = stepId.trim();
+      if (trimmed !== '') accepted.push({ stepId: trimmed, commit: sha });
+    }
+  }
+
+  return accepted;
 }
 
 /**

@@ -66,12 +66,14 @@ async function fixture(category = 'agent_failed') {
   const manifestPath = join(root, 'execution-manifest.yml');
   await writeManifest(
     manifestPath,
-    await buildManifest({
-      planFile,
-      manifestPath,
-      repoPath: repo.dir,
-      resolveImages: () => Promise.resolve(IMAGES),
-    }),
+    (
+      await buildManifest({
+        planFile,
+        manifestPath,
+        repoPath: repo.dir,
+        resolveImages: () => Promise.resolve(IMAGES),
+      })
+    ).manifest,
   );
   const approved = await validateManifest(await loadManifest(manifestPath), {
     repoPath: repo.dir,

@@ -135,7 +135,7 @@ describe('autonomous two-step plan', () => {
     const manifestPath = join(workdir, 'execution-manifest.yml');
     await writeManifest(
       manifestPath,
-      await buildManifest({ planFile, manifestPath, repoPath: repo.dir }),
+      (await buildManifest({ planFile, manifestPath, repoPath: repo.dir })).manifest,
     );
 
     const approved = await validateManifest(await loadManifest(manifestPath), {
@@ -258,7 +258,7 @@ describe('bounded stronger retry', () => {
     const manifestPath = join(workdir, 'execution-manifest.yml');
     await writeManifest(
       manifestPath,
-      await buildManifest({ planFile, manifestPath, repoPath: repo.dir }),
+      (await buildManifest({ planFile, manifestPath, repoPath: repo.dir })).manifest,
     );
     const approved = await validateManifest(await loadManifest(manifestPath), {
       repoPath: repo.dir,

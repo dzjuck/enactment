@@ -45,6 +45,24 @@ const PLAN = [
   '',
 ].join('\n');
 
+/** The same plan with a second step, for warning about more than one accepted ID. */
+const TWO_STEP_PLAN = PLAN.replace(
+  'final_verification:',
+  [
+    '  - type: task',
+    '    complexity: low',
+    '    risk: standard',
+    '    id: second-step',
+    '    observable_behavior: Do the other thing.',
+    '    implementation_paths:',
+    '      - second-step.txt',
+    '    verification:',
+    '      commands:',
+    '        - ["node", "--version"]',
+    'final_verification:',
+  ].join('\n'),
+);
+
 const dirs: string[] = [];
 const repos: string[] = [];
 
@@ -68,13 +86,13 @@ interface Workspace {
   env: NodeJS.ProcessEnv;
 }
 
-async function workspace(): Promise<Workspace> {
+async function workspace(plan = PLAN): Promise<Workspace> {
   const repo = await createM2Repo();
   repos.push(repo.dir);
 
   const dir = await scratch();
   const planFile = join(dir, 'plan.yml');
-  await writeFile(planFile, PLAN);
+  await writeFile(planFile, plan);
 
   const stateDir = join(dir, 'state');
 
@@ -120,6 +138,32 @@ async function prepare(space: Workspace): Promise<void> {
 async function offBranchCommit(repo: TargetRepo): Promise<string> {
   const tree = await git(repo.dir, ['rev-parse', 'HEAD^{tree}']);
   return git(repo.dir, ['commit-tree', tree, '-p', repo.commit, '-m', 'off-branch']);
+}
+
+/** What an accepted step leaves behind: a commit on the checked-out branch, with trailers. */
+function acceptanceMessage(stepId: string): string {
+  return [
+    `${stepId}: accepted work`,
+    '',
+    'AI-Harness-Plan: previous-revision',
+    `AI-Harness-Step: ${stepId}`,
+    `AI-Harness-Attempt: ${'0'.repeat(16)}`,
+  ].join('\n');
+}
+
+async function acceptStep(repo: TargetRepo, stepId: string): Promise<string> {
+  await writeFile(join(repo.dir, `${stepId}.txt`), `${stepId}\n`);
+  return commitAll(repo.dir, acceptanceMessage(stepId));
+}
+
+interface StepWarning {
+  step: string;
+  commit: string;
+  message: string;
+}
+
+function warningsOf(result: CommandResult): StepWarning[] | undefined {
+  return (result.report as { warnings?: StepWarning[] }).warnings;
 }
 
 describe('command parsing', () => {
@@ -314,6 +358,96 @@ describe('prepare --base', () => {
     expect((await prepareWith(space, ['--base', orphan], other)).exitCode).toBe(0);
 
     expect((await loadManifest(other)).manifestHash).not.toBe(head);
+  });
+});
+
+describe('prepare warnings about already-accepted steps', () => {
+  it('names the step and the commit that carries it, and still writes an approvable manifest', async () => {
+    const space = await workspace();
+    const carrier = await acceptStep(space.repo, 'only-step');
+
+    const result = await prepareWith(space, ['--base', 'main']);
+
+    expect(result.exitCode).toBe(0);
+    expect(warningsOf(result)).toHaveLength(1);
+    expect(warningsOf(result)?.[0]).toMatchObject({ step: 'only-step', commit: carrier });
+    // Both fixes, because the harness cannot tell which one applies.
+    expect(warningsOf(result)?.[0]?.message).toMatch(/remove/i);
+    expect(warningsOf(result)?.[0]?.message).toMatch(/rename/i);
+
+    // A warning is not a refusal: the manifest is on disk and approvable.
+    const approved = await validateManifest(await loadManifest(space.manifestPath), {
+      repoPath: space.repo.dir,
+      resolveImages: () => Promise.resolve(IMAGES),
+    });
+    expect(approved.baseCommit).toBe(carrier);
+  });
+
+  it('warns about every colliding step, not only the first', async () => {
+    const space = await workspace(TWO_STEP_PLAN);
+    const first = await acceptStep(space.repo, 'only-step');
+    const second = await acceptStep(space.repo, 'second-step');
+
+    const result = await prepareWith(space, ['--base', 'main']);
+
+    expect(result.exitCode).toBe(0);
+    expect(warningsOf(result)).toEqual([
+      expect.objectContaining({ step: 'only-step', commit: first }),
+      expect.objectContaining({ step: 'second-step', commit: second }),
+    ]);
+  });
+
+  it('carries no warnings key at all when nothing collides', async () => {
+    const space = await workspace();
+    await writeFile(join(space.repo.dir, 'unrelated.txt'), 'x\n');
+    await commitAll(space.repo.dir, 'an ordinary commit with no trailers');
+
+    const result = await prepareWith(space, ['--base', 'main']);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.report).not.toHaveProperty('warnings');
+  });
+
+  it('ignores a trailer the base cannot reach, and finds the same one when it can', async () => {
+    const space = await workspace();
+    const tree = await git(space.repo.dir, ['rev-parse', 'HEAD^{tree}']);
+    const sibling = await git(space.repo.dir, [
+      'commit-tree',
+      tree,
+      '-p',
+      space.repo.commit,
+      '-m',
+      acceptanceMessage('only-step'),
+    ]);
+    await git(space.repo.dir, ['branch', 'sibling', sibling]);
+
+    const unreachable = await prepareWith(space, ['--base', 'main']);
+    expect(unreachable.report).not.toHaveProperty('warnings');
+
+    const reachable = await prepareWith(
+      space,
+      ['--base', 'sibling'],
+      join(dirname(space.manifestPath), 'execution-manifest-sibling.yml'),
+    );
+    expect(warningsOf(reachable)).toEqual([
+      expect.objectContaining({ step: 'only-step', commit: sibling }),
+    ]);
+  });
+
+  it('scans the resolved base, not the repository head', async () => {
+    const space = await workspace();
+    const older = space.repo.commit;
+    await acceptStep(space.repo, 'only-step');
+
+    const fromOlder = await prepareWith(space, ['--base', older]);
+    expect(fromOlder.report).not.toHaveProperty('warnings');
+
+    const fromHead = await prepareWith(
+      space,
+      [],
+      join(dirname(space.manifestPath), 'execution-manifest-head.yml'),
+    );
+    expect(warningsOf(fromHead)).toHaveLength(1);
   });
 });
 

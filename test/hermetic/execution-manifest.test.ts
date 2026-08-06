@@ -97,14 +97,15 @@ async function writePlan(dir: string, lines: string[] = STEP, name = 'plan.yml')
   return path;
 }
 
-function build(planFile: string, manifestPath: string): Promise<ExecutionManifest> {
-  return buildManifest({
+async function build(planFile: string, manifestPath: string): Promise<ExecutionManifest> {
+  const { manifest } = await buildManifest({
     planFile,
     manifestPath,
     repoPath: '/unused',
     resolveImages: () => Promise.resolve(IMAGES),
     resolveBase: () => Promise.resolve(BASE),
   });
+  return manifest;
 }
 
 describe('candidate execution manifest', () => {
@@ -370,7 +371,7 @@ describe('candidate execution manifest', () => {
     const before = await git(repo.dir, ['status', '--porcelain=v1', '--branch']);
     const refsBefore = await git(repo.dir, ['for-each-ref', '--format=%(refname) %(objectname)']);
 
-    const manifest = await buildManifest({
+    const { manifest } = await buildManifest({
       planFile,
       manifestPath: join(dir, 'execution-manifest.yml'),
       repoPath: repo.dir,
@@ -461,12 +462,14 @@ describe('execution manifest approval', () => {
 
     await writeManifest(
       manifestPath,
-      await buildManifest({
-        planFile,
-        manifestPath,
-        repoPath: repo.dir,
-        resolveImages: () => Promise.resolve(IMAGES),
-      }),
+      (
+        await buildManifest({
+          planFile,
+          manifestPath,
+          repoPath: repo.dir,
+          resolveImages: () => Promise.resolve(IMAGES),
+        })
+      ).manifest,
     );
 
     return { repo, manifestPath };
@@ -569,12 +572,14 @@ describe('execution manifest approval', () => {
 
       await writeManifest(
         manifestPath,
-        await buildManifest({
-          planFile,
-          manifestPath,
-          repoPath: repo.dir,
-          resolveImages: () => Promise.resolve(IMAGES),
-        }),
+        (
+          await buildManifest({
+            planFile,
+            manifestPath,
+            repoPath: repo.dir,
+            resolveImages: () => Promise.resolve(IMAGES),
+          })
+        ).manifest,
       );
 
       return { repo, manifestPath, planFile };
