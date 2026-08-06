@@ -473,6 +473,7 @@ describe('loadPlan', () => {
 
     it.each([
       ['a plain http URL', 'http://example.com/a.json', /https/i],
+      ['a non-default HTTPS port', 'https://example.com:8443/a.json', /port 443/i],
       ['embedded credentials', 'https://user:pass@example.com/a.json', /credential/i],
       ['a fragment', 'https://example.com/a.json#section', /fragment/i],
       ['a non-URL string', 'not a url', /url/i],
@@ -487,6 +488,9 @@ describe('loadPlan', () => {
       ['an absolute path', '/etc/passwd', /absolute/i],
       ['a traversing path', '../outside/a.json', /\.\./],
       ['an empty path', '', /empty/i],
+      ['a directory path', 'api/', /file/i],
+      ['a non-normalized path', 'api//openapi.json', /normalized/i],
+      ['a backslash path', 'api\\openapi.json', /forward slash/i],
     ])('rejects %s', async (_label, path, message) => {
       const error = await loadDocumentError(
         documentationDocument({ sources: [{ url: 'https://example.com/a.json', path }] }),
@@ -508,6 +512,20 @@ describe('loadPlan', () => {
 
       expect(error.message).toContain('documentation.sources[1].path');
       expect(error.message).toMatch(/duplicate/i);
+    });
+
+    it('rejects file and directory path conflicts', async () => {
+      const error = await loadDocumentError(
+        documentationDocument({
+          sources: [
+            { url: 'https://example.com/a', path: 'api' },
+            { url: 'https://example.com/b', path: 'api/spec.json' },
+          ],
+        }),
+      );
+
+      expect(error.message).toContain('documentation.sources[1].path');
+      expect(error.message).toMatch(/conflict/i);
     });
 
     it('covers documentation values in the plan hash', async () => {

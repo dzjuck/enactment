@@ -187,6 +187,29 @@ describe('verifyBundle', () => {
     expect((await verifyError()).reason).toBe('provenance_malformed');
   });
 
+  it.each([
+    ['a null source', { sources: [null] }],
+    [
+      'an invalid source field',
+      {
+        sources: [
+          {
+            path: 'guide.md',
+            url: 'https://example.com/guide.md',
+            hash: 'not-a-hash',
+            bytes: -1,
+            fetched_at: 'not-a-time',
+          },
+        ],
+      },
+    ],
+  ])('rejects valid JSON with %s as malformed provenance', async (_label, provenance) => {
+    await writeBundle(root, entries());
+    await writeFile(join(root, 'provenance.json'), JSON.stringify(provenance));
+
+    expect((await verifyError()).reason).toBe('provenance_malformed');
+  });
+
   it('rejects provenance that does not describe the declared sources', async () => {
     await writeBundle(root, [entries()[0] as DocumentationEntry]);
 

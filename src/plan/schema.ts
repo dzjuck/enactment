@@ -1,4 +1,4 @@
-import { basename } from 'node:path';
+import { basename, posix } from 'node:path';
 
 import picomatch from 'picomatch';
 import { z } from 'zod';
@@ -228,6 +228,9 @@ const documentationUrl = z.string().superRefine((value, ctx) => {
   if (url.protocol !== 'https:') {
     ctx.addIssue({ code: 'custom', message: `"${value}" must use https` });
   }
+  if (url.port !== '') {
+    ctx.addIssue({ code: 'custom', message: `"${value}" must use the default HTTPS port 443` });
+  }
   if (url.username !== '' || url.password !== '') {
     ctx.addIssue({
       code: 'custom',
@@ -255,6 +258,18 @@ const documentationPath = z
         message: `"${value}" traverses out of the bundle with ".."`,
       });
     }
+    if (value.includes('\\')) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `"${value}" must use forward slashes`,
+      });
+    }
+    if (value.endsWith('/')) {
+      ctx.addIssue({ code: 'custom', message: `"${value}" must name a file, not a directory` });
+    }
+    if (posix.normalize(value) !== value) {
+      ctx.addIssue({ code: 'custom', message: `"${value}" must be a normalized path` });
+    }
   });
 
 const documentation = z
@@ -264,17 +279,27 @@ const documentation = z
       .min(1, 'must declare at least one source'),
   })
   .superRefine((value, ctx) => {
-    const seen = new Set<string>();
+    const seen: string[] = [];
 
     for (const [index, source] of value.sources.entries()) {
-      if (seen.has(source.path)) {
+      if (seen.includes(source.path)) {
         ctx.addIssue({
           code: 'custom',
           path: ['sources', index, 'path'],
           message: `duplicate documentation path "${source.path}"`,
         });
       }
-      seen.add(source.path);
+      const conflict = seen.find(
+        (path) => source.path.startsWith(`${path}/`) || path.startsWith(`${source.path}/`),
+      );
+      if (conflict !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['sources', index, 'path'],
+          message: `documentation path "${source.path}" conflicts with file path "${conflict}"`,
+        });
+      }
+      seen.push(source.path);
     }
   });
 

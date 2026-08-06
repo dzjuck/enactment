@@ -68,14 +68,38 @@ export interface DocumentationDownloadResult {
  */
 export const DOWNLOADER_SOURCE = `
 const { createHash } = require('node:crypto');
+const { createWriteStream } = require('node:fs');
+const { readFile, rm } = require('node:fs/promises');
+const { Readable, Transform } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 const cap = Number(process.argv[1]);
 const urls = process.argv.slice(2);
 const emit = (record) => process.stdout.write(JSON.stringify(record) + '\\n');
 
+class SourceRuleError extends Error {
+  constructor(reason) {
+    super(reason);
+    this.reason = reason;
+  }
+}
+
+const binarySignatures = [
+  Buffer.from('%PDF-'),
+  Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+  Buffer.from([0x50, 0x4b, 0x05, 0x06]),
+  Buffer.from([0x1f, 0x8b]),
+  Buffer.from('BZh'),
+  Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]),
+  Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]),
+];
+const startsWith = (body, signature) =>
+  body.length >= signature.length && body.subarray(0, signature.length).equals(signature);
+
 (async () => {
   let total = 0;
 
-  for (const url of urls) {
+  for (const [index, url] of urls.entries()) {
+    const temporary = '/tmp/documentation-source-' + String(index);
     try {
       const response = await fetch(url, { redirect: 'manual' });
 
@@ -90,11 +114,43 @@ const emit = (record) => process.stdout.write(JSON.stringify(record) + '\\n');
         continue;
       }
 
-      const body = Buffer.from(await response.arrayBuffer());
-      total += body.length;
-      if (total > cap) {
-        emit({ url, ok: false, reason: 'too_large', bytes: body.length });
-        continue;
+      if (response.body === null) throw new Error('response has no body');
+
+      let sourceBytes = 0;
+      const hash = createHash('sha256');
+      const meter = new Transform({
+        transform(chunk, _encoding, callback) {
+          const bytes = Buffer.from(chunk);
+          if (total + sourceBytes + bytes.length > cap) {
+            callback(new SourceRuleError('too_large'));
+            return;
+          }
+          sourceBytes += bytes.length;
+          hash.update(bytes);
+          callback(null, bytes);
+        },
+      });
+
+      await pipeline(
+        Readable.fromWeb(response.body),
+        meter,
+        createWriteStream(temporary, { flags: 'wx', mode: 0o600 }),
+      );
+      total += sourceBytes;
+
+      const body = await readFile(temporary);
+      let text;
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(body);
+      } catch {
+        throw new SourceRuleError('not_utf8');
+      }
+      if (text.includes('\\0') || binarySignatures.some((signature) => startsWith(body, signature))) {
+        throw new SourceRuleError('binary_content');
+      }
+      const head = text.trimStart().slice(0, 20).toLowerCase();
+      if (head.startsWith('<!doctype html') || head.startsWith('<html')) {
+        throw new SourceRuleError('html_content');
       }
 
       emit({
@@ -102,12 +158,15 @@ const emit = (record) => process.stdout.write(JSON.stringify(record) + '\\n');
         ok: true,
         status: 200,
         contentType: response.headers.get('content-type'),
-        bytes: body.length,
-        hash: createHash('sha256').update(body).digest('hex'),
+        bytes: sourceBytes,
+        hash: hash.digest('hex'),
         body: body.toString('base64'),
       });
     } catch (error) {
-      emit({ url, ok: false, reason: 'fetch_failed', detail: String((error && error.message) || error) });
+      if (error instanceof SourceRuleError) emit({ url, ok: false, reason: error.reason });
+      else emit({ url, ok: false, reason: 'fetch_failed', detail: String((error && error.message) || error) });
+    } finally {
+      await rm(temporary, { force: true });
     }
   }
 })();
@@ -162,6 +221,24 @@ function parseRecords(stdout: string): DownloadRecord[] {
 
 const UTF8 = new TextDecoder('utf-8', { fatal: true });
 
+const BINARY_SIGNATURES = [
+  Buffer.from('%PDF-'),
+  Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+  Buffer.from([0x50, 0x4b, 0x05, 0x06]),
+  Buffer.from([0x1f, 0x8b]),
+  Buffer.from('BZh'),
+  Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]),
+  Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]),
+];
+
+function hasBinarySignature(bytes: Buffer): boolean {
+  return BINARY_SIGNATURES.some(
+    (signature) =>
+      bytes.byteLength >= signature.byteLength &&
+      bytes.subarray(0, signature.byteLength).equals(signature),
+  );
+}
+
 function acceptBody(source: DocumentationSource, record: DownloadRecord): DownloadedSource {
   const bytes = Buffer.from(String(record.body ?? ''), 'base64');
 
@@ -193,11 +270,11 @@ function acceptBody(source: DocumentationSource, record: DownloadRecord): Downlo
     );
   }
 
-  if (text.includes('\0')) {
+  if (text.includes('\0') || hasBinarySignature(bytes)) {
     throw new DocumentationSourceError(
       'binary_content',
       source.url,
-      `${source.url} contains a NUL byte; V1 stores documentation as text only`,
+      `${source.url} is binary content; V1 stores documentation as text only`,
     );
   }
 
@@ -246,6 +323,15 @@ function rejectFailure(source: DocumentationSource, record: DownloadRecord): nev
     );
   }
 
+  if (reason === 'not_utf8' || reason === 'binary_content' || reason === 'html_content') {
+    const messages = {
+      not_utf8: 'is not UTF-8 text',
+      binary_content: 'is binary content',
+      html_content: 'is an HTML page',
+    } as const;
+    throw new DocumentationSourceError(reason, source.url, `${source.url} ${messages[reason]}`);
+  }
+
   throw new DocumentationDownloadError(
     `the downloader reported an unknown outcome for ${source.url}: ${JSON.stringify(record)}`,
   );
@@ -261,6 +347,8 @@ function verify(
     );
   }
 
+  let total = 0;
+
   return sources.map((source, index) => {
     const record = records[index] as DownloadRecord;
 
@@ -270,7 +358,18 @@ function verify(
       );
     }
 
-    return record.ok === true ? acceptBody(source, record) : rejectFailure(source, record);
+    if (record.ok !== true) return rejectFailure(source, record);
+
+    const accepted = acceptBody(source, record);
+    total += accepted.bytes.byteLength;
+    if (total > DOCUMENTATION_MAX_BYTES) {
+      throw new DocumentationSourceError(
+        'too_large',
+        source.url,
+        `${source.url} pushes the complete bundle over the fixed ${String(DOCUMENTATION_MAX_MB)} MB documentation limit`,
+      );
+    }
+    return accepted;
   });
 }
 

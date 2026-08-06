@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, posix, relative, sep } from 'node:path';
+
+import { z } from 'zod';
 
 import type { DocumentationConfig, DocumentationSource } from '../plan/schema.js';
 
@@ -33,17 +35,18 @@ export interface DocumentationEntry extends DocumentationSource {
   fetchedAt: string;
 }
 
-export interface ProvenanceSource {
-  path: string;
-  url: string;
-  hash: string;
-  bytes: number;
-  fetched_at: string;
-}
+const provenanceSourceSchema = z.strictObject({
+  path: z.string().min(1),
+  url: z.url(),
+  hash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  bytes: z.number().int().nonnegative(),
+  fetched_at: z.iso.datetime({ offset: true }),
+});
 
-export interface Provenance {
-  sources: ProvenanceSource[];
-}
+const provenanceSchema = z.strictObject({ sources: z.array(provenanceSourceSchema) });
+
+export type ProvenanceSource = z.infer<typeof provenanceSourceSchema>;
+export type Provenance = z.infer<typeof provenanceSchema>;
 
 export function bundleRootFor(planFile: string): string {
   return join(dirname(planFile), 'documentation');
@@ -71,6 +74,9 @@ function resolveStoragePath(bundleRoot: string, path: string): string {
     path === '' ||
     path.startsWith('/') ||
     /^[a-zA-Z]:[\\/]/.test(path) ||
+    path.includes('\\') ||
+    path.endsWith('/') ||
+    posix.normalize(path) !== path ||
     inside === '' ||
     inside.startsWith('..') ||
     inside.startsWith(sep)
@@ -136,6 +142,19 @@ export async function writeBundle(
   }));
 
   const targets = entries.map((entry) => resolveStoragePath(bundleRoot, entry.path));
+  for (const [index, target] of targets.entries()) {
+    const conflict = targets.findIndex(
+      (other, otherIndex) =>
+        otherIndex < index &&
+        (other === target || other.startsWith(`${target}${sep}`) || target.startsWith(`${other}${sep}`)),
+    );
+    if (conflict !== -1) {
+      throw new DocumentationError(
+        'invalid_path',
+        `documentation path "${entries[index]?.path ?? ''}" conflicts with "${entries[conflict]?.path ?? ''}"`,
+      );
+    }
+  }
 
   await mkdir(filesDirFor(bundleRoot), { recursive: true });
   for (const [index, entry] of entries.entries()) {
@@ -163,16 +182,27 @@ export async function readProvenance(bundleRoot: string): Promise<Provenance> {
     );
   }
 
+  let document: unknown;
   try {
-    const parsed = JSON.parse(raw) as Provenance;
-    if (!Array.isArray(parsed.sources)) throw new Error('sources is not an array');
-    return parsed;
+    document = JSON.parse(raw);
   } catch (error) {
     throw new DocumentationError(
       'provenance_malformed',
       `${join(bundleRoot, PROVENANCE_FILE)} is not valid provenance (${error instanceof Error ? error.message : String(error)}); delete the whole documentation directory and run "harness docs" again`,
     );
   }
+
+  const parsed = provenanceSchema.safeParse(document);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const detail = issue === undefined ? 'invalid structure' : `${issue.path.join('.')}: ${issue.message}`;
+    throw new DocumentationError(
+      'provenance_malformed',
+      `${join(bundleRoot, PROVENANCE_FILE)} is not valid provenance (${detail}); delete the whole documentation directory and run "harness docs" again`,
+    );
+  }
+
+  return parsed.data;
 }
 
 async function listRelativeFiles(dir: string, prefix = ''): Promise<string[]> {

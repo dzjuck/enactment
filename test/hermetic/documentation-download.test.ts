@@ -1,4 +1,6 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { promisify } from 'node:util';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -58,6 +60,7 @@ const SOURCES = [
 ];
 
 const PROXY_RECORDS = [{ host: 'open-meteo.com', allowed: true }];
+const execFileAsync = promisify(execFile);
 
 function ok(overrides: Partial<RunResult> = {}): RunResult {
   return {
@@ -193,6 +196,70 @@ describe('the downloader container', () => {
 
     expect(result.proxyRecords).toEqual(PROXY_RECORDS);
   });
+
+  it('writes response chunks progressively and emits the exact bytes', async () => {
+    const fakeFetch = `
+      global.fetch = async () => ({
+        status: 200,
+        headers: { get: () => 'text/plain' },
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(Buffer.from('first '));
+            controller.enqueue(Buffer.from('second'));
+            controller.close();
+          },
+        }),
+        arrayBuffer: async () => { throw new Error('must not buffer the response'); },
+      });
+    `;
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        '-e',
+        `${fakeFetch}\n${DOWNLOADER_SOURCE}`,
+        String(DOCUMENTATION_MAX_BYTES),
+        'https://example.com/stream',
+      ],
+    );
+    const record = JSON.parse(stdout) as { ok: boolean; body: string };
+
+    expect(record.ok).toBe(true);
+    expect(Buffer.from(record.body, 'base64').toString('utf8')).toBe('first second');
+  });
+
+  it('stops reading an oversized response instead of buffering it all', async () => {
+    const cap = 64 * 1024;
+    const chunkBytes = 16 * 1024;
+    const totalChunks = 512;
+    const fakeFetch = `
+      let pulls = 0;
+      const chunkBytes = ${String(chunkBytes)};
+      const totalChunks = ${String(totalChunks)};
+      process.on('exit', () => require('node:fs').writeSync(2, String(pulls)));
+      global.fetch = async () => ({
+        status: 200,
+        headers: { get: () => 'text/plain' },
+        body: new ReadableStream({
+          pull(controller) {
+            pulls += 1;
+            controller.enqueue(new Uint8Array(chunkBytes).fill(0x61));
+            if (pulls === totalChunks) controller.close();
+          },
+        }),
+        arrayBuffer: async () => {
+          pulls = totalChunks;
+          return new Uint8Array(chunkBytes * totalChunks).buffer;
+        },
+      });
+    `;
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ['-e', `${fakeFetch}\n${DOWNLOADER_SOURCE}`, String(cap), 'https://example.com/large'],
+    );
+
+    expect(JSON.parse(stdout)).toMatchObject({ ok: false, reason: 'too_large' });
+    expect(Number(stderr) * chunkBytes).toBeLessThan(chunkBytes * totalChunks);
+  });
 });
 
 describe('result verification', () => {
@@ -268,6 +335,8 @@ describe('result verification', () => {
   it.each([
     ['invalid UTF-8', Buffer.from([0xff, 0xfe, 0x41]), 'not_utf8'],
     ['a NUL byte', Buffer.from('ok\0bad', 'utf8'), 'binary_content'],
+    ['a PDF', Buffer.from('%PDF-1.7\n1 0 obj\n', 'utf8'), 'binary_content'],
+    ['a ZIP archive', Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x61]), 'binary_content'],
     ['an HTML page', Buffer.from('<!DOCTYPE html>\n<html></html>', 'utf8'), 'html_content'],
     ['an HTML fragment', Buffer.from('<html><body>hi</body></html>', 'utf8'), 'html_content'],
   ])('rejects %s on the host, whatever the container reported', async (_label, body, reason) => {
@@ -308,6 +377,21 @@ describe('result verification', () => {
 
     await expect(download({ run: () => Promise.resolve(ok({ stdout })) })).rejects.toMatchObject({
       reason: 'too_large',
+    });
+  });
+
+  it('rejects sources that exceed the complete-bundle cap in aggregate', async () => {
+    const first = 'a'.repeat(26 * 1024 * 1024);
+    const second = 'b'.repeat(26 * 1024 * 1024);
+    const stdout = `${[
+      line(SOURCES[0]!.url, first),
+      line(SOURCES[1]!.url, second),
+      line(SOURCES[2]!.url, '# reference'),
+    ].join('\n')}\n`;
+
+    await expect(download({ run: () => Promise.resolve(ok({ stdout })) })).rejects.toMatchObject({
+      reason: 'too_large',
+      url: SOURCES[1]!.url,
     });
   });
 });
