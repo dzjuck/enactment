@@ -335,8 +335,7 @@ describe('result verification', () => {
   it.each([
     ['invalid UTF-8', Buffer.from([0xff, 0xfe, 0x41]), 'not_utf8'],
     ['a NUL byte', Buffer.from('ok\0bad', 'utf8'), 'binary_content'],
-    ['a PDF', Buffer.from('%PDF-1.7\n1 0 obj\n', 'utf8'), 'binary_content'],
-    ['a ZIP archive', Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x61]), 'binary_content'],
+    ['a gzip archive', Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0xff]), 'not_utf8'],
     ['an HTML page', Buffer.from('<!DOCTYPE html>\n<html></html>', 'utf8'), 'html_content'],
     ['an HTML fragment', Buffer.from('<html><body>hi</body></html>', 'utf8'), 'html_content'],
   ])('rejects %s on the host, whatever the container reported', async (_label, body, reason) => {

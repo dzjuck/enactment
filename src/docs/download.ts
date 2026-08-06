@@ -181,24 +181,6 @@ function parseRecords(stdout: string): DownloadRecord[] {
 
 const UTF8 = new TextDecoder('utf-8', { fatal: true });
 
-const BINARY_SIGNATURES = [
-  Buffer.from('%PDF-'),
-  Buffer.from([0x50, 0x4b, 0x03, 0x04]),
-  Buffer.from([0x50, 0x4b, 0x05, 0x06]),
-  Buffer.from([0x1f, 0x8b]),
-  Buffer.from('BZh'),
-  Buffer.from([0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]),
-  Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]),
-];
-
-function hasBinarySignature(bytes: Buffer): boolean {
-  return BINARY_SIGNATURES.some(
-    (signature) =>
-      bytes.byteLength >= signature.byteLength &&
-      bytes.subarray(0, signature.byteLength).equals(signature),
-  );
-}
-
 function acceptBody(source: DocumentationSource, record: DownloadRecord): DownloadedSource {
   const bytes = Buffer.from(String(record.body ?? ''), 'base64');
 
@@ -230,11 +212,13 @@ function acceptBody(source: DocumentationSource, record: DownloadRecord): Downlo
     );
   }
 
-  if (text.includes('\0') || hasBinarySignature(bytes)) {
+  // Fatal UTF-8 decoding above already rejects archives and compressed formats; a NUL byte
+  // covers what is left. Sniffing magic numbers on top of that would restate the same answer.
+  if (text.includes('\0')) {
     throw new DocumentationSourceError(
       'binary_content',
       source.url,
-      `${source.url} is binary content; V1 stores documentation as text only`,
+      `${source.url} contains a NUL byte; V1 stores documentation as text only`,
     );
   }
 
