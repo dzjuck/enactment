@@ -31,6 +31,7 @@ import {
   bundleRootFor,
   contextDirFor,
   verifyBundle,
+  type ApprovedDocumentation,
 } from '../docs/bundle.js';
 import { DOCUMENTATION_CONTRACT } from '../docs/policy.js';
 import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
@@ -399,7 +400,7 @@ export interface ApprovedInputs {
   baseCommit: string;
   images: RuntimeImages;
   /** Present exactly when the plan declares documentation; mounted read-only at `/context`. */
-  documentationContextDir?: string;
+  documentation?: ApprovedDocumentation;
 }
 
 export interface ValidateManifestOptions {
@@ -431,7 +432,7 @@ export async function validateManifest(
 
   // Before images, the base commit and any container work: an approval whose documentation
   // drifted must stop while the only cost is a message.
-  const documentationContextDir = await approveDocumentation(loaded);
+  const documentation = await approveDocumentation(loaded);
 
   if (manifest.runtime.harness_version !== HARNESS_VERSION) {
     throw new ApprovalError(
@@ -470,7 +471,7 @@ export async function validateManifest(
     baseBranch: manifest.repository.base_branch,
     baseCommit: manifest.repository.base_commit,
     images,
-    ...(documentationContextDir === undefined ? {} : { documentationContextDir }),
+    ...(documentation === undefined ? {} : { documentation }),
   };
 }
 
@@ -482,7 +483,9 @@ export async function validateManifest(
  * plan. A stray `documentation/` directory beside a plan that declares none is not the
  * harness's business and is ignored.
  */
-async function approveDocumentation(loaded: LoadedManifest): Promise<string | undefined> {
+async function approveDocumentation(
+  loaded: LoadedManifest,
+): Promise<ApprovedDocumentation | undefined> {
   const approvedHash = loaded.manifest.inputs.documentation_hash;
   const declared = loaded.plan.documentation;
 
@@ -528,5 +531,5 @@ async function approveDocumentation(loaded: LoadedManifest): Promise<string | un
     );
   }
 
-  return contextDirFor(bundleRoot);
+  return { contextDir: contextDirFor(bundleRoot), hash: bundle.hash };
 }

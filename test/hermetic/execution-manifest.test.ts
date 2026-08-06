@@ -659,7 +659,10 @@ describe('execution manifest approval', () => {
         resolveImages: () => Promise.resolve(IMAGES),
       });
 
-      expect(inputs.documentationContextDir).toBe(contextDirFor(bundleRootFor(planFile)));
+      expect(inputs.documentation).toEqual({
+        contextDir: contextDirFor(bundleRootFor(planFile)),
+        hash: await documentationHash(contextDirFor(bundleRootFor(planFile))),
+      });
     });
 
     it.each([
@@ -750,7 +753,7 @@ describe('execution manifest approval', () => {
         resolveImages: () => Promise.resolve(IMAGES),
       });
 
-      expect(inputs.documentationContextDir).toBeUndefined();
+      expect(inputs.documentation).toBeUndefined();
     });
   });
 

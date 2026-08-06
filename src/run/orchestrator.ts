@@ -18,7 +18,7 @@ import {
   dependencyMount,
 } from '../deps/volume.js';
 import { manifestFromTar, sourceDiff } from '../diff/source-diff.js';
-import { documentationSummary } from '../docs/bundle.js';
+import { documentationSummary, type ApprovedDocumentation } from '../docs/bundle.js';
 import { documentationMount, withDocumentation } from '../docs/mount.js';
 import { DiffValidationError, validateChanges } from '../diff/validate.js';
 import type { RuntimeImages } from '../docker/images.js';
@@ -141,10 +141,11 @@ export interface StepExecutionOptions {
   /** Harness-owned context for a stronger retry; never changes scope or verification. */
   advisoryContext?: string;
   /**
-   * The approved documentation bundle's `context/` directory, when the plan declares one.
-   * Mounted read-only at `/context` for agent containers only (DESIGN.md §18).
+   * The approved documentation bundle, when the plan declares one: its `context/` directory
+   * and the hash the approval proved it to have. Mounted read-only at `/context` for agent
+   * containers only (DESIGN.md §18).
    */
-  documentationContextDir?: string;
+  documentation?: ApprovedDocumentation;
   /** Test-only substitution of runtime images and agent environment. See `RunInjection`. */
   injection?: RunInjection;
   onPhase?: (phase: RunPhase) => void | Promise<void>;
@@ -305,9 +306,9 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
       export_hash: exportHash,
       ...networkPolicySection(descriptor.allowlist, descriptor.cliVersion),
     };
-    if (options.documentationContextDir !== undefined) {
+    if (options.documentation !== undefined) {
       // So a commit can be traced to the documentation that was mounted for it.
-      inputs.documentation = await documentationSummary(options.documentationContextDir);
+      inputs.documentation = await documentationSummary(options.documentation);
     }
     manifest.inputs = inputs;
     const snapshotHashes: Record<string, string> = {};
@@ -367,7 +368,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     const compose = (prompt: string): string =>
       composeAgentPrompt(prompt, {
         ...(options.advisoryContext === undefined ? {} : { advisory: options.advisoryContext }),
-        documentation: options.documentationContextDir !== undefined,
+        documentation: options.documentation !== undefined,
       });
 
     const policy = descriptor.compile(compose(step.observable_behavior));
@@ -541,9 +542,9 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
                     workspaceMount(workspace),
                     dependencyMount(agentDependencies),
                     authMount(descriptor.authProvider, runAuth),
-                    ...(options.documentationContextDir === undefined
+                    ...(options.documentation === undefined
                       ? []
-                      : [documentationMount(options.documentationContextDir)]),
+                      : [documentationMount(options.documentation.contextDir)]),
                   ],
                   timeoutSeconds: timeouts.agent_seconds,
                   graceSeconds: timeouts.termination_grace_seconds,

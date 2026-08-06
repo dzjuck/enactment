@@ -110,8 +110,11 @@ describe('documentationSummary', () => {
   it('reports the hash, the source count and the total mounted bytes', async () => {
     const root = await bundle();
 
-    expect(await documentationSummary(contextDirFor(root))).toEqual({
-      hash: await documentationHash(contextDirFor(root)),
+    const contextDir = contextDirFor(root);
+    const hash = await documentationHash(contextDir);
+
+    expect(await documentationSummary({ contextDir, hash })).toEqual({
+      hash,
       sources: 2,
       bytes: '{"openapi":"3.1.0"}'.length + '# guide\n'.length,
     });

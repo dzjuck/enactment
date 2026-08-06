@@ -4,7 +4,13 @@ import { execa } from 'execa';
 
 import { ArtifactStore } from '../artifacts/store.js';
 import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
-import { bundleRootFor, contextDirFor, DocumentationError, verifyBundle } from '../docs/bundle.js';
+import {
+  bundleRootFor,
+  contextDirFor,
+  DocumentationError,
+  verifyBundle,
+  type ApprovedDocumentation,
+} from '../docs/bundle.js';
 import { idempotencyKey } from '../git/idempotency.js';
 import { loadPlan } from '../plan/load.js';
 import type { Plan, PlanStep } from '../plan/schema.js';
@@ -90,16 +96,17 @@ export async function runSinglePlanStep(
     // instead. Production takes the same directory from `validateManifest`. A declared bundle
     // that is not there stops the run: an agent that silently gets no `/context` is a step
     // running against different inputs than the plan describes.
-    let documentationContextDir: string | undefined;
+    let documentation: ApprovedDocumentation | undefined;
     if (plan.documentation !== undefined) {
       const bundleRoot = bundleRootFor(options.planFile);
-      if (!(await verifyBundle(bundleRoot, plan.documentation)).present) {
+      const bundle = await verifyBundle(bundleRoot, plan.documentation);
+      if (!bundle.present) {
         throw new DocumentationError(
           'bundle_missing',
           `${options.planFile} declares documentation but ${bundleRoot} does not exist; run "harness docs ${options.planFile}" first`,
         );
       }
-      documentationContextDir = contextDirFor(bundleRoot);
+      documentation = { contextDir: contextDirFor(bundleRoot), hash: bundle.hash };
     }
     const parentCommit = await git(options.repoPath, ['rev-parse', 'HEAD']);
     const baseBranch = await git(options.repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -132,7 +139,7 @@ export async function runSinglePlanStep(
       }),
       artifactDir: options.artifactDir,
       snapshots: new ArtifactStore(join(options.artifactDir, 'snapshots')),
-      documentationContextDir,
+      documentation,
       sourceCodexHome: options.sourceCodexHome,
       claudeTokenFile: options.claudeTokenFile,
       storeDirectory: options.storeDirectory,

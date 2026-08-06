@@ -223,6 +223,15 @@ const FIX = 'delete the whole documentation directory and run "harness docs" aga
 
 export type BundleVerification = { present: false } | { present: true; hash: string };
 
+/**
+ * An approved bundle: where the mounted tree is, and the hash approval already proved it to
+ * have. The two travel together so no later phase re-derives what the approval established.
+ */
+export interface ApprovedDocumentation {
+  contextDir: string;
+  hash: string;
+}
+
 export interface DocumentationSummary {
   hash: string;
   sources: number;
@@ -230,11 +239,13 @@ export interface DocumentationSummary {
 }
 
 /** What an attempt records about the documentation it mounted, so a commit can be traced to it. */
-export async function documentationSummary(contextDir: string): Promise<DocumentationSummary> {
-  const provenance = await readProvenance(dirname(contextDir));
+export async function documentationSummary(
+  documentation: ApprovedDocumentation,
+): Promise<DocumentationSummary> {
+  const provenance = await readProvenance(dirname(documentation.contextDir));
 
   return {
-    hash: await documentationHash(contextDir),
+    hash: documentation.hash,
     sources: provenance.sources.length,
     bytes: provenance.sources.reduce((total, source) => total + source.bytes, 0),
   };
