@@ -15,6 +15,12 @@ import {
 import { compileCodexPolicy } from '../../src/adapters/codex/policy.js';
 import type { RuntimeImages } from '../../src/docker/images.js';
 import {
+  bundleRootFor,
+  contextDirFor,
+  documentationHash,
+  writeBundle,
+} from '../../src/docs/bundle.js';
+import {
   ApprovalError,
   ManifestConfigError,
   activePolicy,
@@ -526,6 +532,226 @@ describe('execution manifest approval', () => {
     expect(error).toBeInstanceOf(ApprovalError);
     expect((error as ApprovalError).reason).toBe('runtime_changed');
     expect((error as ApprovalError).message).toContain('harness_version');
+  });
+
+  describe('documentation', () => {
+    const SOURCES = [
+      { url: 'https://example.com/openapi.json', path: 'example/openapi.json' },
+      { url: 'https://example.com/guide.md', path: 'guide.md' },
+    ];
+
+    async function documentedPlan(dir: string): Promise<string> {
+      const planFile = join(dir, 'plan.yml');
+      await writeFile(planFile, planDocument(STEP, { documentation: SOURCES }));
+
+      await writeBundle(
+        bundleRootFor(planFile),
+        SOURCES.map((source, index) => ({
+          ...source,
+          bytes: Buffer.from(`body ${String(index)}\n`, 'utf8'),
+          fetchedAt: '2026-01-01T00:00:00.000Z',
+        })),
+      );
+
+      return planFile;
+    }
+
+    async function approvedDocumented(): Promise<{
+      repo: TargetRepo;
+      manifestPath: string;
+      planFile: string;
+    }> {
+      const repo = await createTargetRepo();
+      repos.push(repo.dir);
+      const dir = await workspace();
+      const planFile = await documentedPlan(dir);
+      const manifestPath = join(dir, 'execution-manifest.yml');
+
+      await writeManifest(
+        manifestPath,
+        await buildManifest({
+          planFile,
+          manifestPath,
+          repoPath: repo.dir,
+          resolveImages: () => Promise.resolve(IMAGES),
+        }),
+      );
+
+      return { repo, manifestPath, planFile };
+    }
+
+    function approve(
+      loaded: Awaited<ReturnType<typeof loadManifest>>,
+      repoPath: string,
+      resolveImages: () => Promise<RuntimeImages> = () => Promise.resolve(IMAGES),
+    ): Promise<unknown> {
+      return validateManifest(loaded, { repoPath, resolveImages }).catch(
+        (thrown: unknown) => thrown,
+      );
+    }
+
+    it('records the bundle hash for a documented plan and omits the field otherwise', async () => {
+      const documented = await documentedPlan(await workspace());
+      const plain = await writePlan(await workspace());
+
+      const withDocs = await build(documented, join(documented, '..', 'm.yml'));
+      const without = await build(plain, join(plain, '..', 'm.yml'));
+
+      expect(withDocs.inputs.documentation_hash).toBe(
+        await documentationHash(contextDirFor(bundleRootFor(documented))),
+      );
+      expect(without.inputs).not.toHaveProperty('documentation_hash');
+    });
+
+    it('refuses to prepare a documented plan whose bundle has not been downloaded', async () => {
+      const dir = await workspace();
+      const planFile = join(dir, 'plan.yml');
+      await writeFile(planFile, planDocument(STEP, { documentation: SOURCES }));
+
+      const error = await build(planFile, join(dir, 'm.yml')).catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(ApprovalError);
+      expect((error as Error).message).toMatch(/harness docs/);
+    });
+
+    it('contains the fixed documentation policy and hashes every part of it', () => {
+      expect(activePolicy().documentation).toEqual({
+        transport: 'connect-proxy',
+        timeout_seconds: 600,
+        maximum_download_mb: 50,
+        redirects: 'rejected',
+        content: 'utf8-text-no-html',
+        mount: '/context',
+        mount_mode: 'read-only',
+        consumers: ['agent'],
+      });
+
+      const baseline = policyHash(activePolicy());
+      const changed = (mutate: (policy: ReturnType<typeof activePolicy>) => void): string => {
+        const policy = structuredClone(activePolicy());
+        mutate(policy);
+        return policyHash(policy);
+      };
+
+      const mutations = [
+        changed((policy) => {
+          policy.documentation.timeout_seconds = 900;
+        }),
+        changed((policy) => {
+          policy.documentation.maximum_download_mb = 100;
+        }),
+        changed((policy) => {
+          policy.documentation.mount = '/docs';
+        }),
+        changed((policy) => {
+          policy.documentation.consumers = ['agent', 'verifier'];
+        }),
+      ];
+
+      expect(mutations.every((hash) => hash !== baseline)).toBe(true);
+    });
+
+    it('accepts an unchanged bundle and returns the directory the agent will mount', async () => {
+      const { repo, manifestPath, planFile } = await approvedDocumented();
+
+      const inputs = await validateManifest(await loadManifest(manifestPath), {
+        repoPath: repo.dir,
+        resolveImages: () => Promise.resolve(IMAGES),
+      });
+
+      expect(inputs.documentationContextDir).toBe(contextDirFor(bundleRootFor(planFile)));
+    });
+
+    it.each([
+      [
+        'a deleted bundle',
+        async (planFile: string) => rm(bundleRootFor(planFile), { recursive: true, force: true }),
+      ],
+      [
+        'an edited file',
+        async (planFile: string) =>
+          writeFile(
+            join(bundleRootFor(planFile), 'context', 'files', 'guide.md'),
+            'tampered\n',
+          ),
+      ],
+      [
+        'an extra file',
+        async (planFile: string) =>
+          writeFile(join(bundleRootFor(planFile), 'context', 'files', 'extra.md'), 'extra\n'),
+      ],
+    ])('rejects %s as documentation_changed', async (_label, damage) => {
+      const { repo, manifestPath, planFile } = await approvedDocumented();
+      const loaded = await loadManifest(manifestPath);
+      await damage(planFile);
+
+      const error = await approve(loaded, repo.dir);
+
+      expect(error).toBeInstanceOf(ApprovalError);
+      expect((error as ApprovalError).reason).toBe('documentation_changed');
+      expect((error as Error).message).toMatch(/docs|delete/i);
+    });
+
+    it('rejects a bundle whose content hash differs from the approved one', async () => {
+      const { repo, manifestPath } = await approvedDocumented();
+      const loaded = await loadManifest(manifestPath);
+      loaded.manifest.inputs.documentation_hash = `sha256:${'0'.repeat(64)}`;
+
+      const error = await approve(loaded, repo.dir);
+
+      expect(error).toBeInstanceOf(ApprovalError);
+      expect((error as ApprovalError).reason).toBe('documentation_changed');
+    });
+
+    it('rejects an approval whose hash and plan disagree about documentation existing', async () => {
+      const { repo, manifestPath } = await approvedDocumented();
+
+      const withoutHash = await loadManifest(manifestPath);
+      delete withoutHash.manifest.inputs.documentation_hash;
+      expect((await approve(withoutHash, repo.dir) as ApprovalError).reason).toBe(
+        'documentation_changed',
+      );
+
+      const { repo: plainRepo, manifestPath: plainManifest } = await approved();
+      const withHash = await loadManifest(plainManifest);
+      withHash.manifest.inputs.documentation_hash = `sha256:${'0'.repeat(64)}`;
+      expect((await approve(withHash, plainRepo.dir) as ApprovalError).reason).toBe(
+        'documentation_changed',
+      );
+    });
+
+    it('checks the bundle before images and the base commit', async () => {
+      const { manifestPath, planFile } = await approvedDocumented();
+      const loaded = await loadManifest(manifestPath);
+      await rm(bundleRootFor(planFile), { recursive: true, force: true });
+
+      const error = await approve(loaded, '/definitely/not/a/repo', () =>
+        Promise.reject(new Error('images were resolved')),
+      );
+
+      expect(error).toBeInstanceOf(ApprovalError);
+      expect((error as ApprovalError).reason).toBe('documentation_changed');
+    });
+
+    it('ignores a stray bundle beside a plan that declares no documentation', async () => {
+      const { repo, manifestPath } = await approved();
+      const loaded = await loadManifest(manifestPath);
+      await writeBundle(bundleRootFor(loaded.planFile), [
+        {
+          url: 'https://example.com/stray.md',
+          path: 'stray.md',
+          bytes: Buffer.from('stray\n', 'utf8'),
+          fetchedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ]);
+
+      const inputs = await validateManifest(loaded, {
+        repoPath: repo.dir,
+        resolveImages: () => Promise.resolve(IMAGES),
+      });
+
+      expect(inputs.documentationContextDir).toBeUndefined();
+    });
   });
 
   it('rejects a policy hash that no longer describes the active policy', async () => {

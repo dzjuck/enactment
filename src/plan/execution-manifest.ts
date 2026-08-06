@@ -26,6 +26,13 @@ import {
   SEMGREP_VERSION,
 } from '../config/pins.js';
 import { installCommand, type LifecycleScriptPolicy } from '../deps/cache-key.js';
+import {
+  DocumentationError,
+  bundleRootFor,
+  contextDirFor,
+  verifyBundle,
+} from '../docs/bundle.js';
+import { DOCUMENTATION_CONTRACT } from '../docs/policy.js';
 import { resolveRuntimeImages, type RuntimeImages } from '../docker/images.js';
 import {
   REVIEW_AFTER_ROOT,
@@ -66,6 +73,7 @@ export type ApprovalReason =
   | 'plan_changed'
   | 'policy_changed'
   | 'runtime_changed'
+  | 'documentation_changed'
   | 'base_unresolvable';
 
 /**
@@ -99,6 +107,8 @@ const manifestSchema = z.strictObject({
     inputs: z.strictObject({
       plan_hash: sha256,
       policy_hash: sha256,
+      /** Present exactly when the plan declares documentation (DESIGN.md §18). */
+      documentation_hash: sha256.optional(),
     }),
     runtime: z.strictObject({
       harness_version: z.string().min(1),
@@ -149,10 +159,23 @@ export interface RuntimeContract {
   network: string;
 }
 
+/** DESIGN.md §18: how documentation is fetched, what it may contain, and who may read it. */
+export interface DocumentationContract {
+  transport: string;
+  timeout_seconds: number;
+  maximum_download_mb: number;
+  redirects: string;
+  content: string;
+  mount: string;
+  mount_mode: string;
+  consumers: string[];
+}
+
 export interface Policy {
   providers: { codex: ProviderContract; claude: ProviderContract };
   review: ReviewContract;
   runtime: RuntimeContract;
+  documentation: DocumentationContract;
   routing: {
     profiles: AgentProfile[];
     normal_routes: Record<StepComplexity, ProfileId>;
@@ -210,6 +233,10 @@ export function activePolicy(): Policy {
       environment: [...RUNTIME_ENVIRONMENT],
       network: RUNTIME_NETWORK,
     },
+    documentation: {
+      ...DOCUMENTATION_CONTRACT,
+      consumers: [...DOCUMENTATION_CONTRACT.consumers],
+    },
     routing: {
       profiles: PROFILE_IDS.map((id) => ({ ...PROFILES[id] })),
       normal_routes: { ...NORMAL_ROUTES },
@@ -258,15 +285,32 @@ async function headOf(repoPath: string): Promise<ResolvedBase> {
  * nothing but the manifest the caller then saves.
  */
 export async function buildManifest(options: BuildManifestOptions): Promise<ExecutionManifest> {
-  const { hash: planHash } = await loadPlan(options.planFile);
+  const { plan, hash: planHash } = await loadPlan(options.planFile);
   const base = await (options.resolveBase ?? headOf)(options.repoPath);
   const images = await (options.resolveImages ?? (() => resolveRuntimeImages()))();
+
+  // The bundle is a separate approval input, so there is nothing to approve until it exists.
+  let documentationHash: string | undefined;
+  if (plan.documentation !== undefined) {
+    const bundle = await verifyBundle(bundleRootFor(options.planFile), plan.documentation);
+    if (!bundle.present) {
+      throw new ApprovalError(
+        'documentation_changed',
+        `${options.planFile} declares documentation but ${bundleRootFor(options.planFile)} does not exist; run "harness docs ${options.planFile}" first`,
+      );
+    }
+    documentationHash = bundle.hash;
+  }
 
   return {
     version: 1,
     plan_file: relative(dirname(resolve(options.manifestPath)), resolve(options.planFile)),
     repository: { base_branch: base.branch, base_commit: base.commit },
-    inputs: { plan_hash: planHash, policy_hash: policyHash(activePolicy()) },
+    inputs: {
+      plan_hash: planHash,
+      policy_hash: policyHash(activePolicy()),
+      ...(documentationHash === undefined ? {} : { documentation_hash: documentationHash }),
+    },
     runtime: {
       harness_version: HARNESS_VERSION,
       codex_image_id: images.codex.id,
@@ -354,6 +398,8 @@ export interface ApprovedInputs {
   baseBranch: string;
   baseCommit: string;
   images: RuntimeImages;
+  /** Present exactly when the plan declares documentation; mounted read-only at `/context`. */
+  documentationContextDir?: string;
 }
 
 export interface ValidateManifestOptions {
@@ -382,6 +428,10 @@ export async function validateManifest(
       `the active network/dependency policy is ${activeHash}, but ${manifest.inputs.policy_hash} was approved`,
     );
   }
+
+  // Before images, the base commit and any container work: an approval whose documentation
+  // drifted must stop while the only cost is a message.
+  const documentationContextDir = await approveDocumentation(loaded);
 
   if (manifest.runtime.harness_version !== HARNESS_VERSION) {
     throw new ApprovalError(
@@ -420,5 +470,63 @@ export async function validateManifest(
     baseBranch: manifest.repository.base_branch,
     baseCommit: manifest.repository.base_commit,
     images,
+    ...(documentationContextDir === undefined ? {} : { documentationContextDir }),
   };
+}
+
+/**
+ * Prove the bundle on disk is the one that was approved, and say where it is.
+ *
+ * The plan and the approval have to agree that documentation exists at all: a hash without a
+ * declaration, or a declaration without a hash, means the approval no longer describes the
+ * plan. A stray `documentation/` directory beside a plan that declares none is not the
+ * harness's business and is ignored.
+ */
+async function approveDocumentation(loaded: LoadedManifest): Promise<string | undefined> {
+  const approvedHash = loaded.manifest.inputs.documentation_hash;
+  const declared = loaded.plan.documentation;
+
+  if (declared === undefined) {
+    if (approvedHash !== undefined) {
+      throw new ApprovalError(
+        'documentation_changed',
+        `the approval carries a documentation hash, but ${loaded.planFile} declares no documentation; re-run prepare`,
+      );
+    }
+    return undefined;
+  }
+
+  if (approvedHash === undefined) {
+    throw new ApprovalError(
+      'documentation_changed',
+      `${loaded.planFile} declares documentation, but the approval carries no documentation hash; run "harness docs" and re-run prepare`,
+    );
+  }
+
+  const bundleRoot = bundleRootFor(loaded.planFile);
+  let bundle;
+  try {
+    bundle = await verifyBundle(bundleRoot, declared);
+  } catch (error) {
+    if (error instanceof DocumentationError) {
+      throw new ApprovalError('documentation_changed', error.message);
+    }
+    throw error;
+  }
+
+  if (!bundle.present) {
+    throw new ApprovalError(
+      'documentation_changed',
+      `${bundleRoot} is missing; run "harness docs ${loaded.planFile}" to download the approved documentation again`,
+    );
+  }
+
+  if (bundle.hash !== approvedHash) {
+    throw new ApprovalError(
+      'documentation_changed',
+      `${bundleRoot} is ${bundle.hash}, but ${approvedHash} was approved; delete the whole documentation directory, run "harness docs", then re-run prepare and approve the new manifest`,
+    );
+  }
+
+  return contextDirFor(bundleRoot);
 }

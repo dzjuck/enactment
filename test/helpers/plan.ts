@@ -6,13 +6,25 @@
  */
 export function planDocument(
   stepLines: string[],
-  options: { id?: string; finalCommand?: string[] } = {},
+  options: { id?: string; finalCommand?: string[]; documentation?: { url: string; path: string }[] } = {},
 ): string {
   const final = options.finalCommand ?? ['node', '--version'];
+  const documentation =
+    options.documentation === undefined
+      ? []
+      : [
+          'documentation:',
+          '  sources:',
+          ...options.documentation.flatMap((source) => [
+            `    - url: ${source.url}`,
+            `      path: ${source.path}`,
+          ]),
+        ];
 
   return [
     'version: 1',
     `id: ${options.id ?? 'harness-test-plan'}`,
+    ...documentation,
     'steps:',
     ...stepLines.map((line, index) => (index === 0 ? `  - ${line}` : `    ${line}`)),
     'final_verification:',
