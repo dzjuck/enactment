@@ -936,6 +936,7 @@ execution_manifest:
   inputs:
     plan_hash: sha256:...
     policy_hash: sha256:...
+    documentation_hash: sha256:...   # only when the plan declares documentation
 
   runtime:
     harness_version: 0.1.0
@@ -1946,6 +1947,27 @@ Established against Claude Code `2.1.221` on OrbStack `linux/arm64` before routi
   and failed under load for reasons unrelated to what it claimed. Bounding the *recorded*
   readiness duration is the same claim without the daemon's load in it — and it is what caught
   the race above.
+
+### Findings from the Milestone 7 implementation
+
+* **A CONNECT-only proxy decides what a positive control can be.** The proxy serves CONNECT and
+  nothing else (§7), so the downloader's `fetch` reaches an origin only over TLS. A local test
+  origin would therefore need a certificate the container trusts, which is a CA injection the
+  design forbids. The Docker suite consequently owns the negative controls — a host outside the
+  derived allowlist is denied and recorded, and without proxy configuration the phase network
+  reaches nothing — and the one positive control, "a declared source really downloads", is a live
+  test needing the internet but no credential and no tokens.
+* **`path.join` treats an absolute path as relative, so containment checks need their own
+  absolute test.** `join('/bundle/files', '/etc/passwd')` is `/bundle/files/etc/passwd`, which a
+  `relative()`-based check happily reports as inside the tree. The declared storage path is
+  therefore tested for an absolute prefix directly, in addition to the traversal check.
+* **Phase network roles are global, not per-phase.** The topology invariant is that no two phases
+  share an egress-capable role, so the documentation phase could not reuse the agent phase's
+  `egress` / `proxy-egress` names even though it has the same shape. It carries its own.
+* **The prompt the manifest hashes and the prompt the agent receives must be composed once.** The
+  provider policy is compiled from the prompt before the agent runs, and the agent phases compose
+  theirs separately; adding a second appended paragraph to only some of those sites would record
+  a hash for text that was never sent. All of them now go through one composer.
 
 ### Conclusion
 

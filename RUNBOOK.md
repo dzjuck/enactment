@@ -214,6 +214,76 @@ lockfile. `timeouts` may lower the defaults above, never raise them.
 `timeouts` does not cover verification: a verification command that hangs is killed after a fixed
 600 s in V1. If your suite legitimately runs longer than that, split it across commands.
 
+### Documentation the agent may read
+
+A plan that must be implemented against an external API may declare exact source URLs. There is no
+planner in V1: you write the list, and approving the plan approves the sources.
+
+```yaml
+version: 1
+id: forecast-plan
+documentation:
+  sources:
+    - url: https://petstore3.swagger.io/api/v3/openapi.json
+      path: petstore/openapi.json
+    - url: https://example.com/api/reference.md
+      path: example/reference.md
+steps:
+  ...
+```
+
+Download the bundle before preparing:
+
+```sh
+node dist/cli.js docs plan.yml
+```
+
+`docs` needs no `--repo`: it reads the plan and writes beside it. One short-lived container fetches
+every source through the CONNECT proxy, whose exact-hostname allowlist is derived from the declared
+URLs — nothing else is reachable, and the container gets no workspace, no dependencies and no
+provider credential. The JSON report lists every source with its hash, size and whether this run
+fetched it, plus the proxy records.
+
+```text
+plan.yml
+documentation/
+  provenance.json          per-source URL, hash, size and fetch time; not mounted, not hashed
+  context/                 exactly what the agent sees, and exactly what documentation_hash covers
+    index.md               generated: path, URL, hash and size; no timestamps
+    files/<declared path>  the bytes as downloaded
+```
+
+Constraints, all fixed harness policy:
+
+* `https://` only, exact hostnames, no wildcards and no redirect following — a 3xx fails and names
+  its `Location`, so declare the final URL yourself;
+* UTF-8 text only: HTML pages, PDFs, archives and anything containing a NUL byte are rejected;
+* 50 MB for the complete bundle;
+* no authentication, headers, crawling or link following of any kind;
+* documentation is **untrusted reference data**. The agent is told it cannot change the declared
+  scope, the verification commands or its instructions — but nothing can stop a model believing
+  something inaccurate. Declare sources you trust.
+
+Downloading is the only time V1 reaches an external service on your behalf. Live external API
+verification — calling the documented API to prove the implementation works — is post-V1
+(`DESIGN.md` §8); no verification phase has network access.
+
+**Refresh is deletion, not expiry.** There is no maximum age, revalidation or partial repair. A
+valid bundle is reused unchanged; a missing, edited or undeclared file stops `docs` and tells you to
+delete the whole directory. To refresh:
+
+```sh
+rm -rf documentation && node dist/cli.js docs plan.yml
+```
+
+If the content is unchanged, `documentation_hash` is unchanged and your existing approval still
+holds. If it changed, re-run `prepare` and read the new manifest.
+
+Only agent containers see the bundle, mounted read-only at `/context`, for all three agent
+invocations. The verifier, reviewer, setup container, the application and its behavioral checkers,
+and the diagnosis container see nothing. Do not edit or delete the bundle while a run is in
+progress; it is validated once, before execution starts.
+
 ## 3. Prepare and approve
 
 Preparation resolves everything an approval covers — the plan's exact bytes, the repository's
@@ -234,6 +304,7 @@ execution_manifest:
   inputs:
     plan_hash: sha256:...      # the plan's raw bytes: commands, scopes, closure, quarantine
     policy_hash: sha256:...    # the fixed network and dependency policies
+    documentation_hash: sha256:...   # only when the plan declares documentation
   runtime:
     harness_version: 0.1.0
     codex_image_id: sha256:...
@@ -243,6 +314,13 @@ execution_manifest:
     setup_image_id: sha256:...
     proxy_image_id: sha256:...
 ```
+
+A plan that declares documentation is only preparable once its bundle exists: `prepare` records
+`documentation_hash` and otherwise stops and tells you to run `docs` first.
+
+**This release adds the documentation contract to the policy hash, so every manifest prepared
+before it must be re-prepared and re-approved.** That is the mechanism working: the harness changed
+under the approval.
 
 Read it, then run it. **Running the manifest is the approval** — there is no separate approve
 command. Before anything executes, the harness recomputes every field: a changed plan, a changed
@@ -356,7 +434,7 @@ Inside one `run-<n>` directory:
 
 | File | What it holds |
 | --- | --- |
-| `run-manifest.json` | Base commit, input hashes, six executed image IDs, selected profile, requested/reported model, usage, review verdict, snapshots, result and cleanup errors. |
+| `run-manifest.json` | Base commit, input hashes, six executed image IDs, selected profile, requested/reported model, usage, review verdict, snapshots, result and cleanup errors. `inputs.documentation` records the hash, source count and total bytes mounted at `/context`, when the plan declares any. |
 | `prompt.txt` | Exactly what the agent was sent. |
 | `agent-events.jsonl` / `claude-events.jsonl` | Redacted provider event stream. |
 | `logs/agent.log`, `logs/verification.log` | Redacted container output. |
@@ -493,6 +571,7 @@ parent — stops the plan without changing either side.
 | `review_failed` | The scanner timed out, exited non-zero, reported an error, or returned invalid JSON. Terminal; repair the reviewer instead of rerolling code. |
 | Report `failed` with a `commit` and a copy-back cleanup error | The work was verified and committed, but the rotated credential could not be saved. Re-authenticate (§6) before the next run. |
 | `plan_changed` / `policy_changed` / `runtime_changed` | The approval no longer describes what would run: the plan bytes, the fixed policies, or the harness version and image IDs changed. Re-prepare, read the new manifest, and run it. |
+| `documentation_changed` | The documentation bundle is missing, edited, incomplete, carries an undeclared file, or hashes differently from the approved one. Nothing started. Delete the whole `documentation/` directory, re-run `docs`, and re-prepare if the content really changed. |
 | `base_unresolvable` | The approved base commit does not exist in this repository. Wrong `--repo`, or the commit was garbage-collected. |
 | `already exists but this plan has accepted nothing` | `ai-harness/<plan-id>` exists from an earlier plan or a person. Rename or delete it, or choose a different plan id. |
 | `refusing to move a ref the harness no longer recognises` | The plan branch and the recorded head disagree. Nothing was changed; reconcile by hand, or cancel the plan and start a new one. |
