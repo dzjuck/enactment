@@ -266,28 +266,57 @@ export interface BuildManifestOptions {
   /** Where the manifest will be written; `plan_file` is recorded relative to it. */
   manifestPath: string;
   repoPath: string;
+  /**
+   * DESIGN.md §30: the commit-ish an amended plan builds on, or the repository head.
+   *
+   * Resolved here rather than carried as a ref, so the approval names one exact commit.
+   */
+  base?: string;
   /** Injectable so hash behavior is testable without a Docker daemon. */
   resolveImages?: () => Promise<RuntimeImages>;
   /** Injectable so hash behavior is testable without a repository. */
-  resolveBase?: (repoPath: string) => Promise<ResolvedBase>;
+  resolveBase?: (repoPath: string, base?: string) => Promise<ResolvedBase>;
 }
 
-async function headOf(repoPath: string): Promise<ResolvedBase> {
-  return {
-    commit: await git(repoPath, ['rev-parse', 'HEAD']),
-    branch: await git(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']),
-  };
+/**
+ * Resolve the base an approval covers: a named commit-ish, or the repository head.
+ *
+ * The named case is dereferenced through `^{commit}` to a full SHA at prepare time, which is
+ * what lets an amendment name the previous revision's plan branch: the branch itself is read,
+ * not `plans.head_commit`, which lags it when a process died between a commit and its database
+ * write. The given string is recorded as the base ref — evidence of what was asked for, since
+ * `base_branch` was never strictly a branch name.
+ */
+async function resolveBaseCommit(repoPath: string, base?: string): Promise<ResolvedBase> {
+  if (base === undefined) {
+    return {
+      commit: await git(repoPath, ['rev-parse', 'HEAD']),
+      branch: await git(repoPath, ['rev-parse', '--abbrev-ref', 'HEAD']),
+    };
+  }
+
+  let commit: string;
+  try {
+    commit = await git(repoPath, ['rev-parse', '--verify', '--quiet', `${base}^{commit}`]);
+  } catch {
+    throw new ApprovalError(
+      'base_unresolvable',
+      `--base ${base} does not resolve to a commit in ${repoPath}`,
+    );
+  }
+
+  return { commit, branch: base };
 }
 
 /**
  * Resolve everything an approval covers into one candidate manifest.
  *
- * Read-only: it resolves the repository's current head and the local image IDs, and writes
- * nothing but the manifest the caller then saves.
+ * Read-only: it resolves the approved base — a named commit-ish or the repository head — and
+ * the local image IDs, and writes nothing but the manifest the caller then saves.
  */
 export async function buildManifest(options: BuildManifestOptions): Promise<ExecutionManifest> {
   const { plan, hash: planHash } = await loadPlan(options.planFile);
-  const base = await (options.resolveBase ?? headOf)(options.repoPath);
+  const base = await (options.resolveBase ?? resolveBaseCommit)(options.repoPath, options.base);
   const images = await (options.resolveImages ?? (() => resolveRuntimeImages()))();
 
   // The bundle is a separate approval input, so there is nothing to approve until it exists.

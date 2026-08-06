@@ -1,6 +1,6 @@
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -12,9 +12,9 @@ import {
 } from '../../src/plan/execution-manifest.js';
 import type { CoordinatorOptions, PlanReport } from '../../src/run/coordinator.js';
 import { CliUsageError, parseCommand } from '../../src/run/options.js';
-import { execute } from '../../src/run/production.js';
+import { execute, type CommandResult } from '../../src/run/production.js';
 import { StateStore } from '../../src/state/store.js';
-import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
+import { commitAll, createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
 const IMAGES: RuntimeImages = {
   codex: { role: 'codex', id: `sha256:${'a'.repeat(64)}` },
@@ -98,16 +98,28 @@ const succeeded = (options: CoordinatorOptions): Promise<PlanReport> =>
     steps: [{ id: 'only-step', status: 'completed', attempts: [], commit: 'c'.repeat(40) }],
   });
 
-async function prepare(space: Workspace): Promise<void> {
-  const result = await execute(
+function prepareWith(
+  space: Workspace,
+  extra: string[] = [],
+  output = space.manifestPath,
+): Promise<CommandResult> {
+  return execute(
     parseCommand(
-      ['prepare', space.planFile, '--repo', space.repo.dir, '--output', space.manifestPath],
+      ['prepare', space.planFile, '--repo', space.repo.dir, '--output', output, ...extra],
       space.env,
     ),
     { resolveImages: () => Promise.resolve(IMAGES) },
   );
+}
 
-  expect(result.exitCode).toBe(0);
+async function prepare(space: Workspace): Promise<void> {
+  expect((await prepareWith(space)).exitCode).toBe(0);
+}
+
+/** A commit reachable from no branch, so `--base` cannot be resolving the checked-out head. */
+async function offBranchCommit(repo: TargetRepo): Promise<string> {
+  const tree = await git(repo.dir, ['rev-parse', 'HEAD^{tree}']);
+  return git(repo.dir, ['commit-tree', tree, '-p', repo.commit, '-m', 'off-branch']);
 }
 
 describe('command parsing', () => {
@@ -127,6 +139,20 @@ describe('command parsing', () => {
     });
   });
 
+  it('accepts --base on prepare only', () => {
+    expect(
+      parseCommand(
+        ['prepare', 'plan.yml', '--repo', '/repo', '--output', 'm.yml', '--base', 'ai-harness/r1'],
+        {},
+      ),
+    ).toMatchObject({ kind: 'prepare', base: 'ai-harness/r1' });
+
+    // Omitted, not defaulted: today's behavior is what an absent base means.
+    expect(
+      parseCommand(['prepare', 'plan.yml', '--repo', '/repo', '--output', 'm.yml'], {}),
+    ).not.toHaveProperty('base');
+  });
+
   it.each([
     ['the removed task CLI', ['run', 'task.yml']],
     ['an unknown command', ['execute', 'm.yml', '--repo', '/repo']],
@@ -138,6 +164,9 @@ describe('command parsing', () => {
     ['an image override', ['run', 'm.yml', '--repo', '/repo', '--agent-image', 'x']],
     ['a network override', ['run', 'm.yml', '--repo', '/repo', '--network', 'host']],
     ['an allowlist override', ['run', 'm.yml', '--repo', '/repo', '--allow-host', 'evil.test']],
+    ['a base flag on run', ['run', 'm.yml', '--repo', '/repo', '--base', 'ai-harness/r1']],
+    ['a base flag on cancel', ['cancel', 'm.yml', '--repo', '/repo', '--base', 'ai-harness/r1']],
+    ['a base flag on docs', ['docs', 'plan.yml', '--base', 'ai-harness/r1']],
   ])('rejects %s', (_label, argv) => {
     expect(() => parseCommand(argv, {})).toThrow(CliUsageError);
   });
@@ -209,6 +238,82 @@ describe('prepare', () => {
     expect(approved?.baseCommit).toBe(space.repo.commit);
     expect(approved?.images).toEqual(IMAGES);
     expect(approved?.plan.id).toBe('demo-plan');
+  });
+});
+
+describe('prepare --base', () => {
+  it('records the tip of a named ref, re-read every time it is resolved', async () => {
+    const space = await workspace();
+    await git(space.repo.dir, ['branch', 'ai-harness/r1', space.repo.commit]);
+
+    expect((await prepareWith(space, ['--base', 'ai-harness/r1'])).exitCode).toBe(0);
+    expect((await loadManifest(space.manifestPath)).manifest.repository).toEqual({
+      base_branch: 'ai-harness/r1',
+      base_commit: space.repo.commit,
+    });
+
+    // The ref is resolved at prepare time, not remembered from a previous manifest.
+    await writeFile(join(space.repo.dir, 'accepted.txt'), 'x\n');
+    const moved = await commitAll(space.repo.dir, 'a later accepted step');
+    await git(space.repo.dir, ['branch', '-f', 'ai-harness/r1', moved]);
+
+    const second = join(dirname(space.manifestPath), 'execution-manifest-r2.yml');
+    expect((await prepareWith(space, ['--base', 'ai-harness/r1'], second)).exitCode).toBe(0);
+    expect((await loadManifest(second)).manifest.repository).toEqual({
+      base_branch: 'ai-harness/r1',
+      base_commit: moved,
+    });
+  });
+
+  it('records a full SHA that no branch contains, and the given string as the ref', async () => {
+    const space = await workspace();
+    const orphan = await offBranchCommit(space.repo);
+
+    expect((await prepareWith(space, ['--base', orphan])).exitCode).toBe(0);
+
+    expect((await loadManifest(space.manifestPath)).manifest.repository).toEqual({
+      base_branch: orphan,
+      base_commit: orphan,
+    });
+    expect(await git(space.repo.dir, ['branch', '--contains', orphan])).toBe('');
+  });
+
+  it.each([
+    ['a nonexistent ref', () => Promise.resolve('ai-harness/never-created')],
+    ['an object that is not a commit', (repo: TargetRepo) => git(repo.dir, ['rev-parse', 'HEAD^{tree}'])],
+  ])('fails as base_unresolvable for %s, writing nothing', async (_label, resolve) => {
+    const space = await workspace();
+    const ref = await resolve(space.repo);
+
+    const result = await prepareWith(space, ['--base', ref]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.report).toMatchObject({ error: 'base_unresolvable' });
+    expect((result.report as { message: string }).message).toContain(ref);
+    await expect(access(space.manifestPath)).rejects.toThrow();
+  });
+
+  it('still records the repository head and its branch name when omitted', async () => {
+    const space = await workspace();
+    await prepare(space);
+
+    expect((await loadManifest(space.manifestPath)).manifest.repository).toEqual({
+      base_branch: 'main',
+      base_commit: space.repo.commit,
+    });
+  });
+
+  it('changes the manifest hash, so the base is part of what the user approves', async () => {
+    const space = await workspace();
+    const orphan = await offBranchCommit(space.repo);
+
+    await prepare(space);
+    const head = (await loadManifest(space.manifestPath)).manifestHash;
+
+    const other = join(dirname(space.manifestPath), 'execution-manifest-r2.yml');
+    expect((await prepareWith(space, ['--base', orphan], other)).exitCode).toBe(0);
+
+    expect((await loadManifest(other)).manifestHash).not.toBe(head);
   });
 });
 
@@ -352,9 +457,85 @@ describe('cancel', () => {
     expect(result.exitCode).toBe(1);
   }
 
+  /** Record an accepted commit for the plan's first step, exactly as acceptance would. */
+  function recordAcceptance(space: Workspace, commit: string): void {
+    const store = StateStore.open(join(space.stateDir, 'state.db'));
+    try {
+      const plan = store.activePlanForRepo(space.repo.dir);
+      if (plan === undefined) throw new Error('no plan owns the repository');
+      const step = store.steps(plan.row)[0];
+      if (step === undefined) throw new Error('the plan has no steps');
+
+      const attempt = store.startAttempt({
+        stepRow: step.row,
+        attemptId: 'a'.repeat(16),
+        profileId: 'codex-fast',
+        parentCommit: plan.baseCommit,
+        artifactPath: 'run-1',
+      });
+      store.completeAcceptance({
+        planRow: plan.row,
+        stepRow: step.row,
+        attemptRow: attempt.row,
+        commit,
+      });
+    } finally {
+      store.close();
+    }
+  }
+
   function cancel(space: Workspace, repoPath = space.repo.dir) {
     return execute(parseCommand(['cancel', space.manifestPath, '--repo', repoPath], space.env), {});
   }
+
+  it('names both commits an amendment could build on when a step was accepted', async () => {
+    const space = await workspace();
+    await prepare(space);
+    await registered(space);
+
+    await writeFile(join(space.repo.dir, 'accepted.txt'), 'x\n');
+    const accepted = await commitAll(space.repo.dir, 'accepted step');
+    await git(space.repo.dir, ['branch', 'ai-harness/demo-plan', accepted]);
+    recordAcceptance(space, accepted);
+
+    const result = await cancel(space);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toMatchObject({
+      plan: 'demo-plan',
+      branch: 'ai-harness/demo-plan',
+      head: accepted,
+      base: space.repo.commit,
+    });
+  });
+
+  it('reports the approved base and no head when the plan accepted nothing', async () => {
+    const space = await workspace();
+    await prepare(space);
+    await registered(space);
+
+    const result = await cancel(space);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.report).toMatchObject({ base: space.repo.commit });
+    expect((result.report as { head?: string }).head).toBeUndefined();
+  });
+
+  it('reads the head from the ref, so a commit the database never recorded is still named', async () => {
+    const space = await workspace();
+    await prepare(space);
+    await registered(space);
+
+    // An acceptance interrupted between its commit and its database write: the branch carries
+    // the commit, `plans.head_commit` does not.
+    await writeFile(join(space.repo.dir, 'landed.txt'), 'x\n');
+    const landed = await commitAll(space.repo.dir, 'landed but unrecorded');
+    await git(space.repo.dir, ['branch', 'ai-harness/demo-plan', landed]);
+
+    const result = await cancel(space);
+
+    expect(result.report).toMatchObject({ head: landed, base: space.repo.commit });
+  });
 
   it('releases the repository, preserves the branch and artifacts, and is idempotent', async () => {
     const space = await workspace();

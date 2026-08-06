@@ -124,9 +124,22 @@ async function finishAcceptance(
   });
 }
 
+/**
+ * Where a plan branch actually points, or `undefined` if it does not exist.
+ *
+ * The ref, not `plans.head_commit`: the two disagree exactly when an acceptance was interrupted
+ * between its commit and its database write, and in that window the ref is the one that is
+ * right. `cancel` reads it for the same reason recovery does.
+ */
+export async function branchCommit(
+  repoPath: string,
+  branch: string,
+): Promise<string | undefined> {
+  return git(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
+}
+
 async function refExists(repoPath: string, branch: string): Promise<boolean> {
-  return (await git(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])) !==
-    undefined;
+  return (await branchCommit(repoPath, branch)) !== undefined;
 }
 
 /**

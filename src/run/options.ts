@@ -9,7 +9,7 @@ export class CliUsageError extends Error {
 
 export const CLI_USAGE = [
   'usage:',
-  '  harness prepare <plan.yml> --repo <path> --output <execution-manifest.yml>',
+  '  harness prepare <plan.yml> --repo <path> --output <execution-manifest.yml> [--base <commit-ish>]',
   '  harness run <execution-manifest.yml> --repo <path> [--artifacts <dir>]',
   '  harness cancel <execution-manifest.yml> --repo <path> [--artifacts <dir>]',
   '  harness docs <plan.yml>',
@@ -29,6 +29,14 @@ export interface PrepareCommand extends StateLocations {
   planFile: string;
   repoPath: string;
   output: string;
+  /**
+   * DESIGN.md §30: the commit the plan builds on, resolved at prepare time.
+   *
+   * Absent means the repository head, which is a first revision's case. An amendment names the
+   * previous revision's plan branch, so the base is read from the ref rather than from a
+   * database column that lags it.
+   */
+  base?: string;
 }
 
 export interface RunCommand extends StateLocations {
@@ -59,7 +67,7 @@ export type Command = PrepareCommand | RunCommand | CancelCommand | DocsCommand;
 
 /** Which options each command accepts. An option outside its command's set is an error. */
 const ACCEPTED = {
-  prepare: ['repo', 'output'],
+  prepare: ['repo', 'output', 'base'],
   run: ['repo', 'artifacts'],
   cancel: ['repo', 'artifacts'],
   docs: [],
@@ -132,7 +140,15 @@ export function parseCommand(argv: string[], env: NodeJS.ProcessEnv = process.en
   if (name === 'prepare') {
     const output = parsed.values.output;
     if (output === undefined) throw new CliUsageError(`--output is required\n${CLI_USAGE}`);
-    return { kind: 'prepare', planFile: file, repoPath, output, ...locations };
+    const base = parsed.values.base;
+    return {
+      kind: 'prepare',
+      planFile: file,
+      repoPath,
+      output,
+      ...(base === undefined ? {} : { base }),
+      ...locations,
+    };
   }
 
   // Same default as `run`, because it names the same tree: an operator who passed

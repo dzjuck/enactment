@@ -28,6 +28,7 @@ import { stateDirectory } from '../state/paths.js';
 import { StateStore } from '../state/store.js';
 import { sweepHarness } from './cleanup.js';
 import { runPlan, type CoordinatorOptions, type PlanReport } from './coordinator.js';
+import { branchCommit } from './recovery.js';
 import type { CancelCommand, Command, DocsCommand, PrepareCommand, RunCommand } from './options.js';
 
 export interface ProductionDependencies {
@@ -71,6 +72,7 @@ async function prepare(
     planFile: command.planFile,
     manifestPath: command.output,
     repoPath: command.repoPath,
+    ...(command.base === undefined ? {} : { base: command.base }),
     ...(dependencies.resolveImages === undefined
       ? {}
       : { resolveImages: dependencies.resolveImages }),
@@ -173,12 +175,22 @@ async function cancel(command: CancelCommand): Promise<CommandResult> {
       await snapshots.remove(artifact);
     }
 
+    // Both commits an amendment could build on (§30), so the operator never has to work out
+    // which case they are in: `head` present means the plan accepted work and the amendment
+    // builds on the branch tip; `head` absent means it accepted nothing and `base` is what it
+    // would have built on. `head` comes from the ref, because a database column that lags an
+    // interrupted acceptance would report accepted work as none and drop a commit out of the
+    // amendment — which is also the only way that commit is visible after a policy change,
+    // where the reconciling run is unavailable.
+    const head = await branchCommit(command.repoPath, plan.branch);
+
     return {
       report: {
         plan: plan.planId,
         state: plan.state === 'completed' ? 'completed' : 'cancelled',
         branch: plan.branch,
-        head: plan.headCommit,
+        head,
+        base: plan.baseCommit,
       },
       exitCode: 0,
     };
