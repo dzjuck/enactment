@@ -961,7 +961,7 @@ provider policies, network and dependency policy. Both provider image IDs are ap
 normal route uses only one, because a retry may use Claude.
 
 The base is whatever `prepare` was pointed at. It is the repository head for a first revision and
-the previous revision's plan branch tip for an amendment (§30); nothing here treats those two
+the previous revision's reported accepted head for an amendment (§30); nothing here treats those two
 differently, because an amendment is an ordinary approval.
 
 Approval required for:
@@ -1431,7 +1431,7 @@ they approved the first one.
 ```text
 cancel the current plan
 → rewrite the plan, keeping only the steps that still have to run
-→ prepare from the previous revision's plan branch tip
+→ prepare from the previous revision's reported accepted head
 → approve
 → run
 ```
@@ -1443,7 +1443,7 @@ harness run <old-manifest> --repo <path>      # optional: finishes an interrupte
 harness cancel <old-manifest> --repo <path>   # releases the repository path; reports the base
 # rewrite the plan: new plan ID, remaining steps only
 harness prepare plan-r2.yml --repo <path> \
-  --base ai-harness/<previous-plan-id> \
+  --base <cancel-report-head-or-base> \
   --output execution-manifest-r2.yml     # --base: the cancel report's head, or its base if none
 harness run execution-manifest-r2.yml --repo <path>
 ```
@@ -1463,17 +1463,16 @@ undoes earlier work is an ordinary step of the amended plan.
 ### Choosing the base
 
 A plan branch exists only once the plan has accepted a step (§14), so there are two cases and
-`cancel` reports which one applies by naming both the branch head and the base:
+`cancel` reports which one applies by naming both the accepted head and the base:
 
-* **the plan accepted at least one step** — amend from the plan branch tip,
-  `--base ai-harness/<previous-plan-id>`;
+* **the plan accepted at least one step** — amend from the `head` SHA reported by `cancel`;
 * **the plan accepted nothing** — there is no plan branch to name. Amend from the cancelled plan's
   own approved base, which is what it would have built on.
 
-`cancel` reads that head from the ref, not from `plans.head_commit`. The database column lags the
-branch exactly when an acceptance was interrupted between its commit and its database write — the
-same lag that makes `--base` take a commit-ish — and a discriminator that reported no head there
-would send the operator to the old base and drop an accepted commit out of the amendment.
+`cancel` normally reads that head from `plans.head_commit`. The one valid mismatch is an acceptance
+interrupted between its commit and its database write: the branch tip is used only when its parent,
+step trailer and idempotency-key trailer match the stored `accepting` attempt. Otherwise a moved,
+deleted or pre-existing ref cannot become accepted work through cancellation.
 
 The base must contain the previous revision's tip, or the amendment is a new line of work rather
 than a continuation: the earlier commits stay reachable only from their own branch, and the newest
@@ -1788,11 +1787,12 @@ Adds:
 
 * `prepare --base <commit-ish>`, resolved to a full SHA at prepare time, so an approved plan can
   build on a previous revision's plan branch instead of on the repository head;
-* the amendment procedure of §30 — cancel, rewrite, prepare from the plan branch tip, approve, run
+* the amendment procedure of §30 — cancel, rewrite, prepare from the reported accepted head,
+  approve, run
   — as the single answer to a blocked plan, including the case of a plan that accepted nothing and
   so has no branch to amend from;
-* a `base` field on the `cancel` report, and a head read from the ref rather than the database, so
-  the commit to amend from is named rather than derived;
+* a `base` field on the `cancel` report, and validation of an interrupted acceptance against the
+  branch tip, so the safe commit to amend from is named rather than derived;
 * step insertion, removal, reordering and rewriting, by rewriting the plan;
 * compensating steps as ordinary steps of an amended plan;
 * dependency changes (§13) and test-contract repair (§25) as amendment procedures rather than as

@@ -28,7 +28,7 @@ import { stateDirectory } from '../state/paths.js';
 import { StateStore } from '../state/store.js';
 import { sweepHarness } from './cleanup.js';
 import { runPlan, type CoordinatorOptions, type PlanReport } from './coordinator.js';
-import { branchCommit } from './recovery.js';
+import { acceptedPlanHead } from './recovery.js';
 import type { CancelCommand, Command, DocsCommand, PrepareCommand, RunCommand } from './options.js';
 
 export interface ProductionDependencies {
@@ -197,21 +197,18 @@ async function cancel(command: CancelCommand): Promise<CommandResult> {
       await snapshots.remove(artifact);
     }
 
-    // Both commits an amendment could build on (§30), so the operator never has to work out
-    // which case they are in: `head` present means the plan accepted work and the amendment
-    // builds on the branch tip; `head` absent means it accepted nothing and `base` is what it
-    // would have built on. `head` comes from the ref, because a database column that lags an
-    // interrupted acceptance would report accepted work as none and drop a commit out of the
-    // amendment — which is also the only way that commit is visible after a policy change,
-    // where the reconciling run is unavailable.
-    const head = await branchCommit(command.repoPath, plan.branch);
+    // `head` is accepted work, never merely whatever the plan-named ref points at. The one
+    // legitimate ref/database mismatch is a commit from an `accepting` attempt whose database
+    // transaction was interrupted; recovery validates its parent and trailers before carrying
+    // it forward. A moved or pre-existing ref falls back to the last recorded acceptance.
+    const head = await acceptedPlanHead(command.repoPath, store, plan);
 
     return {
       report: {
         plan: plan.planId,
         state: plan.state === 'completed' ? 'completed' : 'cancelled',
         branch: plan.branch,
-        head,
+        ...(head === undefined ? {} : { head }),
         base: plan.baseCommit,
       },
       exitCode: 0,

@@ -322,7 +322,7 @@ A plan that declares documentation is only preparable once its bundle exists: `p
 
 ```sh
 node dist/cli.js prepare plan-r2.yml --repo /path/to/repo \
-  --base ai-harness/collector-dashboard \
+  --base 9c1f... \
   --output execution-manifest-r2.yml
 ```
 
@@ -468,9 +468,10 @@ node dist/cli.js cancel execution-manifest.yml --repo /path/to/repo --artifacts 
 
 # 3. Rewrite the plan by hand: a new plan id, and only the steps that still have to run.
 
-# 4. Prepare from the accepted work rather than from the base branch.
+# 4. Prepare from the accepted work rather than from the base branch. Use the `head`
+#    SHA from cancel; if it reported no head, use its `base` SHA.
 node dist/cli.js prepare plan-r2.yml --repo /path/to/repo \
-  --base ai-harness/collector-dashboard \
+  --base 9c1f... \
   --output execution-manifest-r2.yml
 
 # 5. Read the manifest and its warnings, then run it. Running it is the approval.
@@ -500,11 +501,12 @@ A plan branch exists only once the plan has accepted a step, so there are two ca
 
 | `cancel` report | Meaning | `--base` |
 | --- | --- | --- |
-| `head` present | The plan accepted at least one step; `head` is the branch tip. | `ai-harness/<previous-plan-id>` |
+| `head` present | The plan accepted at least one step; `head` is its last verified commit. | the reported `head` SHA |
 | `head` absent | The plan accepted nothing, so it never created a branch. | the reported `base` |
 
-`head` is read from the ref, not from the database, so a commit that landed while the process died
-before recording it is still named.
+`head` normally comes from the database. A newer branch tip is reported only when its parent and
+trailers prove that it belongs to an `accepting` attempt interrupted after its commit. A foreign,
+moved or deleted ref cannot become accepted work through `cancel`.
 
 #### Linear continuation is yours to keep
 
@@ -549,16 +551,15 @@ pre-implementation snapshot.
 
 A release that changes a fixed policy or rebuilds an image moves `policy_hash` or an image ID, and
 every approval prepared before it stops with `policy_changed` or `runtime_changed`. That is the
-mechanism working: the harness changed under the approval. For a plan in flight, the way forward is
-the amendment procedure above — prepare the remaining steps from `ai-harness/<plan-id>`, because
-re-preparing without `--base` would resolve the repository head again and drop the accepted work.
+mechanism working: the harness changed under the approval. For a plan in flight, use the amendment
+procedure above and prepare from the `head` or `base` SHA reported by `cancel`; re-preparing without
+`--base` would resolve the repository head again and drop accepted work.
 
 With one difference you cannot work around: **step 1 is unavailable.** `run` validates the policy
 hash before the coordinator reconciles anything, so the old manifest exits `policy_changed` and an
 interrupted acceptance cannot be finished — it is lost with the cancel. `cancel` itself still works,
-because it validates the plan, not the policy. That is the other reason `cancel` reads the branch
-tip from the ref: after an upgrade, that read is the only way a landed-but-unrecorded commit is
-visible at all.
+because it validates the plan, not the policy. That is the other reason `cancel` checks for a
+verified landed-but-unrecorded commit before falling back to the database head.
 
 The release that added the documentation contract to the policy hash was exactly this case. This
 release changes no policy field, so approvals prepared before it stay valid across it.

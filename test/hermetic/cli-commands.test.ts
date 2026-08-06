@@ -5,6 +5,8 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { RuntimeImages } from '../../src/docker/images.js';
+import { acceptChanges } from '../../src/git/accept.js';
+import { idempotencyKey } from '../../src/git/idempotency.js';
 import {
   loadManifest,
   validateManifest,
@@ -618,6 +620,63 @@ describe('cancel', () => {
     }
   }
 
+  async function leaveLandedAcceptance(space: Workspace): Promise<string> {
+    const store = StateStore.open(join(space.stateDir, 'state.db'));
+    let key: string;
+    try {
+      const plan = store.activePlanForRepo(space.repo.dir);
+      if (plan === undefined) throw new Error('no plan owns the repository');
+      const step = store.steps(plan.row)[0];
+      if (step === undefined) throw new Error('the plan has no steps');
+
+      key = idempotencyKey({
+        manifestHash: plan.manifestHash,
+        planId: plan.planId,
+        stepId: step.stepId,
+        attempt: 'accepting-attempt',
+        parentCommit: plan.baseCommit,
+      });
+      const attempt = store.startAttempt({
+        stepRow: step.row,
+        attemptId: 'accepting-attempt',
+        profileId: 'codex-fast',
+        parentCommit: plan.baseCommit,
+        artifactPath: 'run-1',
+      });
+      store.setAttemptCandidate(attempt.row, `sha256:${'e'.repeat(64)}`, key);
+      store.setAttemptState(attempt.row, 'accepting');
+    } finally {
+      store.close();
+    }
+
+    const accepted = await acceptChanges({
+      repoPath: space.repo.dir,
+      parentCommit: space.repo.commit,
+      branchExists: false,
+      branch: 'ai-harness/demo-plan',
+      planId: 'demo-plan',
+      stepId: 'only-step',
+      attempt: 'accepting-attempt',
+      idempotencyKey: key,
+      verificationStatus: 'pass',
+      changes: [
+        {
+          kind: 'added',
+          path: 'only-step.txt',
+          entry: {
+            path: 'only-step.txt',
+            type: 'file',
+            mode: 0o644,
+            hash: 'unused',
+            content: Buffer.from('accepted\n'),
+          },
+        },
+      ],
+    });
+
+    return accepted.commit;
+  }
+
   function cancel(space: Workspace, repoPath = space.repo.dir) {
     return execute(parseCommand(['cancel', space.manifestPath, '--repo', repoPath], space.env), {});
   }
@@ -662,13 +721,42 @@ describe('cancel', () => {
 
     // An acceptance interrupted between its commit and its database write: the branch carries
     // the commit, `plans.head_commit` does not.
-    await writeFile(join(space.repo.dir, 'landed.txt'), 'x\n');
-    const landed = await commitAll(space.repo.dir, 'landed but unrecorded');
-    await git(space.repo.dir, ['branch', 'ai-harness/demo-plan', landed]);
+    const landed = await leaveLandedAcceptance(space);
 
     const result = await cancel(space);
 
     expect(result.report).toMatchObject({ head: landed, base: space.repo.commit });
+  });
+
+  it('does not report a foreign branch as accepted work', async () => {
+    const space = await workspace();
+    await prepare(space);
+    await registered(space);
+    await git(space.repo.dir, ['branch', 'ai-harness/demo-plan', space.repo.commit]);
+
+    const result = await cancel(space);
+
+    expect(result.report).toMatchObject({ base: space.repo.commit });
+    expect(result.report).not.toHaveProperty('head');
+  });
+
+  it('reports the recorded acceptance when the plan branch was moved', async () => {
+    const space = await workspace();
+    await prepare(space);
+    await registered(space);
+
+    await writeFile(join(space.repo.dir, 'accepted.txt'), 'accepted\n');
+    const accepted = await commitAll(space.repo.dir, 'accepted step');
+    await git(space.repo.dir, ['branch', 'ai-harness/demo-plan', accepted]);
+    recordAcceptance(space, accepted);
+
+    await writeFile(join(space.repo.dir, 'foreign.txt'), 'foreign\n');
+    const foreign = await commitAll(space.repo.dir, 'foreign movement');
+    await git(space.repo.dir, ['branch', '-f', 'ai-harness/demo-plan', foreign]);
+
+    const result = await cancel(space);
+
+    expect(result.report).toMatchObject({ head: accepted, base: space.repo.commit });
   });
 
   it('releases the repository, preserves the branch and artifacts, and is idempotent', async () => {
@@ -685,6 +773,7 @@ describe('cancel', () => {
     const first = await cancel(space);
     expect(first.exitCode).toBe(0);
     expect(first.report).toMatchObject({ plan: 'demo-plan', state: 'cancelled' });
+    expect(first.report).not.toHaveProperty('head');
 
     // Idempotent: cancelling again is a success, not an error.
     const second = await cancel(space);

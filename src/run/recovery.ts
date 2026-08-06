@@ -127,15 +127,69 @@ async function finishAcceptance(
 /**
  * Where a plan branch actually points, or `undefined` if it does not exist.
  *
- * The ref, not `plans.head_commit`: the two disagree exactly when an acceptance was interrupted
- * between its commit and its database write, and in that window the ref is the one that is
- * right. `cancel` reads it for the same reason recovery does.
+ * Recovery reads the ref because it can legitimately lead `plans.head_commit` when an acceptance
+ * was interrupted. `cancel` additionally proves that mismatch belongs to an `accepting` attempt
+ * before reporting it as accepted work.
  */
 export async function branchCommit(
   repoPath: string,
   branch: string,
 ): Promise<string | undefined> {
   return git(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
+}
+
+async function trailerValues(
+  repoPath: string,
+  commit: string,
+  trailer: string,
+): Promise<string[]> {
+  const values = await git(repoPath, [
+    'log',
+    '-1',
+    `--format=%(trailers:key=${trailer},valueonly)`,
+    commit,
+  ]);
+  return values?.split('\n').map((value) => value.trim()).filter(Boolean) ?? [];
+}
+
+/**
+ * The last commit `cancel` may safely carry into a new plan revision.
+ *
+ * The database is authoritative unless the branch tip proves the one legitimate mismatch:
+ * an acceptance committed before its database transaction. A foreign, moved or deleted ref
+ * therefore cannot become approved work merely because it uses the plan's branch name.
+ */
+export async function acceptedPlanHead(
+  repoPath: string,
+  store: StateStore,
+  plan: PlanRecord,
+): Promise<string | undefined> {
+  const tip = await branchCommit(repoPath, plan.branch);
+  if (tip === undefined || tip === plan.headCommit) return plan.headCommit;
+
+  const expectedParent = plan.headCommit ?? plan.baseCommit;
+  for (const step of store.steps(plan.row)) {
+    for (const attempt of store.attempts(step.row)) {
+      if (
+        attempt.state !== 'accepting' ||
+        attempt.idempotencyKey === undefined ||
+        attempt.parentCommit !== expectedParent
+      ) {
+        continue;
+      }
+
+      const parent = await git(repoPath, ['rev-parse', `${tip}^`]);
+      if (parent !== attempt.parentCommit) continue;
+
+      const [keys, steps] = await Promise.all([
+        trailerValues(repoPath, tip, TRAILERS.idempotencyKey),
+        trailerValues(repoPath, tip, TRAILERS.step),
+      ]);
+      if (keys.includes(attempt.idempotencyKey) && steps.includes(step.stepId)) return tip;
+    }
+  }
+
+  return plan.headCommit;
 }
 
 async function refExists(repoPath: string, branch: string): Promise<boolean> {
