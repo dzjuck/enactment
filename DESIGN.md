@@ -2089,6 +2089,25 @@ Established against Claude Code `2.1.221` on OrbStack `linux/arm64` before routi
   theirs separately; adding a second appended paragraph to only some of those sites would record
   a hash for text that was never sent. All of them now go through one composer.
 
+### Findings from the Milestone 8 implementation
+
+* **A trailer scan is not a message search.** `git log <commit>
+  --format=%H%x09%(trailers:key=AI-Harness-Step,valueonly,separator=%x2C)` emits one line per
+  commit, tab-separated, empty for every non-harness commit — measured on git 2.39.3. Prose that
+  mentions the trailer text outside the final paragraph is not a trailer and does not appear, so
+  the warning needs no message parsing and cannot be provoked by a commit message.
+* **The trailer names moved to where they are read back.** `acceptedStepIds` lives beside
+  `findCommitByKey`, and acceptance already imports that module, so `TRAILERS` had to move there
+  rather than be imported from acceptance — one definition, no import cycle, no second literal to
+  drift.
+* **An advisory scan must not be able to fail a prepare.** The step-ID scan yields nothing rather
+  than throwing when git fails. Its product is a warning, and §30's asymmetry runs the same way:
+  refusing to write a manifest because an advisory check could not run is a worse failure than the
+  one it exists to prevent.
+* **Warning rather than refusing changes `buildManifest`'s shape, not the manifest's.** It returns
+  the collisions beside the manifest, so the approval file is unchanged and the report is where the
+  warning surfaces — the moment the operator is deciding whether to run it.
+
 ### Conclusion
 
 Milestone 1 is feasible with a simpler security model than earlier drafts assumed:

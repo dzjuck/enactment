@@ -87,10 +87,12 @@ async function prepare(
   const warnings = alreadyAccepted.map((accepted) => ({
     step: accepted.stepId,
     commit: accepted.commit,
+    // Not "…which the approved base <sha> can reach": the carrier is often the base itself,
+    // and the same SHA twice in one sentence reads as a mistake. The base is in the report.
     message:
       `step "${accepted.stepId}" is already carried by commit ${accepted.commit}, which the ` +
-      `approved base ${manifest.repository.base_commit} can reach; remove the step if it is ` +
-      'already done, or rename it if this is different work',
+      'approved base can reach; remove the step if it is already done, or rename it if this ' +
+      'is different work',
   }));
 
   return {

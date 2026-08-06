@@ -286,8 +286,8 @@ progress; it is validated once, before execution starts.
 
 ## 3. Prepare and approve
 
-Preparation resolves everything an approval covers — the plan's exact bytes, the repository's
-current head, fixed network/routing/dependency/review policies, and the six runtime image IDs — into
+Preparation resolves everything an approval covers — the plan's exact bytes, the commit it builds
+on, fixed network/routing/dependency/review policies, and the six runtime image IDs — into
 one candidate manifest. It is read-only apart from the file it writes:
 
 ```sh
@@ -318,15 +318,50 @@ execution_manifest:
 A plan that declares documentation is only preparable once its bundle exists: `prepare` records
 `documentation_hash` and otherwise stops and tells you to run `docs` first.
 
-**This release adds the documentation contract to the policy hash, so every manifest prepared
-before it must be re-prepared and re-approved.** That is the mechanism working: the harness changed
-under the approval.
+### Choosing the base
 
-Read it, then run it. **Running the manifest is the approval** — there is no separate approve
-command. Before anything executes, the harness recomputes every field: a changed plan, a changed
-policy, a rebuilt image, a different harness version, or a base commit the repository can no
+```sh
+node dist/cli.js prepare plan-r2.yml --repo /path/to/repo \
+  --base ai-harness/collector-dashboard \
+  --output execution-manifest-r2.yml
+```
+
+`--base <commit-ish>` names the commit the plan builds on. Omitted, it is the repository head,
+which is what a first revision wants. Given, the ref is resolved to a full commit SHA **at prepare
+time** — so naming a plan branch reads that branch, not a database column that can lag it — and a
+ref that does not exist, or that does not name a commit, fails with `base_unresolvable` before the
+manifest is written. This is how an amended plan continues from accepted work; see "Amending a
+plan" below.
+
+`base_commit` is covered by the manifest hash, so the base is part of what you approve.
+`base_branch` records the string you gave — a branch name, or the SHA repeated — and is evidence
+only; nothing resolves it again.
+
+### Warnings on the prepare report
+
+The report may carry a `warnings` array, and it exists to be read at the moment you decide whether
+to approve:
+
+| Warning | Meaning | Fix |
+| --- | --- | --- |
+| `step "<id>" is already carried by commit <sha>` | An `AI-Harness-Step` trailer reachable from the approved base already names that step, so the plan probably still lists work that is done. | Remove the step if it is already done, or rename it if it is genuinely different work. |
+
+It is a warning and not a refusal. Step IDs stay reachable forever once a revision branch is merged
+into the base branch, and ordinary slugs — `persist-runs`, `add-tests` — collide across unrelated
+plans, so refusing would stop legitimate work. Approving anyway is legitimate; a genuine mistake
+costs one agent run that then fails loudly, because a `code_behavior` step whose implementation
+already exists cannot produce valid RED and a `task` step that reproduces existing work commits
+nothing.
+
+Read the manifest, then run it. **Running the manifest is the approval** — there is no separate
+approve command. Before anything executes, the harness recomputes every field: a changed plan, a
+changed policy, a rebuilt image, a different harness version, or a base commit the repository can no
 longer resolve stops the run with a named error (`plan_changed`, `policy_changed`,
-`runtime_changed`, `base_unresolvable`). Re-prepare and re-read to approve the new inputs.
+`runtime_changed`, `base_unresolvable`).
+
+For a plan that has not started, re-prepare, read the new manifest and run it. For a plan already
+in flight, a re-prepare alone would resolve the repository head again and leave the accepted work
+behind: that case is the amendment procedure below, prepared with `--base`.
 
 ## 4. Run
 
@@ -402,9 +437,131 @@ killed run left, and their hashes stay in the evidence. Pass the same `--artifac
 so it can find them. It is idempotent, a no-op on an already completed plan, and it refuses a
 repository the given manifest does not own.
 
+The report names the plan, its branch, and both commits an amendment could build on:
+
+```json
+{ "plan": "collector-dashboard", "state": "cancelled",
+  "branch": "ai-harness/collector-dashboard",
+  "head": "9c1f...", "base": "0b6f..." }
+```
+
 **Cancellation is terminal.** Running the cancelled manifest again returns a `cancelled` report
 and a non-zero exit without reconciling, running a step, or verifying anything. To carry the work
 further, prepare and approve a new manifest — that is what cancelling freed the repository for.
+
+### Amending a plan
+
+A plan gets blocked for ordinary reasons: a missing prerequisite, a wrong architecture, obsolete
+later steps, a package the workspace does not have, a disputed test contract, a harness upgrade.
+There is no repair command, no amendment file and no plan diff. **An amendment is a new plan
+revision** — you rewrite the plan and approve it exactly as you approved the first one, pointing it
+at the accepted work:
+
+```sh
+# 1. Optional, but do it first: let reconciliation finish an acceptance a killed process
+#    left between its commit and its database write.
+node dist/cli.js run execution-manifest.yml --repo /path/to/repo --artifacts ./artifacts
+
+# 2. Release the repository. Keep the old manifest file until this succeeds:
+#    cancel identifies a plan by its manifest.
+node dist/cli.js cancel execution-manifest.yml --repo /path/to/repo --artifacts ./artifacts
+
+# 3. Rewrite the plan by hand: a new plan id, and only the steps that still have to run.
+
+# 4. Prepare from the accepted work rather than from the base branch.
+node dist/cli.js prepare plan-r2.yml --repo /path/to/repo \
+  --base ai-harness/collector-dashboard \
+  --output execution-manifest-r2.yml
+
+# 5. Read the manifest and its warnings, then run it. Running it is the approval.
+node dist/cli.js run execution-manifest-r2.yml --repo /path/to/repo --artifacts ./artifacts
+```
+
+Step 1 is worth the minute it costs: a candidate that was verified but never committed is lost when
+the plan is cancelled, and that run is what lets its commit reach the branch. It is unavailable in
+exactly one case — see "After a harness upgrade" below.
+
+The amended plan needs **its own plan id**. `ai-harness/<plan-id>` is harness-owned and the harness
+never adopts a ref it did not create, so reusing the previous id stops the run before any step
+executes. Each revision gets its own branch, created at its base by its first acceptance; the newest
+branch contains every accepted commit, and the chain of revision branches is linear.
+
+Trimming completed steps is yours. The harness does not diff plan revisions and does not know which
+authored step produced which commit; `prepare` warns about any step id the base already carries, and
+the decision is yours.
+
+Corrections are ordinary steps. A step that undoes earlier work is just a step of the amended plan —
+an authoring convention, not a mechanism.
+
+#### Which commit to amend from
+
+A plan branch exists only once the plan has accepted a step, so there are two cases, and the
+`cancel` report tells you which one you are in:
+
+| `cancel` report | Meaning | `--base` |
+| --- | --- | --- |
+| `head` present | The plan accepted at least one step; `head` is the branch tip. | `ai-harness/<previous-plan-id>` |
+| `head` absent | The plan accepted nothing, so it never created a branch. | the reported `base` |
+
+`head` is read from the ref, not from the database, so a commit that landed while the process died
+before recording it is still named.
+
+#### Linear continuation is yours to keep
+
+`--base` accepts any commit, and the harness does not check that it contains the previous revision's
+tip. It cannot: the previous plan is cancelled, and "start a different line of work from the base
+branch" is a legitimate use of the same command. If the base does not contain that tip, the earlier
+commits stay reachable only from their own branch and the newest branch stops being the whole story.
+
+The rule that follows: **your own commits go on your own branch, created at the plan branch tip**,
+and `--base` points at that branch.
+
+```sh
+git branch amend-deps ai-harness/collector-dashboard
+git switch amend-deps
+# ... commit the change ...
+node dist/cli.js prepare plan-r2.yml --repo . --base amend-deps --output execution-manifest-r2.yml
+```
+
+Never commit onto `ai-harness/*` — those refs are harness-owned, and a plan whose branch moved
+behind its back stops rather than adopting the change. Committing on the base branch instead is the
+quiet failure: the manifest prepares, the run works, and the accepted work is simply missing from
+the amendment's history.
+
+#### Adding a dependency
+
+V1 has no in-run dependency request protocol and no package-manager adapter. `package.json` and
+lockfiles are outside every agent-writable scope, so a step that needs a package the workspace does
+not have fails with `invalid_change`. The answer is an amendment: commit the exact package and
+lockfile change yourself, on a branch created at the plan branch tip, and point `--base` at it. The
+dependency cache key covers the lockfile hash, so the amended plan's first install is cold and
+correct with no further mechanism.
+
+#### Repairing a disputed test contract
+
+`test_contract_disputed` is terminal and is never retried by a stronger model: it is a claim about
+the plan, not a model failure. Read `implementation/test-contract-dispute.md`, revise that step's
+tests or verifier configuration in the amended plan, and run it. **The step reruns whole** —
+baseline, tests, RED, freeze, implementation — from its parent commit. There is no resume from a
+pre-implementation snapshot.
+
+#### After a harness upgrade
+
+A release that changes a fixed policy or rebuilds an image moves `policy_hash` or an image ID, and
+every approval prepared before it stops with `policy_changed` or `runtime_changed`. That is the
+mechanism working: the harness changed under the approval. For a plan in flight, the way forward is
+the amendment procedure above — prepare the remaining steps from `ai-harness/<plan-id>`, because
+re-preparing without `--base` would resolve the repository head again and drop the accepted work.
+
+With one difference you cannot work around: **step 1 is unavailable.** `run` validates the policy
+hash before the coordinator reconciles anything, so the old manifest exits `policy_changed` and an
+interrupted acceptance cannot be finished — it is lost with the cancel. `cancel` itself still works,
+because it validates the plan, not the policy. That is the other reason `cancel` reads the branch
+tip from the ref: after an upgrade, that read is the only way a landed-but-unrecorded commit is
+visible at all.
+
+The release that added the documentation contract to the policy hash was exactly this case. This
+release changes no policy field, so approvals prepared before it stay valid across it.
 
 Optional environment (state locations only; nothing here reaches the container contract):
 
@@ -557,11 +714,11 @@ parent — stops the plan without changing either side.
 | `setup_timeout` / `setup_failed` | The dependency install overran its budget or failed. No cache entry is published. |
 | `agent_timeout` / `agent_failed` | The agent was killed at its deadline or exited non-zero. The attempt workspace is discarded; no commit. |
 | `provider_error` | The provider refused the request. It is recorded from structured provider output and is not diagnosed or retried; check auth, plan/Agent SDK credit and pinned model availability. |
-| `invalid_change` | The agent wrote outside `implementation_paths`, touched a dependency manifest, added an unsafe symlink, or changed nothing. |
+| `invalid_change` | The agent wrote outside `implementation_paths`, touched a dependency manifest, added an unsafe symlink, or changed nothing. A step that genuinely needs a new package is an amendment — see "Adding a dependency". |
 | `baseline_failed` | Existing tests failed, an expected test already existed, or baseline retry policy blocked the run. |
 | `red_invalid` | New tests did not fail for an allowed, behavior-related reason. Read `red/verdict.json`. |
 | `closure_violation` | An agent changed a frozen test, runner configuration, setup file, manifest, or lockfile. |
-| `test_contract_disputed` | The implementation agent reported that the frozen tests are wrong. Read `implementation/test-contract-dispute.md`; no commit was created. |
+| `test_contract_disputed` | The implementation agent reported that the frozen tests are wrong. Read `implementation/test-contract-dispute.md`; no commit was created. Terminal and never retried by a stronger model — repair it by amendment. |
 | `verification_failed` | GREEN, an opaque verification command, or the runtime check failed. Read `green/verdict.json`, `verification.json` and `runtime/`. |
 | `verification_failed` at phase `runtime`, stage `readiness`, reason "the application exited" | The application process died before it ever answered. Reported within seconds, not after the readiness budget: the harness watches the container from the host. `runtime/application.log` holds its output. |
 | `verification_failed` at phase `runtime`, stage `readiness` | The application stayed up but never answered `readiness_path` with 200 inside 60 s. Check that it binds `0.0.0.0` and the declared `PORT` — a server on `127.0.0.1` is unreachable from the checker's container and looks exactly like this. |
@@ -572,8 +729,9 @@ parent — stops the plan without changing either side.
 | Report `failed` with a `commit` and a copy-back cleanup error | The work was verified and committed, but the rotated credential could not be saved. Re-authenticate (§6) before the next run. |
 | `plan_changed` / `policy_changed` / `runtime_changed` | The approval no longer describes what would run: the plan bytes, the fixed policies, or the harness version and image IDs changed. Re-prepare, read the new manifest, and run it. |
 | `documentation_changed` | The documentation bundle is missing, edited, incomplete, carries an undeclared file, or hashes differently from the approved one. Nothing started. Delete the whole `documentation/` directory, re-run `docs`, and re-prepare if the content really changed. |
-| `base_unresolvable` | The approved base commit does not exist in this repository. Wrong `--repo`, or the commit was garbage-collected. |
-| `already exists but this plan has accepted nothing` | `ai-harness/<plan-id>` exists from an earlier plan or a person. Rename or delete it, or choose a different plan id. |
+| `base_unresolvable` from `run` | The approved base commit does not exist in this repository. Wrong `--repo`, or the commit was garbage-collected. |
+| `base_unresolvable` from `prepare` | `--base` names a ref this repository does not have, or an object that is not a commit. Nothing was written; check the ref, and remember the plan branch exists only once a plan has accepted a step. |
+| `already exists but this plan has accepted nothing` | `ai-harness/<plan-id>` exists from an earlier plan or a person. An amended plan needs its own plan id; otherwise rename or delete the ref. |
 | `refusing to move a ref the harness no longer recognises` | The plan branch and the recorded head disagree. Nothing was changed; reconcile by hand, or cancel the plan and start a new one. |
 | `is owned by plan ... cancel it before registering a different manifest` | Another plan owns this repository. Finish it, or `cancel` its manifest. |
 
