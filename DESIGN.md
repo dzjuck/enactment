@@ -22,7 +22,7 @@ The harness provides:
 * tests-first execution;
 * strict change scopes;
 * independent verification;
-* plan repair;
+* plan amendment;
 * model routing;
 * targeted human review;
 * persistent state;
@@ -614,18 +614,19 @@ Agents cannot persistently modify:
 * lockfiles;
 * dependency configuration.
 
-Dependency request flow:
+V1 has no in-run request protocol and no package-manager adapter. A step that needs a package the
+workspace does not have fails on scope validation, and the response is a plan amendment (§30):
 
 ```text
-agent requests exact package/version
-→ human approves
-→ harness package-manager adapter updates files
-→ dependency snapshot rebuilt
-→ execution manifest updated
-→ baseline and RED restart
+step fails on a dependency-manifest change
+→ operator commits the exact package and lockfile change
+→ amended plan prepared with that commit as its base
+→ approval
+→ execution resumes from the amended plan's first step
 ```
 
-Initial milestones may block all dependency changes.
+The dependency cache key already covers the lockfile hash, so the amended plan's first install is
+cold and correct without any further mechanism.
 
 Preapproved exact dependencies may be included in the plan.
 
@@ -666,6 +667,11 @@ It is created at the approved base by the first acceptance and advanced linearly
 step. The ref moves only through `git update-ref` with an expected old value — absent for the
 first acceptance, the step's parent commit for every later one — so a branch that was moved,
 deleted or created behind the harness's back fails the step instead of being adopted or forced.
+
+An amended plan (§30) is a new plan with its own ID, so it takes its own branch, created at the
+previous revision's tip. The chain of revision branches is linear and the newest branch contains
+every accepted commit; the harness still never adopts a ref it did not create, it extends one it
+did.
 
 Commit trailers:
 
@@ -953,6 +959,10 @@ verification closure and quarantine. The policy hash covers fixed provider profi
 provider policies, network and dependency policy. Both provider image IDs are approved even when a
 normal route uses only one, because a retry may use Claude.
 
+The base is whatever `prepare` was pointed at. It is the repository head for a first revision and
+the previous revision's plan branch tip for an amendment (§30); nothing here treats those two
+differently, because an amendment is an ordinary approval.
+
 Approval required for:
 
 * plan changes;
@@ -1139,20 +1149,24 @@ Acceptance uses the pre-verification immutable implementation snapshot.
 
 ## 25. Test-contract repair
 
-Required from the first tests-first milestone.
+A step's tests are approved plan content, so the implementation agent cannot weaken them directly.
+When it concludes the contract is unimplementable it writes the dispute marker instead, and the
+step stops with `test_contract_disputed`. That category is terminal and is never retried by a
+stronger model: a dispute is a claim about the plan, not a model failure.
+
+Repair is a plan amendment (§30), not a separate flow:
 
 ```text
 implementation reports invalid test contract
-→ restore pre-implementation snapshot
-→ propose test amendment
-→ human approval
-→ revise tests or verifier config
-→ rerun RED
-→ freeze again
-→ restart implementation
+→ step fails, plan stops
+→ operator revises the step's tests or verifier configuration in the plan
+→ approval of the amended plan
+→ the step runs again from its parent commit
 ```
 
-The implementation agent cannot weaken tests directly.
+The step reruns whole — baseline, tests, RED, freeze, implementation — rather than resuming from a
+restored pre-implementation snapshot. That costs one further test-writing pass and removes a
+partial step-resume path nothing else needs.
 
 ---
 
@@ -1403,29 +1417,73 @@ The harness never merges automatically.
 
 ---
 
-## 30. Plan repair
+## 30. Plan amendment
 
-Full plan repair handles:
+A plan changes for ordinary reasons: a missing prerequisite, a wrong architecture, obsolete future
+steps, changed ordering, new documentation, a new dependency, a changed API assumption.
 
-* missing prerequisites;
-* wrong architecture;
-* obsolete future steps;
-* changed ordering;
-* new documentation;
-* new dependencies;
-* API-assumption changes.
+V1 has no repair machinery for any of them. There is no planner to propose an amendment (§18), no
+amendment file format, no in-place revision of an approved manifest and no repair approval state.
+An amendment is a **new plan revision**: the operator rewrites the plan and approves it exactly as
+they approved the first one.
 
 ```text
-step blocked
-→ planner proposes amendment
-→ user approves amendment
-→ manifest revision
-→ execution resumes
+cancel the current plan
+→ rewrite the plan, keeping only the steps that still have to run
+→ prepare from the previous revision's plan branch tip
+→ approve
+→ run
 ```
 
-Accepted history remains immutable.
+Concretely:
 
-Corrections use compensating steps.
+```bash
+harness run <old-manifest> --repo <path>      # optional: finishes an interrupted acceptance
+harness cancel <old-manifest> --repo <path>   # releases the repository path
+# rewrite the plan: new plan ID, remaining steps only
+harness prepare plan-r2.yml --repo <path> \
+  --base ai-harness/<previous-plan-id> \
+  --output execution-manifest-r2.yml
+harness run execution-manifest-r2.yml --repo <path>
+```
+
+`--base` is the only new mechanism. It names the commit the amended plan builds on; without it
+`prepare` resolves the repository head, which is the first revision's case. A ref is resolved to
+its SHA at prepare time, so naming the plan branch reads the branch itself rather than
+`plans.head_commit`, which lags it when a process died mid-acceptance.
+
+Accepted history remains immutable because the amended plan never touches it. It has its own plan
+ID and therefore its own branch (§14), created at the previous revision's tip and advanced from
+there.
+
+Corrections use compensating steps. That is an authoring convention, not a mechanism: a step that
+undoes earlier work is an ordinary step of the amended plan.
+
+### What the operator owns
+
+Trimming completed steps out of the amended plan. The harness does not diff plan revisions and
+does not know which authored step produced which commit. Leaving a completed step in reruns it,
+which fails loudly — a `code_behavior` step whose implementation already exists cannot produce
+valid RED — rather than corrupting anything.
+
+Finishing an interrupted acceptance before cancelling. A candidate that was verified but never
+committed is lost when the plan is cancelled, so running the old manifest once first is worth it:
+reconciliation completes that acceptance and the commit reaches the branch.
+
+Keeping the old manifest file until the plan is cancelled, because `cancel` identifies a plan by
+its manifest.
+
+### Not in V1
+
+* planner-generated amendments;
+* an amendment format or plan diff;
+* in-place revision of an approved manifest;
+* `repair_requested` and `awaiting_repair_approval` plan states;
+* same-branch step revision. An amended plan whose completed prefix is proven byte-identical could
+  keep one branch and one plan row, but that needs per-step hashes, a step revision column —
+  amendments usually reuse a step ID, and `steps` is unique on `(plan_row, step_id)` — and new
+  recovery paths, all to replace a procedure that already works. It remains a strict superset of
+  this one, so nothing here forecloses it.
 
 ---
 
@@ -1444,8 +1502,6 @@ Plan states:
 draft
 approved
 running
-repair_requested
-awaiting_repair_approval
 awaiting_final_review
 completed
 failed
@@ -1464,6 +1520,10 @@ A failed plan stays active — the same approved manifest may retry it — so on
 non-cancelled plan owns a canonical repository path at a time. That ownership is a uniqueness
 constraint, not a process lock: concurrent production runs remain unsupported because the startup
 sweep is global.
+
+An amendment does not reopen a plan. Cancelling releases the repository path, and the amended plan
+registers as a new row with its own ID, manifest and branch (§30). Nothing rewrites an existing
+plan's steps, so no state here describes a plan under repair.
 
 Attempt states are only those recovery has to tell apart:
 
@@ -1541,7 +1601,7 @@ Record from V1:
 * retries;
 * verification outcome;
 * failure category;
-* repairs;
+* amendments;
 * human decisions.
 
 Future metrics:
@@ -1550,7 +1610,7 @@ Future metrics:
 * step success;
 * plan completion;
 * cost per successful step;
-* repair rate;
+* amendment rate;
 * interruption rate;
 * model success;
 * flake rate;
@@ -1682,14 +1742,30 @@ Adds:
 * manual bundle-wide refresh by deletion; no automatic freshness;
 * offline implementation context.
 
-## Milestone 8 — Full Plan Repair
+## Milestone 8 — Plan Amendment
 
 Adds:
 
-* amendments;
-* future-step insertion/removal/reordering;
-* compensating steps;
-* dependency escalation.
+* `prepare --base <commit-ish>`, resolved to a full SHA at prepare time, so an approved plan can
+  build on a previous revision's plan branch instead of on the repository head;
+* the amendment procedure of §30 — cancel, rewrite, prepare from the plan branch tip, approve, run
+  — as the single answer to a blocked plan;
+* step insertion, removal, reordering and rewriting, by rewriting the plan;
+* compensating steps as ordinary steps of an amended plan;
+* dependency changes (§13) and test-contract repair (§25) as amendment procedures rather than as
+  protocols of their own;
+* a prepare-time guard rejecting a step ID already carried by an `AI-Harness-Step` trailer
+  reachable from the base commit, which catches an amended plan that still lists a completed step.
+
+Working result:
+
+```text
+blocked plan → amended plan → one linear chain of revision branches
+```
+
+No repair state machine, no amendment format and no planner. An amendment is an ordinary approval
+of an ordinary plan whose base happens to be the previous revision's accepted work, which is why
+this milestone is one flag and a documented procedure rather than a subsystem.
 
 ## Milestone 9 — Metrics and Feedback
 
@@ -1711,7 +1787,7 @@ Adds:
 * diffs;
 * costs;
 * model comparison;
-* repair history.
+* amendment history.
 
 ## Post-V1 Milestone 11 — Local Services
 
