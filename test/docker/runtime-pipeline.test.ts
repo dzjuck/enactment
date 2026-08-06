@@ -109,10 +109,28 @@ const FAILING_CHECKER = `console.error('behavioral expectation not met');
 process.exit(1);
 `;
 
-/** Writes into the shared verifier workspace; nothing it writes may reach the commit. */
-const TAMPERING_CHECKER = `import { writeFileSync } from 'node:fs';
-writeFileSync('/workspace/src/tampered.js', 'export const tampered = true;\\n');
-console.log('tampered');
+/** Attempts to replace the checker before serving; the runtime mounts must prevent this. */
+const CHECKER_REWRITING_SERVER = `import http from 'node:http';
+import { writeFileSync } from 'node:fs';
+
+try {
+  writeFileSync('/workspace/harness-checks/failing-check.mjs', "console.log('checker replaced');\\n");
+  console.log('checker replacement succeeded');
+} catch {
+  console.log('checker replacement blocked');
+}
+
+http
+  .createServer((request, response) => {
+    if (request.url === '/health') {
+      response.writeHead(200);
+      response.end('ok');
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  })
+  .listen(Number(process.env.PORT), process.env.HOST);
 `;
 
 let repo: TargetRepo;
@@ -132,7 +150,6 @@ beforeAll(async () => {
   await mkdir(join(repo.dir, 'harness-checks'), { recursive: true });
   await writeFile(join(repo.dir, 'harness-checks/health-check.mjs'), CHECKER);
   await writeFile(join(repo.dir, 'harness-checks/failing-check.mjs'), FAILING_CHECKER);
-  await writeFile(join(repo.dir, 'harness-checks/tampering-check.mjs'), TAMPERING_CHECKER);
   repo.commit = await commitAll(repo.dir, 'Add behavioral checkers');
 }, 900_000);
 
@@ -387,23 +404,24 @@ describe('runtime-gated task step', () => {
   );
 
   it(
-    'commits the exact pre-runtime implementation snapshot',
+    'does not let the application replace its behavioral checker',
     async () => {
       const plan = await taskPlan({
-        runtime: { behavioralCommands: [['node', 'harness-checks/tampering-check.mjs']] },
+        runtime: { behavioralCommands: [['node', 'harness-checks/failing-check.mjs']] },
       });
-      const { report } = await run(plan, taskEnv());
+      const { report, events, artifacts } = await run(plan, taskEnv(CHECKER_REWRITING_SERVER));
 
-      expect(report.status).toBe('succeeded');
-      const changed = await git(repo.dir, [
-        'diff-tree',
-        '--no-commit-id',
-        '--name-only',
-        '-r',
-        report.commit ?? '',
-      ]);
-      expect(changed.split('\n')).toEqual(['src/server.js']);
-      expect(changed).not.toContain('tampered');
+      expect(report.status).toBe('failed');
+      expect(report.failedPhase).toBe('runtime');
+      expect(report.category).toBe('verification_failed');
+      expect(events.some((event) => event.kind === 'candidate')).toBe(false);
+      expect(await branchExists()).toBe(false);
+      expect(
+        await readFile(join(artifacts, RUNTIME_ARTIFACT_DIR, APPLICATION_LOG_FILE), 'utf8'),
+      ).toContain('checker replacement blocked');
+      expect(
+        await readFile(join(artifacts, RUNTIME_ARTIFACT_DIR, BEHAVIORAL_LOG_FILE), 'utf8'),
+      ).toContain('behavioral expectation not met');
     },
     900_000,
   );

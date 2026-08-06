@@ -208,7 +208,7 @@ describe('runtime application container', () => {
     const spec = recorder.started[0];
     expect(spec?.image).toBe(IMAGES.verifier.id);
     expect(spec?.argv).toEqual(['node', 'dist/server.js']);
-    expect(spec?.mounts).toEqual(MOUNTS);
+    expect(spec?.mounts).toEqual(MOUNTS.map((mount) => ({ ...mount, readonly: true })));
     expect(spec?.env).toEqual({ HOST: '0.0.0.0', PORT: '3000' });
   });
 
@@ -425,7 +425,7 @@ describe('behavioral commands', () => {
     for (const { spec, options } of recorder.ran.slice(1)) {
       expect(spec.image).toBe(IMAGES.verifier.id);
       expect(spec.network).toBe(NETWORK);
-      expect(spec.mounts).toEqual(MOUNTS);
+      expect(spec.mounts).toEqual(MOUNTS.map((mount) => ({ ...mount, readonly: true })));
       expect(spec.env?.HARNESS_APP_URL).toBe(`http://${APP}:3000`);
       expect(options.timeoutSeconds).toBe(RUNTIME_COMMAND_TIMEOUT_SECONDS);
     }

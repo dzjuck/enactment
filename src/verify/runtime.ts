@@ -101,7 +101,9 @@ export interface RuntimeCheckOptions {
   /**
    * The caller's verifier workspace and dependency mounts. Static and runtime verification
    * share one disposable workspace, so a static command may build what `start_command` runs.
-   * Ownership stays with the caller: this function creates no volume and removes none.
+   * Runtime containers receive read-only views, so the application under test cannot alter a
+   * checker or its dependencies. Ownership stays with the caller: this function creates no
+   * volume and removes none.
    */
   mounts: readonly Mount[];
   images: RuntimeImages;
@@ -280,7 +282,7 @@ export async function runRuntimeCheck(
   const application = runtimeContainerName(options.attempt);
   const url = `http://${application}:${options.runtime.port}`;
   const readinessUrl = `${url}${options.runtime.readiness_path}`;
-  const mounts = [...options.mounts];
+  const mounts = options.mounts.map((mount) => ({ ...mount, readonly: true }));
 
   return withPhaseNetworks(options.attempt, 'runtime', async (networks) => {
     const network = networks.runtime;

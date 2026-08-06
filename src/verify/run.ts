@@ -91,7 +91,10 @@ export async function withVerifierWorkspace<T>(
     (options.dependencyTemplate === undefined
       ? acquireVerifierDependencies
       : cloneVerifierDependencies(options.dependencyTemplate));
-  const restore = options.restore ?? restoreWorkspace;
+  const restore =
+    options.restore ??
+    ((volume, snapshot, images, labels) =>
+      restoreWorkspace(volume, snapshot, images, labels, { dependencyMountpoint: true }));
   const release = options.removeVolume ?? removeVolume;
 
   const workspaceVolume = workspaceVolumeName(`${options.attempt}-verify`);

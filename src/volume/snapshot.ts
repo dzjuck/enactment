@@ -70,6 +70,7 @@ export async function restoreWorkspace(
   snapshot: StoredArtifact,
   images: RuntimeImages,
   labels?: Record<string, string>,
+  options: { dependencyMountpoint?: boolean } = {},
 ): Promise<void> {
   const bytes = await readFile(snapshot.path);
 
@@ -80,7 +81,13 @@ export async function restoreWorkspace(
   const result = await runContainer(
     {
       image: images.setup.id,
-      argv: ['sh', '-c', RESTORE_SCRIPT],
+      argv: [
+        'sh',
+        '-c',
+        options.dependencyMountpoint === true
+          ? `${RESTORE_SCRIPT}\nmkdir -p ${WORKSPACE_PATH}/node_modules`
+          : RESTORE_SCRIPT,
+      ],
       network: 'none',
       mounts: [workspaceMount(volume)],
       ...(labels === undefined ? {} : { labels }),
