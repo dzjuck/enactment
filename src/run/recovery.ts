@@ -2,9 +2,9 @@ import { execa } from 'execa';
 
 import type { ArtifactStore } from '../artifacts/store.js';
 import { sourceDiff } from '../diff/source-diff.js';
-import { acceptChanges, TRAILERS } from '../git/accept.js';
+import { acceptChanges } from '../git/accept.js';
 import { exportCommit } from '../git/export.js';
-import { findCommitByKey } from '../git/idempotency.js';
+import { findCommitByKey, trailerValues, TRAILERS } from '../git/idempotency.js';
 import type { ApprovedInputs } from '../plan/execution-manifest.js';
 import type { AttemptRecord, PlanRecord, StateStore, StepRecord } from '../state/store.js';
 import { excludeDispute } from '../verify/dispute.js';
@@ -57,8 +57,8 @@ async function finishAcceptance(
     : undefined;
 
   if (existing !== undefined) {
-    const message = (await git(repoPath, ['log', '-1', '--format=%B', existing])) ?? '';
-    if (!message.includes(`${TRAILERS.step}: ${step.stepId}`)) {
+    const steps = await trailerValues(repoPath, existing, TRAILERS.step);
+    if (!steps.includes(step.stepId)) {
       throw new ReconcileError(
         `commit ${existing} carries attempt ${attempt.attemptId}'s key but not step "${step.stepId}"`,
       );
@@ -138,20 +138,6 @@ export async function branchCommit(
   return git(repoPath, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
 }
 
-async function trailerValues(
-  repoPath: string,
-  commit: string,
-  trailer: string,
-): Promise<string[]> {
-  const values = await git(repoPath, [
-    'log',
-    '-1',
-    `--format=%(trailers:key=${trailer},valueonly)`,
-    commit,
-  ]);
-  return values?.split('\n').map((value) => value.trim()).filter(Boolean) ?? [];
-}
-
 /**
  * The last commit `cancel` may safely carry into a new plan revision.
  *
@@ -167,25 +153,28 @@ export async function acceptedPlanHead(
   const tip = await branchCommit(repoPath, plan.branch);
   if (tip === undefined || tip === plan.headCommit) return plan.headCommit;
 
+  // One commit past the last recorded acceptance is the only shape an interrupted one can have,
+  // and neither that parent nor the tip's trailers vary by attempt: read them once, then look
+  // for the attempt they belong to.
   const expectedParent = plan.headCommit ?? plan.baseCommit;
+  if ((await git(repoPath, ['rev-parse', `${tip}^`])) !== expectedParent) return plan.headCommit;
+
+  const [keys, steps] = await Promise.all([
+    trailerValues(repoPath, tip, TRAILERS.idempotencyKey),
+    trailerValues(repoPath, tip, TRAILERS.step),
+  ]);
+
   for (const step of store.steps(plan.row)) {
     for (const attempt of store.attempts(step.row)) {
       if (
-        attempt.state !== 'accepting' ||
-        attempt.idempotencyKey === undefined ||
-        attempt.parentCommit !== expectedParent
+        attempt.state === 'accepting' &&
+        attempt.idempotencyKey !== undefined &&
+        attempt.parentCommit === expectedParent &&
+        keys.includes(attempt.idempotencyKey) &&
+        steps.includes(step.stepId)
       ) {
-        continue;
+        return tip;
       }
-
-      const parent = await git(repoPath, ['rev-parse', `${tip}^`]);
-      if (parent !== attempt.parentCommit) continue;
-
-      const [keys, steps] = await Promise.all([
-        trailerValues(repoPath, tip, TRAILERS.idempotencyKey),
-        trailerValues(repoPath, tip, TRAILERS.step),
-      ]);
-      if (keys.includes(attempt.idempotencyKey) && steps.includes(step.stepId)) return tip;
     }
   }
 

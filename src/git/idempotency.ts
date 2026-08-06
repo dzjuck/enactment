@@ -43,6 +43,32 @@ export function idempotencyKey(inputs: IdempotencyInputs): string {
   return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
 }
 
+/**
+ * The values one trailer carries on one commit.
+ *
+ * A trailer read rather than a search of the message: prose that mentions the trailer text is
+ * not a trailer, and a substring match would let `AI-Harness-Step: persist-runs` be satisfied
+ * by a commit whose step is `persist-runs-index`. Like every read here it yields nothing when
+ * git fails, which fails the caller's check closed.
+ */
+export async function trailerValues(
+  repoPath: string,
+  commit: string,
+  trailer: string,
+): Promise<string[]> {
+  const { stdout, exitCode } = await execa(
+    'git',
+    ['-C', repoPath, 'log', '-1', `--format=%(trailers:key=${trailer},valueonly)`, commit],
+    { reject: false },
+  );
+
+  if (exitCode !== 0) return [];
+  return stdout
+    .split('\n')
+    .map((value) => value.trim())
+    .filter((value) => value !== '');
+}
+
 export interface AcceptedStep {
   stepId: string;
   /** The commit whose trailer carries it. */

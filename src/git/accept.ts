@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { execa } from 'execa';
 
 import type { Change } from '../diff/source-diff.js';
-import { findCommitByKey, TRAILERS } from './idempotency.js';
+import { findCommitByKey, trailerValues, TRAILERS } from './idempotency.js';
 
 export class AcceptError extends Error {
   constructor(message: string) {
@@ -13,8 +13,6 @@ export class AcceptError extends Error {
     this.name = 'AcceptError';
   }
 }
-
-export { TRAILERS };
 
 const COMMIT_ENV = {
   GIT_AUTHOR_NAME: 'AI Harness',
@@ -123,8 +121,8 @@ export async function acceptChanges(options: AcceptOptions): Promise<AcceptResul
     );
 
     if (existing !== undefined) {
-      const message = await git(options.repoPath, ['log', '-1', '--format=%B', existing]);
-      if (!message.includes(`${TRAILERS.step}: ${options.stepId}`)) {
+      const steps = await trailerValues(options.repoPath, existing, TRAILERS.step);
+      if (!steps.includes(options.stepId)) {
         throw new AcceptError(
           `commit ${existing} carries this idempotency key but not step "${options.stepId}"`,
         );

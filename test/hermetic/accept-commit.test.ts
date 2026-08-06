@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { execa } from 'execa';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { acceptChanges, AcceptError, TRAILERS } from '../../src/git/accept.js';
+import { acceptChanges, AcceptError } from '../../src/git/accept.js';
+import { TRAILERS } from '../../src/git/idempotency.js';
 import { idempotencyKey, type IdempotencyInputs } from '../../src/git/idempotency.js';
 import type { Change, FileEntry } from '../../src/diff/source-diff.js';
 import { commitAll, createTargetRepo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
