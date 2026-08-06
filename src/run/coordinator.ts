@@ -470,6 +470,7 @@ export async function runPlan(
       idempotencyKey: key,
       artifactDir,
       snapshots,
+      documentationContextDir: approved.documentationContextDir,
       sourceCodexHome: options.sourceCodexHome,
       claudeTokenFile: options.claudeTokenFile,
       storeDirectory: options.storeDirectory,

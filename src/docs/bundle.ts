@@ -205,6 +205,23 @@ const FIX = 'delete the whole documentation directory and run "harness docs" aga
 
 export type BundleVerification = { present: false } | { present: true; hash: string };
 
+export interface DocumentationSummary {
+  hash: string;
+  sources: number;
+  bytes: number;
+}
+
+/** What an attempt records about the documentation it mounted, so a commit can be traced to it. */
+export async function documentationSummary(contextDir: string): Promise<DocumentationSummary> {
+  const provenance = await readProvenance(dirname(contextDir));
+
+  return {
+    hash: await documentationHash(contextDir),
+    sources: provenance.sources.length,
+    bytes: provenance.sources.reduce((total, source) => total + source.bytes, 0),
+  };
+}
+
 /**
  * A bundle is complete and untouched, absent, or an error. There is no partial repair: refreshing
  * documentation is whole-bundle deletion (DESIGN.md §18).

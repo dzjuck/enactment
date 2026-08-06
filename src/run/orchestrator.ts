@@ -18,6 +18,8 @@ import {
   dependencyMount,
 } from '../deps/volume.js';
 import { manifestFromTar, sourceDiff } from '../diff/source-diff.js';
+import { documentationSummary } from '../docs/bundle.js';
+import { documentationMount, withDocumentation } from '../docs/mount.js';
 import { DiffValidationError, validateChanges } from '../diff/validate.js';
 import type { RuntimeImages } from '../docker/images.js';
 import { acceptChanges } from '../git/accept.js';
@@ -138,6 +140,11 @@ export interface StepExecutionOptions {
   dependencyCacheDirectory?: string;
   /** Harness-owned context for a stronger retry; never changes scope or verification. */
   advisoryContext?: string;
+  /**
+   * The approved documentation bundle's `context/` directory, when the plan declares one.
+   * Mounted read-only at `/context` for agent containers only (DESIGN.md §18).
+   */
+  documentationContextDir?: string;
   /** Test-only substitution of runtime images and agent environment. See `RunInjection`. */
   injection?: RunInjection;
   onPhase?: (phase: RunPhase) => void | Promise<void>;
@@ -160,6 +167,20 @@ export interface RunReport {
 function withAdvisory(prompt: string, advisory: string | undefined): string {
   if (advisory === undefined || advisory.trim() === '') return prompt;
   return `${prompt}\n\n--- Stronger retry advisory (evidence only) ---\n${advisory.slice(0, 4_000)}`;
+}
+
+/**
+ * Everything the harness appends to a step's own text, in one place.
+ *
+ * All three agent invocations compose their prompt through this, so the retry advisory and
+ * the documentation paragraph cannot disagree between phases — or between the prompt that is
+ * sent and the one whose hash the manifest records.
+ */
+export function composeAgentPrompt(
+  prompt: string,
+  options: { advisory?: string; documentation?: string },
+): string {
+  return withDocumentation(withAdvisory(prompt, options.advisory), options.documentation);
 }
 
 const PHASE_CATEGORY: Record<RunPhase, FailureCategory> = {
@@ -284,6 +305,10 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
       export_hash: exportHash,
       ...networkPolicySection(descriptor.allowlist, descriptor.cliVersion),
     };
+    if (options.documentationContextDir !== undefined) {
+      // So a commit can be traced to the documentation that was mounted for it.
+      inputs.documentation = await documentationSummary(options.documentationContextDir);
+    }
     manifest.inputs = inputs;
     const snapshotHashes: Record<string, string> = {};
     manifest.snapshots = snapshotHashes;
@@ -339,7 +364,15 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     );
     teardown.push(() => removeVolume(agentDependencies));
 
-    const policy = descriptor.compile(withAdvisory(step.observable_behavior, options.advisoryContext));
+    const compose = (prompt: string): string =>
+      composeAgentPrompt(prompt, {
+        ...(options.advisoryContext === undefined ? {} : { advisory: options.advisoryContext }),
+        ...(options.documentationContextDir === undefined
+          ? {}
+          : { documentation: options.documentationContextDir }),
+      });
+
+    const policy = descriptor.compile(compose(step.observable_behavior));
     inputs.policy_hash = policy.hash;
     let runAuth: string;
     let secrets: string[];
@@ -504,10 +537,15 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
                     HARNESS_PHASE: agentPhase,
                     ...proxied,
                   },
+                  // The documentation mount is here and nowhere else: no verifier, reviewer,
+                  // runtime or diagnosis container sees `/context` (DESIGN.md §18).
                   mounts: [
                     workspaceMount(workspace),
                     dependencyMount(agentDependencies),
                     authMount(descriptor.authProvider, runAuth),
+                    ...(options.documentationContextDir === undefined
+                      ? []
+                      : [documentationMount(options.documentationContextDir)]),
                   ],
                   timeoutSeconds: timeouts.agent_seconds,
                   graceSeconds: timeouts.termination_grace_seconds,
@@ -621,7 +659,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     if (step.type === 'code_behavior') {
       const testsRun = await runAgentAndValidate(
         'tests',
-        withAdvisory(testWritingPrompt(step), options.advisoryContext),
+        compose(testWritingPrompt(step)),
         step.test_paths,
         tar,
         frozenPathsForPhase(
@@ -690,7 +728,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
       );
       const implementationRun = await runAgentAndValidate(
         'implementation',
-        withAdvisory(implementationPrompt(step), options.advisoryContext),
+        compose(implementationPrompt(step)),
         implementationScopeWithDispute(step.implementation_paths),
         testsRun.snapshotTar,
         implementationFrozenPaths,
@@ -717,7 +755,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
     } else {
       const run = await runAgentAndValidate(
         'agent',
-        withAdvisory(step.observable_behavior, options.advisoryContext),
+        compose(step.observable_behavior),
         step.implementation_paths,
         tar,
       );

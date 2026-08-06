@@ -32,6 +32,26 @@ if [ -n "$STUB_WRITE_PATH" ]; then
   printf '%s' "$STUB_WRITE_CONTENT" > "/workspace/${STUB_WRITE_PATH}"
 fi
 
+# Report what the read-only documentation mount contains, so the test can assert on a real
+# container's view of /context rather than on the harness's intent.
+if [ -n "${STUB_CONTEXT_REPORT_PATH:-}" ]; then
+  target="/workspace/${STUB_CONTEXT_REPORT_PATH}"
+  mkdir -p "$(dirname "$target")"
+  {
+    if [ -d /context ]; then echo "context: present"; else echo "context: absent"; fi
+    [ -f /context/index.md ] && cat /context/index.md
+    if [ -n "${STUB_CONTEXT_FILE:-}" ] && [ -f "/context/files/${STUB_CONTEXT_FILE}" ]; then
+      cat "/context/files/${STUB_CONTEXT_FILE}"
+      echo
+    fi
+    if echo tampered > /context/tampered.md 2>/dev/null; then
+      echo "write: allowed"
+    else
+      echo "write: refused"
+    fi
+  } > "$target"
+fi
+
 if [ -n "$STUB_SYMLINK_PATH" ]; then
   mkdir -p "$(dirname "/workspace/${STUB_SYMLINK_PATH}")"
   ln -sf "${STUB_SYMLINK_TARGET}" "/workspace/${STUB_SYMLINK_PATH}"
