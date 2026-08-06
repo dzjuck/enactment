@@ -43,8 +43,7 @@ Supported:
 * Codex CLI;
 * Claude Code;
 * one active plan per repository;
-* one step at a time;
-* public or server-enforced read-only API checks.
+* one step at a time.
 
 Not supported:
 
@@ -56,6 +55,7 @@ Not supported:
 * concurrent harness runs (see §5, startup cleanup);
 * remote workers;
 * production deployment;
+* live external API verification;
 * external writes;
 * automatic merge;
 * local service containers;
@@ -347,13 +347,6 @@ downloader
 └── documentation-egress-net
 ```
 
-### External integration phase
-
-```text
-integration verifier
-└── integration-egress-net
-```
-
 Every topology is created per phase and destroyed afterward.
 
 ---
@@ -445,17 +438,19 @@ provider supports it, but the proxy is the enforcement layer.
 
 ---
 
-## 8. External verification limits
+## 8. Post-V1 external verification constraints
+
+V1 does not perform live external API verification.
 
 CONNECT allowlisting cannot enforce read-only HTTP behavior.
 
-Live verification is permitted only for:
+Any future live verification is permitted only for:
 
 1. public unauthenticated APIs where writes are unavailable;
 2. credentials with server-enforced read-only permissions;
 3. in-process mocks or recorded fixtures.
 
-Generic authenticated API access is not described as read-only.
+Generic authenticated API access is not read-only.
 
 V1 does not perform:
 
@@ -785,36 +780,36 @@ accepted trusted-plan authoring error rather than a load-time rejection.
 
 ---
 
-## 18. Planning flow
+## 18. Documentation flow
 
 ```text
-repository analysis
-→ preliminary plan
-→ documentation requirements
-→ documentation-domain approval
+declared documentation source URLs
+→ exact host allowlist derived from those URLs
 → documentation download
-→ final executable plan
 → execution-manifest approval
+→ offline implementation context
 ```
 
 ### Documentation authorization
 
-Separate from implementation approval:
+V1 has no planner. A hand-authored plan may declare exact source URLs:
 
 ```yaml
-planning:
-  documentation:
-    official_sources_only: true
-    allowed_domains:
-      - open-meteo.com
-    maximum_download_mb: 50
+documentation:
+  sources:
+    - url: https://open-meteo.com/en/docs/openapi.json
+      path: open-meteo/openapi.json
 ```
+
+The source list is covered by the plan hash. The downloader derives its exact-hostname proxy
+allowlist from those URLs; there is no separate domain list to keep synchronized. The download cap
+is fixed harness policy at 50 MB for the complete bundle.
 
 ### Documentation downloader
 
 Runs in a dedicated container with:
 
-* approved-domain access;
+* access only to hostnames derived from declared source URLs;
 * no provider authentication;
 * no source write access.
 
@@ -823,12 +818,33 @@ Stores:
 * URLs;
 * timestamps;
 * hashes;
-* provenance;
-* OpenAPI;
-* Markdown pages;
-* concise index.
+* provenance outside the agent context;
+* a deterministic context containing the downloaded text and concise index.
+
+```text
+documentation/
+  provenance.json
+  context/
+    index.md
+    files/<declared path>
+```
+
+`documentation_hash` covers every regular file under `context/` by relative path and content. The
+index contains no timestamps; timestamps exist only in provenance. The downloader uses HTTPS,
+rejects redirects without following them, and enforces the fixed 50 MB complete-bundle cap.
 
 Downloaded text is untrusted reference data and cannot redefine policy.
+
+V1 has no automatic freshness check or partial refresh. `docs` downloads every declared source only
+when the documentation bundle is absent. A valid existing bundle is reused unchanged. An incomplete,
+edited or unexpected bundle is an error; the harness does not repair it. To refresh, the operator
+deletes the whole documentation bundle and runs `docs` again, which downloads every source again.
+If the resulting content hash is unchanged, the existing execution approval remains valid. Changed
+content requires a new execution manifest and approval.
+
+The documentation bundle is trusted local operator input. It is validated before execution, and the
+operator must not edit or delete it during an active run. Protecting against deliberate concurrent
+host edits is out of scope for V1.
 
 ---
 
@@ -1658,13 +1674,12 @@ implementation snapshot → isolated application startup → behavioral verifica
 
 Adds:
 
-* domain approval;
+* exact source approval and derived host allowlisting;
 * downloader;
 * OpenAPI bundles;
 * provenance;
-* freshness;
-* offline implementation context;
-* constrained external verification.
+* manual bundle-wide refresh by deletion; no automatic freshness;
+* offline implementation context.
 
 ## Milestone 8 — Full Plan Repair
 
