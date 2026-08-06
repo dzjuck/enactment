@@ -37,6 +37,16 @@ describe('phase topology', () => {
     expect(runtime.networks.every((network) => network.internal)).toBe(true);
   });
 
+  it('gives the documentation downloader an internal network plus its own outward leg', () => {
+    const documentation = phaseTopology('documentation');
+
+    expect(documentation.containerNetwork).toBe('documentation-egress');
+    expect(documentation.networks).toEqual([
+      { role: 'documentation-egress', internal: true },
+      { role: 'documentation-proxy-egress', internal: false },
+    ]);
+  });
+
   it('never places two phases on one shared egress-capable network', () => {
     const reachable = Object.values(PHASE_TOPOLOGY).flatMap((topology) =>
       topology.networks.filter((network) => !network.internal).map((network) => network.role),

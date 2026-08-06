@@ -1,4 +1,4 @@
-export type Phase = 'agent' | 'setup' | 'verifier' | 'runtime';
+export type Phase = 'agent' | 'setup' | 'verifier' | 'runtime' | 'documentation';
 
 export interface NetworkSpec {
   role: string;
@@ -39,6 +39,15 @@ export const PHASE_TOPOLOGY: Record<Phase, PhaseTopology> = {
   runtime: {
     networks: [{ role: 'runtime', internal: true }],
     containerNetwork: 'runtime',
+  },
+  // The agent phase's shape with its own role names, so the two never share a network even
+  // within one attempt: the downloader reaches its declared hosts and nothing else (§18).
+  documentation: {
+    networks: [
+      { role: 'documentation-egress', internal: true },
+      { role: 'documentation-proxy-egress', internal: false },
+    ],
+    containerNetwork: 'documentation-egress',
   },
 };
 
