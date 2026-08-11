@@ -41,7 +41,7 @@ const IMPLEMENTATION_SOURCE = `export function slugify(title) {
 
 const DISPUTE_PATH = '.harness/test-contract-dispute.md';
 const CANARY = 'm2-canary';
-const ATTEMPT_LABEL = 'ai-harness.attempt';
+const ATTEMPT_LABEL = 'enactment.attempt';
 
 let repo: TargetRepo;
 let root: string;
@@ -66,7 +66,7 @@ function phaseEnv(overrides: Record<string, string> = {}): Record<string, string
 beforeAll(async () => {
   stub = await stubAgentImage();
   repo = await createM2Repo();
-  root = await mkdtemp(join(tmpdir(), 'harness-m2-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-m2-'));
 
   const source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
@@ -132,7 +132,7 @@ async function run(
   env: Record<string, string> = phaseEnv(),
   overrides: Partial<Parameters<typeof runSinglePlanStep>[0]> = {},
 ): Promise<{ report: RunReport; artifacts: string }> {
-  const artifacts = await mkdtemp(join(tmpdir(), 'harness-m2-artifacts-'));
+  const artifacts = await mkdtemp(join(tmpdir(), 'enactment-m2-artifacts-'));
   dirs.push(artifacts);
   const injection: RunInjection = { codex: stub, agentEnv: env };
 

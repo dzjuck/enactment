@@ -3,7 +3,7 @@ import { execa } from 'execa';
 import { AGENT_GID, AGENT_UID, NODE_BASE_IMAGE } from '../../src/config/pins.js';
 import { resolveImageId, type RuntimeImage } from '../../src/docker/images.js';
 
-export const STUB_AGENT_IMAGE = 'ai-harness/stub-agent:test';
+export const STUB_AGENT_IMAGE = 'enactment/stub-agent:test';
 
 /**
  * The stub's real runtime identity. Injection substitutes an image; it never suspends the

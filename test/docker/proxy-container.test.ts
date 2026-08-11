@@ -22,8 +22,8 @@ import { newAttemptId } from '../../src/volume/naming.js';
 import { runtimeImages } from '../helpers/images.js';
 import { ORIGIN_PORT, startOriginContainer, type OriginContainer } from '../helpers/origin-server.js';
 
-const ALLOWED_ORIGIN = 'ai-harness-origin-allowed';
-const DENIED_ORIGIN = 'ai-harness-origin-denied';
+const ALLOWED_ORIGIN = 'enactment-origin-allowed';
+const DENIED_ORIGIN = 'enactment-origin-denied';
 
 let artifactDir: string;
 let images: RuntimeImages;
@@ -31,7 +31,7 @@ const origins: OriginContainer[] = [];
 
 beforeAll(async () => {
   images = await runtimeImages();
-  artifactDir = await mkdtemp(join(tmpdir(), 'harness-proxy-artifacts-'));
+  artifactDir = await mkdtemp(join(tmpdir(), 'enactment-proxy-artifacts-'));
 });
 
 afterAll(async () => {
@@ -186,7 +186,7 @@ describe('proxy startup is atomic', () => {
     overrides: Partial<Parameters<typeof startProxyContainer>[0]>,
   ): Promise<{ failure: unknown; name: string; networks: string[]; teardown: unknown }> {
     const attempt = newAttemptId();
-    const name = `ai-harness-proxy-${attempt}`;
+    const name = `enactment-proxy-${attempt}`;
     const created: string[] = [];
     let failure: unknown;
 
@@ -278,7 +278,7 @@ describe('proxy startup is atomic', () => {
 
   it('leaves successful startup and normal teardown unchanged', async () => {
     const attempt = newAttemptId();
-    const name = `ai-harness-proxy-${attempt}`;
+    const name = `enactment-proxy-${attempt}`;
 
     const reached = await withPhaseNetworks(attempt, 'agent', async (networks) => {
       const outward = networks['proxy-egress'] ?? '';

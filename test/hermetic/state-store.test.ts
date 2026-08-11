@@ -21,7 +21,7 @@ afterEach(async () => {
 });
 
 async function databasePath(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-state-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-state-'));
   dirs.push(dir);
   return join(dir, 'state.db');
 }
@@ -40,7 +40,7 @@ function registration(overrides: Partial<RegisterPlanInput> = {}): RegisterPlanI
     manifestHash: `sha256:${'1'.repeat(64)}`,
     planHash: `sha256:${'2'.repeat(64)}`,
     repoPath: '/repo',
-    branch: 'ai-harness/slugify-plan',
+    branch: 'enactment/slugify-plan',
     baseCommit: COMMIT('a'),
     stepIds: ['first-step', 'second-step'],
     ...overrides,
@@ -120,7 +120,7 @@ describe('plan registration', () => {
 
   it('canonicalizes the repository path before deciding ownership', async () => {
     const store = open(await databasePath());
-    const dir = await mkdtemp(join(tmpdir(), 'harness-repo-'));
+    const dir = await mkdtemp(join(tmpdir(), 'enactment-repo-'));
     dirs.push(dir);
 
     const first = store.registerPlan(registration({ repoPath: dir }));

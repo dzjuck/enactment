@@ -33,7 +33,7 @@ function entries(overrides: Partial<Record<string, Buffer>> = {}): Documentation
 let root: string;
 
 beforeEach(async () => {
-  root = join(await mkdtemp(join(tmpdir(), 'harness-docs-')), 'documentation');
+  root = join(await mkdtemp(join(tmpdir(), 'enactment-docs-')), 'documentation');
 });
 
 describe('writeBundle', () => {

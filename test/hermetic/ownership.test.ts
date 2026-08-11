@@ -7,7 +7,7 @@ describe('resource ownership', () => {
     const released: string[] = [];
 
     const value = await withOwnedResource(
-      'ai-harness-proxy-1',
+      'enactment-proxy-1',
       async (name) => void released.push(name),
       () => Promise.resolve('handle'),
     );
@@ -21,7 +21,7 @@ describe('resource ownership', () => {
     const order: string[] = [];
 
     const failure = await withOwnedResource(
-      'ai-harness-proxy-1',
+      'enactment-proxy-1',
       async (name) => {
         released.push(name);
         order.push('released');
@@ -32,7 +32,7 @@ describe('resource ownership', () => {
       return cause;
     });
 
-    expect(released).toEqual(['ai-harness-proxy-1']);
+    expect(released).toEqual(['enactment-proxy-1']);
     expect(order).toEqual(['released', 'reported']);
     expect((failure as Error).message).toBe('readiness never arrived');
   });
@@ -41,7 +41,7 @@ describe('resource ownership', () => {
     const original = new Error('connect failed');
 
     const failure = await withOwnedResource(
-      'ai-harness-proxy-1',
+      'enactment-proxy-1',
       async () => {},
       () => Promise.reject(original),
     ).catch((cause: unknown) => cause);
@@ -54,7 +54,7 @@ describe('resource ownership', () => {
     const secondary = new Error('container removal failed');
 
     const failure = await withOwnedResource(
-      'ai-harness-proxy-1',
+      'enactment-proxy-1',
       () => Promise.reject(secondary),
       () => Promise.reject(primary),
     ).catch((cause: unknown) => cause);
@@ -66,13 +66,13 @@ describe('resource ownership', () => {
     // Neither cause may be lost to the other: the message names both.
     expect((failure as Error).message).toContain('outward network connect failed');
     expect((failure as Error).message).toContain('container removal failed');
-    expect((failure as Error).message).toContain('ai-harness-proxy-1');
+    expect((failure as Error).message).toContain('enactment-proxy-1');
   });
 
   it('never converts a cleanup failure into success', async () => {
     await expect(
       withOwnedResource(
-        'ai-harness-proxy-1',
+        'enactment-proxy-1',
         () => Promise.reject(new Error('removal failed')),
         () => Promise.resolve('handle'),
       ),
@@ -82,7 +82,7 @@ describe('resource ownership', () => {
     // failing scope must never be reported as anything other than a failure.
     await expect(
       withOwnedResource(
-        'ai-harness-proxy-1',
+        'enactment-proxy-1',
         () => Promise.reject(new Error('removal failed')),
         () => Promise.reject(new Error('scope failed')),
       ),

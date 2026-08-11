@@ -26,7 +26,7 @@ let claudeTokenFile: string;
 beforeAll(async () => {
   token = await loadClaudeToken();
   repo = await createM2Repo();
-  root = await mkdtemp(join(tmpdir(), 'harness-live-claude-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-live-claude-'));
   stateRoot = join(root, 'state');
   artifacts = join(root, 'artifacts');
   planFile = join(root, 'plan.yml');
@@ -82,8 +82,8 @@ async function artifactText(rootPath: string): Promise<string> {
 describe('real Claude task run', () => {
   it('routes medium complexity through claude-balanced and is a completed-plan no-op on rerun', async () => {
     const images = await runtimeImages();
-    const previousStateRoot = process.env.HARNESS_STATE_DIR;
-    process.env.HARNESS_STATE_DIR = stateRoot;
+    const previousStateRoot = process.env.ENACTMENT_STATE_DIR;
+    process.env.ENACTMENT_STATE_DIR = stateRoot;
 
     try {
       const prepared = await execute(
@@ -136,13 +136,13 @@ describe('real Claude task run', () => {
       expect(await artifactText(join(artifacts, 'live-claude'))).not.toContain(token);
 
       const reportsBefore = await readdir(join(artifacts, 'live-claude', 'reports'));
-      const commitsBefore = await git(repo.dir, ['rev-list', '--count', 'ai-harness/live-claude']);
+      const commitsBefore = await git(repo.dir, ['rev-list', '--count', 'enactment/live-claude']);
       const second = await execute(
         parseCommand(['run', manifestPath, '--repo', repo.dir, '--artifacts', artifacts]),
       );
       expect(second).toEqual(first);
       expect(await readdir(join(artifacts, 'live-claude', 'reports'))).toEqual(reportsBefore);
-      expect(await git(repo.dir, ['rev-list', '--count', 'ai-harness/live-claude'])).toBe(
+      expect(await git(repo.dir, ['rev-list', '--count', 'enactment/live-claude'])).toBe(
         commitsBefore,
       );
 
@@ -150,8 +150,8 @@ describe('real Claude task run', () => {
       await chmod(claudeTokenFile, 0o600);
       expect(await readAuthStore(codexStore)).toBe(codexAuth);
     } finally {
-      if (previousStateRoot === undefined) delete process.env.HARNESS_STATE_DIR;
-      else process.env.HARNESS_STATE_DIR = previousStateRoot;
+      if (previousStateRoot === undefined) delete process.env.ENACTMENT_STATE_DIR;
+      else process.env.ENACTMENT_STATE_DIR = previousStateRoot;
     }
   }, 1_800_000);
 });

@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 
 async function bundle(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-context-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-context-'));
   dirs.push(dir);
 
   const root = bundleRootFor(join(dir, 'plan.yml'));

@@ -23,7 +23,7 @@ export function planDocument(
 
   return [
     'version: 1',
-    `id: ${options.id ?? 'harness-test-plan'}`,
+    `id: ${options.id ?? 'enactment-test-plan'}`,
     ...documentation,
     'steps:',
     ...stepLines.map((line, index) => (index === 0 ? `  - ${line}` : `    ${line}`)),

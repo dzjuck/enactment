@@ -19,10 +19,10 @@ export const SYNTHETIC_COMMIT_SUBJECT = 'Synthetic workspace baseline';
 const GIT_ENV = {
   GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_CONFIG_SYSTEM: '/dev/null',
-  GIT_AUTHOR_NAME: 'AI Harness',
-  GIT_AUTHOR_EMAIL: 'harness@localhost',
-  GIT_COMMITTER_NAME: 'AI Harness',
-  GIT_COMMITTER_EMAIL: 'harness@localhost',
+  GIT_AUTHOR_NAME: 'Enactment',
+  GIT_AUTHOR_EMAIL: 'enactment@localhost',
+  GIT_COMMITTER_NAME: 'Enactment',
+  GIT_COMMITTER_EMAIL: 'enactment@localhost',
   GIT_AUTHOR_DATE: '2020-01-01T00:00:00+0000',
   GIT_COMMITTER_DATE: '2020-01-01T00:00:00+0000',
 };

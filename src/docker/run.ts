@@ -32,7 +32,7 @@ export const DEFAULT_GRACE_SECONDS = 10;
  * services that must outlive a single command. Returns its name.
  */
 export async function startContainer(spec: ContainerSpec): Promise<string> {
-  const name = spec.name ?? `harness-${randomUUID()}`;
+  const name = spec.name ?? `enactment-${randomUUID()}`;
   await execa('docker', buildRunArgs({ ...spec, name, detach: true }));
   return name;
 }
@@ -119,7 +119,7 @@ export async function runContainer(
   spec: ContainerSpec,
   options: RunOptions = {},
 ): Promise<RunResult> {
-  const name = spec.name ?? `harness-${randomUUID()}`;
+  const name = spec.name ?? `enactment-${randomUUID()}`;
   const grace = options.graceSeconds ?? DEFAULT_GRACE_SECONDS;
   const started = Date.now();
 

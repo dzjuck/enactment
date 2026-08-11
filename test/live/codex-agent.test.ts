@@ -35,7 +35,7 @@ let artifacts: string;
 
 beforeAll(async () => {
   repo = await createM2Repo();
-  root = await mkdtemp(join(tmpdir(), 'harness-live-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-live-'));
   artifacts = join(root, 'artifacts');
   planFile = join(repo.dir, 'plan.yml');
   manifestPath = join(root, 'execution-manifest.yml');
@@ -76,7 +76,7 @@ describe('real Codex tests-first run', () => {
     const result = await execute(
       parseCommand(['run', manifestPath, '--repo', repo.dir, '--artifacts', artifacts], {
         ...process.env,
-        HARNESS_STATE_DIR: join(root, 'state'),
+        ENACTMENT_STATE_DIR: join(root, 'state'),
       }),
     );
 

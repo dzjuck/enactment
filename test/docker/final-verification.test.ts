@@ -15,7 +15,7 @@ import {
 } from '../../src/verify/final.js';
 import { commitAll, createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
-const LABEL = 'ai-harness.attempt';
+const LABEL = 'enactment.attempt';
 
 let repo: TargetRepo;
 let images: RuntimeImages;
@@ -26,7 +26,7 @@ const dirs: string[] = [];
 beforeAll(async () => {
   images = await resolveRuntimeImages();
   repo = await createM2Repo();
-  root = await mkdtemp(join(tmpdir(), 'harness-final-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-final-'));
 
   // A committed marker the working tree does not have, so a run that verified the working
   // tree instead of the commit would be visible.
@@ -80,7 +80,7 @@ async function run(
   commands: string[][],
   overrides: Partial<Parameters<typeof verifyPlanHead>[0]> = {},
 ): Promise<Run> {
-  const artifacts = await scratch('harness-final-artifacts-');
+  const artifacts = await scratch('enactment-final-artifacts-');
   const attempt = overrides.attempt ?? `final-${Math.random().toString(16).slice(2, 10)}`;
 
   const result = await verifyPlanHead({

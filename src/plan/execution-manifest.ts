@@ -20,7 +20,7 @@ import {
   CLAUDE_VERSION,
   CODEX_PROVIDER_ALLOWLIST,
   CODEX_VERSION,
-  HARNESS_VERSION,
+  ENACTMENT_VERSION,
   IMAGE_ROLES,
   SEMGREP_IMAGE,
   SEMGREP_VERSION,
@@ -113,7 +113,7 @@ const manifestSchema = z.strictObject({
       documentation_hash: sha256.optional(),
     }),
     runtime: z.strictObject({
-      harness_version: z.string().min(1),
+      enactment_version: z.string().min(1),
       codex_image_id: sha256,
       claude_image_id: sha256,
       verifier_image_id: sha256,
@@ -339,7 +339,7 @@ export async function buildManifest(options: BuildManifestOptions): Promise<Prep
     if (!bundle.present) {
       throw new ApprovalError(
         'documentation_changed',
-        `${options.planFile} declares documentation but ${bundleRootFor(options.planFile)} does not exist; run "harness docs ${options.planFile}" first`,
+        `${options.planFile} declares documentation but ${bundleRootFor(options.planFile)} does not exist; run "enactment docs ${options.planFile}" first`,
       );
     }
     documentationHash = bundle.hash;
@@ -363,7 +363,7 @@ export async function buildManifest(options: BuildManifestOptions): Promise<Prep
         ...(documentationHash === undefined ? {} : { documentation_hash: documentationHash }),
       },
       runtime: {
-        harness_version: HARNESS_VERSION,
+        enactment_version: ENACTMENT_VERSION,
         codex_image_id: images.codex.id,
         claude_image_id: images.claude.id,
         verifier_image_id: images.verifier.id,
@@ -489,10 +489,10 @@ export async function validateManifest(
   // drifted must stop while the only cost is a message.
   const documentation = await approveDocumentation(loaded);
 
-  if (manifest.runtime.harness_version !== HARNESS_VERSION) {
+  if (manifest.runtime.enactment_version !== ENACTMENT_VERSION) {
     throw new ApprovalError(
       'runtime_changed',
-      `runtime.harness_version is ${HARNESS_VERSION}, but ${manifest.runtime.harness_version} was approved`,
+      `runtime.enactment_version is ${ENACTMENT_VERSION}, but ${manifest.runtime.enactment_version} was approved`,
     );
   }
 
@@ -557,7 +557,7 @@ async function approveDocumentation(
   if (approvedHash === undefined) {
     throw new ApprovalError(
       'documentation_changed',
-      `${loaded.planFile} declares documentation, but the approval carries no documentation hash; run "harness docs" and re-run prepare`,
+      `${loaded.planFile} declares documentation, but the approval carries no documentation hash; run "enactment docs" and re-run prepare`,
     );
   }
 
@@ -575,14 +575,14 @@ async function approveDocumentation(
   if (!bundle.present) {
     throw new ApprovalError(
       'documentation_changed',
-      `${bundleRoot} is missing; run "harness docs ${loaded.planFile}" to download the approved documentation again`,
+      `${bundleRoot} is missing; run "enactment docs ${loaded.planFile}" to download the approved documentation again`,
     );
   }
 
   if (bundle.hash !== approvedHash) {
     throw new ApprovalError(
       'documentation_changed',
-      `${bundleRoot} is ${bundle.hash}, but ${approvedHash} was approved; delete the whole documentation directory, run "harness docs", then re-run prepare and approve the new manifest`,
+      `${bundleRoot} is ${bundle.hash}, but ${approvedHash} was approved; delete the whole documentation directory, run "enactment docs", then re-run prepare and approve the new manifest`,
     );
   }
 

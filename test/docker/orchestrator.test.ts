@@ -26,7 +26,7 @@ import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 const CANARY = 'sk-orchestrator-canary-77d3f19a';
-const LABEL = 'ai-harness.attempt';
+const LABEL = 'enactment.attempt';
 const M1_PHASES = [
   'export',
   'setup',
@@ -73,7 +73,7 @@ beforeAll(async () => {
   stub = await stubAgentImage();
 
   repo = await createTargetRepo();
-  root = await mkdtemp(join(tmpdir(), 'harness-run-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-run-'));
 
   const source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
@@ -116,11 +116,11 @@ beforeAll(async () => {
       '  process.on(signal, () => { controller.abort(); });',
       '}',
       'const report = await runSinglePlanStep({',
-      '  ...JSON.parse(process.env.HARNESS_TEST_RUN),',
-      '  onPhase: (phase) => appendFile(process.env.HARNESS_TEST_PHASES, `${phase}\\n`),',
+      '  ...JSON.parse(process.env.ENACTMENT_TEST_RUN),',
+      '  onPhase: (phase) => appendFile(process.env.ENACTMENT_TEST_PHASES, `${phase}\\n`),',
       '  signal: controller.signal,',
       '});',
-      'await writeFile(process.env.HARNESS_TEST_REPORT, JSON.stringify(report));',
+      'await writeFile(process.env.ENACTMENT_TEST_REPORT, JSON.stringify(report));',
       "process.exit(report.status === 'succeeded' ? 0 : 1);",
       '',
     ].join('\n'),
@@ -163,7 +163,7 @@ async function expectNoResources(attempt: string): Promise<void> {
 }
 
 async function artifactDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-artifacts-'));
   dirs.push(dir);
   return dir;
 }
@@ -230,8 +230,8 @@ describe('orchestrator', () => {
     expect(report.commit).toMatch(/^[0-9a-f]{40}$/);
 
     const message = await git(repo.dir, ['log', '-1', '--format=%B', report.commit ?? '']);
-    expect(message).toContain('AI-Harness-Plan: harness-test-plan');
-    expect(message).toContain('AI-Harness-Step: add-slugify');
+    expect(message).toContain('Enactment-Plan: harness-test-plan');
+    expect(message).toContain('Enactment-Step: add-slugify');
 
     const files = (await walk(artifacts)).map((path) => path.replace(`${artifacts}/`, ''));
     expect(files).toEqual(
@@ -408,7 +408,7 @@ describe('orchestrator', () => {
   it('tears down every attempt resource when the run is interrupted', async () => {
     const artifacts = await artifactDir();
 
-    const scratch = await mkdtemp(join(tmpdir(), 'harness-report-'));
+    const scratch = await mkdtemp(join(tmpdir(), 'enactment-report-'));
     dirs.push(scratch);
     const reportFile = join(scratch, 'report.json');
     const phasesFile = join(scratch, 'phases');
@@ -417,9 +417,9 @@ describe('orchestrator', () => {
     const child = execa('node', [runnerScript], {
       reject: false,
       env: {
-        HARNESS_TEST_REPORT: reportFile,
-        HARNESS_TEST_PHASES: phasesFile,
-        HARNESS_TEST_RUN: JSON.stringify({
+        ENACTMENT_TEST_REPORT: reportFile,
+        ENACTMENT_TEST_PHASES: phasesFile,
+        ENACTMENT_TEST_RUN: JSON.stringify({
           planFile,
           repoPath: repo.dir,
           artifactDir: artifacts,
@@ -491,7 +491,7 @@ describe('orchestrator', () => {
     if (status === 'failed') {
       expect(report.commit).toBeUndefined();
       expect(events.map((event) => event.kind)).not.toContain('candidate');
-      expect(report.message).toMatch(/opt\.ai-harness\.rules\..+src\/review-probe\.js/);
+      expect(report.message).toMatch(/opt\.enactment\.rules\..+src\/review-probe\.js/);
     }
   }, 900_000);
 });

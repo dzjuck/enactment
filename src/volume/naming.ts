@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-export const LABEL_PREFIX = 'ai-harness';
+export const LABEL_PREFIX = 'enactment';
 export const ATTEMPT_LABEL = `${LABEL_PREFIX}.attempt`;
 export const ROLE_LABEL = `${LABEL_PREFIX}.role`;
 

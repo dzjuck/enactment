@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 async function scratch(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-amend-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-amend-'));
   dirs.push(dir);
   return dir;
 }
@@ -68,7 +68,7 @@ const passingFinal = (): Promise<FinalVerificationResult> =>
     dependencyCacheKey: `sha256:${'f'.repeat(64)}`,
     exportHash: `sha256:${'0'.repeat(64)}`,
     runtime: {
-      harness_version: '0.1.0',
+      enactment_version: '0.1.0',
       codex_image_id: IMAGES.codex.id,
       claude_image_id: IMAGES.claude.id,
       verifier_image_id: IMAGES.verifier.id,
@@ -154,7 +154,7 @@ async function operator(): Promise<Operator> {
     repo,
     dir,
     artifactDir: join(dir, 'artifacts'),
-    env: { HARNESS_STATE_DIR: join(dir, 'state') },
+    env: { ENACTMENT_STATE_DIR: join(dir, 'state') },
   };
 }
 
@@ -227,7 +227,7 @@ describe('amending a blocked plan', () => {
       failure: { step: 'persist-runs', category: 'test_contract_disputed' },
     });
 
-    const accepted = await git(space.repo.dir, ['rev-parse', 'ai-harness/collector-dashboard']);
+    const accepted = await git(space.repo.dir, ['rev-parse', 'enactment/collector-dashboard']);
 
     // Cancel releases the repository and names the commit to amend from.
     const cancelled = await cancel(space, firstManifest);
@@ -253,20 +253,20 @@ describe('amending a blocked plan', () => {
     expect(amended.report).toMatchObject({
       plan: 'collector-dashboard-r2',
       state: 'completed',
-      branch: 'ai-harness/collector-dashboard-r2',
+      branch: 'enactment/collector-dashboard-r2',
       baseCommit: accepted,
       finalVerification: { status: 'pass' },
     });
 
     // One linear chain: the newest branch contains the previous revision's accepted commit.
-    const head = await git(space.repo.dir, ['rev-parse', 'ai-harness/collector-dashboard-r2']);
+    const head = await git(space.repo.dir, ['rev-parse', 'enactment/collector-dashboard-r2']);
     expect(await git(space.repo.dir, ['rev-parse', `${head}^`])).toBe(accepted);
     await expect(
       git(space.repo.dir, ['merge-base', '--is-ancestor', accepted, head]),
     ).resolves.toBeDefined();
 
     // The previous revision's branch is untouched by any of it.
-    expect(await git(space.repo.dir, ['rev-parse', 'ai-harness/collector-dashboard'])).toBe(
+    expect(await git(space.repo.dir, ['rev-parse', 'enactment/collector-dashboard'])).toBe(
       accepted,
     );
   });

@@ -26,7 +26,7 @@ beforeAll(async () => {
   images = await runtimeImages();
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
-  root = await mkdtemp(join(tmpdir(), 'harness-implsnap-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-implsnap-'));
   store = new ArtifactStore(root);
 });
 

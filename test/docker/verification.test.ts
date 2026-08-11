@@ -93,7 +93,7 @@ let images: RuntimeImages;
 beforeAll(async () => {
   images = await runtimeImages();
   repo = await createTargetRepo();
-  root = await mkdtemp(join(tmpdir(), 'harness-verify-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-verify-'));
   store = new ArtifactStore(join(root, 'artifacts'));
 
   const { tar: original } = await exportCommit(repo.dir, repo.commit);
@@ -127,7 +127,7 @@ async function verify(
   commands: readonly (readonly string[])[],
   overrides: Partial<Parameters<typeof runVerification>[0]> = {},
 ) {
-  const artifactDir = await mkdtemp(join(tmpdir(), 'harness-verify-artifacts-'));
+  const artifactDir = await mkdtemp(join(tmpdir(), 'enactment-verify-artifacts-'));
 
   const result = await runVerification({
     attempt: newAttemptId(),
@@ -312,7 +312,7 @@ describe('verification phase', () => {
   it('destroys the disposable workspace copy afterwards', async () => {
     const { result } = await verify(passing, [['true']]);
 
-    expect(result.workspaceVolume).toMatch(/^ai-harness-/);
+    expect(result.workspaceVolume).toMatch(/^enactment-/);
     await expect(volumeExists(result.workspaceVolume)).resolves.toBe(false);
   }, 300_000);
 

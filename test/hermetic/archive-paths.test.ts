@@ -48,7 +48,7 @@ async function git(dir: string, args: string[]): Promise<string> {
 }
 
 async function repoWith(files: Record<string, string>): Promise<{ dir: string; commit: string }> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-archive-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-archive-'));
   dirs.push(dir);
   await git(dir, ['init', '-q', '-b', 'main']);
 
@@ -72,7 +72,7 @@ let gnuFormatArgs: string[] | undefined;
 async function gnuFormat(): Promise<string[]> {
   if (gnuFormatArgs !== undefined) return gnuFormatArgs;
 
-  const empty = await mkdtemp(join(tmpdir(), 'harness-tar-probe-'));
+  const empty = await mkdtemp(join(tmpdir(), 'enactment-tar-probe-'));
   dirs.push(empty);
 
   for (const args of [['--format=gnu'], ['--format', 'gnutar']]) {
@@ -92,7 +92,7 @@ async function gnuFormat(): Promise<string[]> {
 
 /** A GNU-format archive of a directory, which is what workspace snapshots produce. */
 async function gnuTar(files: Record<string, string>, links: Record<string, string> = {}) {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-gnu-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-gnu-'));
   dirs.push(dir);
 
   for (const [path, content] of Object.entries(files)) {
@@ -269,7 +269,7 @@ describe('archive path fidelity', () => {
       repoPath: before.dir,
       parentCommit: before.commit,
       branchExists: false,
-      branch: 'ai-harness/archive-matrix',
+      branch: 'enactment/archive-matrix',
       planId: 'archive-matrix',
       stepId: 'archive-matrix',
       attempt: 'attempt-1',
@@ -288,7 +288,7 @@ describe('archive path fidelity', () => {
   });
 
   it('fails closed on an unsupported entry type, naming the real path', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'harness-fifo-'));
+    const dir = await mkdtemp(join(tmpdir(), 'enactment-fifo-'));
     dirs.push(dir);
 
     await mkdir(join(dir, 'src'), { recursive: true });

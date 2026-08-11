@@ -66,7 +66,7 @@ function completed(stdout = '', stderr = '', exitCode = 0): RunResult {
 let dir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'harness-review-run-'));
+  dir = await mkdtemp(join(tmpdir(), 'enactment-review-run-'));
 });
 
 afterEach(async () => {

@@ -44,8 +44,8 @@ function runCodex(home: string, args: string[], timeoutSeconds = 30): Promise<Ru
 }
 
 beforeAll(async () => {
-  validHome = await mkdtemp(join(tmpdir(), 'harness-codex-valid-'));
-  invalidHome = await mkdtemp(join(tmpdir(), 'harness-codex-invalid-'));
+  validHome = await mkdtemp(join(tmpdir(), 'enactment-codex-valid-'));
+  invalidHome = await mkdtemp(join(tmpdir(), 'enactment-codex-invalid-'));
 
   await materializeCodexHome(policy, validHome);
   await materializeCodexHome(policy, invalidHome);

@@ -20,13 +20,13 @@ let authVolume: string;
 
 beforeAll(async () => {
   images = await runtimeImages();
-  source = await mkdtemp(join(tmpdir(), 'harness-codex-source-'));
+  source = await mkdtemp(join(tmpdir(), 'enactment-codex-source-'));
   await writeFile(
     join(source, AUTH_FILE),
     JSON.stringify({ tokens: { access_token: 'access-canary' } }),
   );
 
-  const store = await seedAuthStore(await mkdtemp(join(tmpdir(), 'harness-store-')), source);
+  const store = await seedAuthStore(await mkdtemp(join(tmpdir(), 'enactment-store-')), source);
   const policy = compileCodexPolicy({ prompt: 'noop', workdir: '/workspace' });
 
   authVolume = await createAuthVolume(

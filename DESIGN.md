@@ -661,7 +661,7 @@ implementation snapshot
 Accepted work lands on one stable branch per plan:
 
 ```text
-ai-harness/<plan-id>
+enactment/<plan-id>
 ```
 
 It is created at the approved base by the first acceptance and advanced linearly by each later
@@ -677,10 +677,10 @@ did.
 Commit trailers:
 
 ```text
-AI-Harness-Plan: collector-dashboard
-AI-Harness-Step: persist-runs
-AI-Harness-Attempt: 4f3c1b9a2e5d7801
-AI-Harness-Idempotency-Key: ...
+Enactment-Plan: collector-dashboard
+Enactment-Step: persist-runs
+Enactment-Attempt: 4f3c1b9a2e5d7801
+Enactment-Idempotency-Key: ...
 ```
 
 The idempotency key covers the manifest hash, plan ID, step ID, attempt ID and expected parent,
@@ -909,13 +909,13 @@ runtime:
   readiness_timeout_seconds: 60
   command_timeout_seconds: 600
   probe: http-get-200
-  environment: [HOST, PORT, HARNESS_APP_URL]
+  environment: [HOST, PORT, ENACTMENT_APP_URL]
   network: internal
 ```
 
 The application receives harness-owned `HOST=0.0.0.0` and `PORT`, and must listen on `0.0.0.0`
 because the checker reaches it over Docker DNS. Behavioral commands additionally receive
-`HARNESS_APP_URL=http://<app-container>:<port>`. A task may neither lower nor raise these.
+`ENACTMENT_APP_URL=http://<app-container>:<port>`. A task may neither lower nor raise these.
 
 `observable_behavior` is the text sent to the agent; it replaces the earlier `prompt`. Plan and
 step IDs are Git-safe lowercase slugs, because they name a branch and an artifact directory.
@@ -946,7 +946,7 @@ execution_manifest:
     documentation_hash: sha256:...   # only when the plan declares documentation
 
   runtime:
-    harness_version: 0.1.0
+    enactment_version: 0.1.0
     codex_image_id: sha256:...
     claude_image_id: sha256:...
     verifier_image_id: sha256:...
@@ -1439,13 +1439,13 @@ cancel the current plan
 Concretely:
 
 ```bash
-harness run <old-manifest> --repo <path>      # optional: finishes an interrupted acceptance
-harness cancel <old-manifest> --repo <path>   # releases the repository path; reports the base
+enactment run <old-manifest> --repo <path>      # optional: finishes an interrupted acceptance
+enactment cancel <old-manifest> --repo <path>   # releases the repository path; reports the base
 # rewrite the plan: new plan ID, remaining steps only
-harness prepare plan-r2.yml --repo <path> \
+enactment prepare plan-r2.yml --repo <path> \
   --base <cancel-report-head-or-base> \
   --output execution-manifest-r2.yml     # --base: the cancel report's head, or its base if none
-harness run execution-manifest-r2.yml --repo <path>
+enactment run execution-manifest-r2.yml --repo <path>
 ```
 
 `--base` is the only new mechanism. It names the commit the amended plan builds on; without it
@@ -1483,13 +1483,13 @@ continuation is the operator's to preserve.
 That constraint decides where an operator's own commits go. A dependency change (§13) must be
 committed on a branch the operator creates **at the plan branch tip**, and `--base` points at it.
 Committing it on the base branch instead produces a base that does not contain the accepted work.
-It is never committed onto `ai-harness/<plan-id>`: those refs are harness-owned (§14).
+It is never committed onto `enactment/<plan-id>`: those refs are harness-owned (§14).
 
 ### What the operator owns
 
 Trimming completed steps out of the amended plan. The harness does not diff plan revisions and
 does not know which authored step produced which commit. `prepare` warns when a declared step ID is
-already carried by an `AI-Harness-Step` trailer reachable from the base, naming the ID and the
+already carried by an `Enactment-Step` trailer reachable from the base, naming the ID and the
 commit, and the operator decides — running the manifest is still the approval.
 
 It warns rather than refuses because the two errors are not symmetric. A missed warning costs one
@@ -1797,7 +1797,7 @@ Adds:
 * compensating steps as ordinary steps of an amended plan;
 * dependency changes (§13) and test-contract repair (§25) as amendment procedures rather than as
   protocols of their own;
-* a prepare-time warning naming any step ID already carried by an `AI-Harness-Step` trailer
+* a prepare-time warning naming any step ID already carried by an `Enactment-Step` trailer
   reachable from the base commit, which surfaces an amended plan that still lists a completed step
   at the moment the operator is deciding whether to approve it.
 
@@ -2092,7 +2092,7 @@ Established against Claude Code `2.1.221` on OrbStack `linux/arm64` before routi
 ### Findings from the Milestone 8 implementation
 
 * **A trailer scan is not a message search.** `git log <commit>
-  --format=%H%x09%(trailers:key=AI-Harness-Step,valueonly,separator=%x2C)` emits one line per
+  --format=%H%x09%(trailers:key=Enactment-Step,valueonly,separator=%x2C)` emits one line per
   commit, tab-separated, empty for every non-harness commit — measured on git 2.39.3. Prose that
   mentions the trailer text outside the final paragraph is not a trailer and does not appear, so
   the warning needs no message parsing and cannot be provoked by a commit message.

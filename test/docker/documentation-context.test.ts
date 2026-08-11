@@ -50,7 +50,7 @@ const STEP = [
 beforeAll(async () => {
   stub = await stubAgentImage();
   repo = await createTargetRepo();
-  root = await mkdtemp(join(tmpdir(), 'harness-docs-context-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-docs-context-'));
 
   const source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
@@ -68,7 +68,7 @@ afterEach(async () => {
 });
 
 async function scratch(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-docs-run-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-docs-run-'));
   dirs.push(dir);
   return dir;
 }

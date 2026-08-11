@@ -139,7 +139,7 @@ async function connectNetwork(network: string, container: string): Promise<void>
  * escapes.
  */
 export async function startProxyContainer(options: ProxyContainerOptions): Promise<ProxyHandle> {
-  const name = `ai-harness-proxy-${options.attempt}`;
+  const name = `enactment-proxy-${options.attempt}`;
   const hosts = options.allowlist ?? CODEX_PROVIDER_ALLOWLIST;
   const ports = options.ports ?? DEFAULT_PORTS;
 

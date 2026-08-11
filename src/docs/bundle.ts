@@ -166,7 +166,7 @@ export async function readProvenance(bundleRoot: string): Promise<Provenance> {
   } catch {
     throw new DocumentationError(
       'provenance_missing',
-      `${join(bundleRoot, PROVENANCE_FILE)} is missing; delete the whole documentation directory and run "harness docs" again`,
+      `${join(bundleRoot, PROVENANCE_FILE)} is missing; delete the whole documentation directory and run "enactment docs" again`,
     );
   }
 
@@ -176,7 +176,7 @@ export async function readProvenance(bundleRoot: string): Promise<Provenance> {
   } catch (error) {
     throw new DocumentationError(
       'provenance_malformed',
-      `${join(bundleRoot, PROVENANCE_FILE)} is not valid provenance (${error instanceof Error ? error.message : String(error)}); delete the whole documentation directory and run "harness docs" again`,
+      `${join(bundleRoot, PROVENANCE_FILE)} is not valid provenance (${error instanceof Error ? error.message : String(error)}); delete the whole documentation directory and run "enactment docs" again`,
     );
   }
 
@@ -186,7 +186,7 @@ export async function readProvenance(bundleRoot: string): Promise<Provenance> {
     const detail = issue === undefined ? 'invalid structure' : `${issue.path.join('.')}: ${issue.message}`;
     throw new DocumentationError(
       'provenance_malformed',
-      `${join(bundleRoot, PROVENANCE_FILE)} is not valid provenance (${detail}); delete the whole documentation directory and run "harness docs" again`,
+      `${join(bundleRoot, PROVENANCE_FILE)} is not valid provenance (${detail}); delete the whole documentation directory and run "enactment docs" again`,
     );
   }
 
@@ -219,7 +219,7 @@ export async function documentationHash(contextDir: string): Promise<string> {
   return `sha256:${hash.digest('hex')}`;
 }
 
-const FIX = 'delete the whole documentation directory and run "harness docs" again';
+const FIX = 'delete the whole documentation directory and run "enactment docs" again';
 
 export type BundleVerification = { present: false } | { present: true; hash: string };
 

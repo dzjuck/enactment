@@ -42,7 +42,7 @@ beforeAll(async () => {
   stub = await stubAgentImage();
 
   repo = await createTargetRepo();
-  root = await mkdtemp(join(tmpdir(), 'harness-startup-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-startup-'));
 
   const source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
@@ -95,8 +95,8 @@ async function leaveStaleResources(attempt: string): Promise<void> {
   const labels = ['--label', `${ATTEMPT_LABEL}=${attempt}`, '--label', `${ROLE_LABEL}=stale`];
 
   await execa('docker', ['run', '-d', ...labels, images.setup.id, 'sleep', '300']);
-  await execa('docker', ['volume', 'create', ...labels, `ai-harness-ws-${attempt}`]);
-  await execa('docker', ['network', 'create', ...labels, `ai-harness-net-${attempt}-egress`]);
+  await execa('docker', ['volume', 'create', ...labels, `enactment-ws-${attempt}`]);
+  await execa('docker', ['network', 'create', ...labels, `enactment-net-${attempt}-egress`]);
 }
 
 describe('a production restart cleans up after a crashed one', () => {
@@ -123,7 +123,7 @@ describe('a production restart cleans up after a crashed one', () => {
     const foreign = `foreign${String(Date.now()).slice(-10)}`;
     await leaveStaleResources(foreign);
 
-    const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
+    const artifacts = await mkdtemp(join(tmpdir(), 'enactment-artifacts-'));
     dirs.push(artifacts);
 
     const report = await runSinglePlanStep({

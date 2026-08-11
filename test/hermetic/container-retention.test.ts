@@ -6,9 +6,9 @@ import { ContainerRemovalError, removeContainer } from '../../src/docker/run.js'
 import { startProxyContainer } from '../../src/proxy/container.js';
 
 /** Docker's real messages, measured against the daemon rather than guessed. */
-const NO_SUCH = 'Error response from daemon: No such container: ai-harness-app-a1';
+const NO_SUCH = 'Error response from daemon: No such container: enactment-app-a1';
 const IN_PROGRESS =
-  'Error response from daemon: removal of container ai-harness-app-a1 is already in progress';
+  'Error response from daemon: removal of container enactment-app-a1 is already in progress';
 
 const { calls, outcome, fakeExeca } = vi.hoisted(() => {
   const recorded: string[][] = [];
@@ -38,31 +38,31 @@ beforeEach(() => {
 
 describe('removeContainer', () => {
   it('removes a retained container by force, so an exited one goes too', async () => {
-    await expect(removeContainer('ai-harness-app-a1')).resolves.toBeUndefined();
+    await expect(removeContainer('enactment-app-a1')).resolves.toBeUndefined();
 
-    expect(calls).toEqual([['rm', '--force', 'ai-harness-app-a1']]);
+    expect(calls).toEqual([['rm', '--force', 'enactment-app-a1']]);
   });
 
   it('treats an already-absent container as success, so removal is idempotent', async () => {
     outcome.stderr = NO_SUCH;
 
-    await expect(removeContainer('ai-harness-app-a1')).resolves.toBeUndefined();
+    await expect(removeContainer('enactment-app-a1')).resolves.toBeUndefined();
   });
 
   it('propagates a real removal failure with Docker own message', async () => {
     outcome.stderr = IN_PROGRESS;
 
-    const failure = await removeContainer('ai-harness-app-a1').catch((cause: unknown) => cause);
+    const failure = await removeContainer('enactment-app-a1').catch((cause: unknown) => cause);
 
     expect(failure).toBeInstanceOf(ContainerRemovalError);
-    expect((failure as Error).message).toContain('ai-harness-app-a1');
+    expect((failure as Error).message).toContain('enactment-app-a1');
     expect((failure as Error).message).toContain('already in progress');
   });
 
   it('propagates a failure it cannot interpret rather than assuming not-found', async () => {
     outcome.stderr = 'Cannot connect to the Docker daemon';
 
-    await expect(removeContainer('ai-harness-app-a1')).rejects.toThrow(ContainerRemovalError);
+    await expect(removeContainer('enactment-app-a1')).rejects.toThrow(ContainerRemovalError);
   });
 });
 
@@ -74,8 +74,8 @@ describe('proxy container retention', () => {
   it('still runs under --rm, with unchanged argv', async () => {
     await startProxyContainer({
       attempt: 'a1',
-      egressNetwork: 'ai-harness-net-a1-agent-egress',
-      outwardNetwork: 'ai-harness-net-a1-proxy-egress',
+      egressNetwork: 'enactment-net-a1-agent-egress',
+      outwardNetwork: 'enactment-net-a1-proxy-egress',
       images,
       allowlist: ['chatgpt.com'],
       ports: [443],
@@ -90,7 +90,7 @@ describe('proxy container retention', () => {
         '--rm',
         '--detach',
         '--name',
-        'ai-harness-proxy-a1',
+        'enactment-proxy-a1',
         '--user',
         '1001:1001',
         '--read-only',
@@ -103,13 +103,13 @@ describe('proxy container retention', () => {
         '--cpus',
         String(DEFAULT_LIMITS.cpus),
         '--network',
-        'ai-harness-net-a1-agent-egress',
+        'enactment-net-a1-agent-egress',
         '--workdir',
         '/app',
         '--label',
-        'ai-harness.attempt=a1',
+        'enactment.attempt=a1',
         '--label',
-        'ai-harness.role=proxy',
+        'enactment.role=proxy',
         '--tmpfs',
         '/tmp:rw,nosuid,nodev,mode=1777',
         '--tmpfs',

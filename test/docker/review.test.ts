@@ -43,7 +43,7 @@ let root: string;
 let images: RuntimeImages;
 
 beforeAll(async () => {
-  root = await mkdtemp(join(tmpdir(), 'harness-review-docker-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-review-docker-'));
   images = await runtimeImages();
 });
 

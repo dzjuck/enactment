@@ -65,7 +65,7 @@ async function authVolumes(attempt: string): Promise<string[]> {
     'ls',
     '-q',
     '--filter',
-    `label=ai-harness.attempt=${attempt}`,
+    `label=enactment.attempt=${attempt}`,
   ]);
   return stdout.split('\n').filter((name) => name.includes('-auth-'));
 }
@@ -76,7 +76,7 @@ async function run(
 ) {
   const repo = await createTargetRepo();
   repos.push(repo);
-  const root = await scratch('harness-provider-routing-');
+  const root = await scratch('enactment-provider-routing-');
   const planFile = join(root, 'plan.yml');
   const artifactDir = join(root, 'artifacts');
   const attempt = `route-${complexity}-${Date.now().toString(36)}`;
@@ -195,7 +195,7 @@ describe('whole-step provider routing', () => {
     expect(result.report.failedPhase).toBe('agent');
     expect(result.report.commit).toBeUndefined();
     expect(result.report.message).toMatch(/model/i);
-    expect(await git(result.repo.dir, ['for-each-ref', 'refs/heads/ai-harness/'])).toBe('');
+    expect(await git(result.repo.dir, ['for-each-ref', 'refs/heads/enactment/'])).toBe('');
   });
 
   // Claude has no such fallback — a wrong model is a terminal provider error, not a quiet

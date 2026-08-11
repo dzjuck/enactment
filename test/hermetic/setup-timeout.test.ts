@@ -75,7 +75,7 @@ beforeEach(async () => {
   calls.length = 0;
   state.termAt = 0;
   state.killAt = 0;
-  dir = await mkdtemp(join(tmpdir(), 'harness-setup-timeout-'));
+  dir = await mkdtemp(join(tmpdir(), 'enactment-setup-timeout-'));
 });
 
 afterEach(async () => {
@@ -89,7 +89,7 @@ function hangingInstall(cache: DependencyCache): Promise<unknown> {
     attempt: 'attempt-1',
     workspaceTar: Buffer.from('tar'),
     installCommand: ['hang-forever'],
-    network: 'ai-harness-net-attempt-1-registry',
+    network: 'enactment-net-attempt-1-registry',
     images: IMAGES,
     setupSeconds: 0.05,
     graceSeconds: GRACE_SECONDS,

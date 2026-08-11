@@ -35,7 +35,7 @@ beforeAll(async () => {
   lifecycle = await createRepo('lifecycle-repo');
   ({ tar: lifecycleTar } = await exportCommit(lifecycle.dir, lifecycle.commit));
 
-  cacheRoot = await mkdtemp(join(tmpdir(), 'harness-deps-'));
+  cacheRoot = await mkdtemp(join(tmpdir(), 'enactment-deps-'));
   cache = new DependencyCache(cacheRoot);
 }, 120_000);
 
@@ -157,7 +157,7 @@ describe('dependency setup', () => {
 
 describe('setup phase budget', () => {
   /** Every attempt-scoped resource carries this, so a leak is a count rather than a guess. */
-  const LABEL = 'ai-harness.attempt';
+  const LABEL = 'enactment.attempt';
 
   async function labelled(attempt: string, kind: 'container' | 'volume' | 'network'): Promise<string[]> {
     const filter = `label=${LABEL}=${attempt}`;

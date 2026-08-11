@@ -5,10 +5,10 @@ import { execa } from 'execa';
 /** DESIGN.md §14. Defined here rather than beside acceptance, because reading them back is
  * this module's job and acceptance imports it, not the other way round. */
 export const TRAILERS = {
-  plan: 'AI-Harness-Plan',
-  step: 'AI-Harness-Step',
-  attempt: 'AI-Harness-Attempt',
-  idempotencyKey: 'AI-Harness-Idempotency-Key',
+  plan: 'Enactment-Plan',
+  step: 'Enactment-Step',
+  attempt: 'Enactment-Attempt',
+  idempotencyKey: 'Enactment-Idempotency-Key',
 };
 
 export interface IdempotencyInputs {
@@ -47,7 +47,7 @@ export function idempotencyKey(inputs: IdempotencyInputs): string {
  * The values one trailer carries on one commit.
  *
  * A trailer read rather than a search of the message: prose that mentions the trailer text is
- * not a trailer, and a substring match would let `AI-Harness-Step: persist-runs` be satisfied
+ * not a trailer, and a substring match would let `Enactment-Step: persist-runs` be satisfied
  * by a commit whose step is `persist-runs-index`. Like every read here it yields nothing when
  * git fails, which fails the caller's check closed.
  */
@@ -76,7 +76,7 @@ export interface AcceptedStep {
 }
 
 /**
- * Every step ID an `AI-Harness-Step` trailer carries, reachable from `commit`, newest first.
+ * Every step ID an `Enactment-Step` trailer carries, reachable from `commit`, newest first.
  *
  * This is what tells an operator that an amended plan still lists a step the base already
  * accepted (DESIGN.md §30). It reads trailers rather than commit messages, so prose that

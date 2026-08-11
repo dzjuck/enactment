@@ -72,7 +72,7 @@ interface Space {
 }
 
 async function workspace(plan = PLAN): Promise<Space> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-docs-cli-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-docs-cli-'));
   dirs.push(dir);
 
   const planFile = join(dir, 'plan.yml');
@@ -137,7 +137,7 @@ describe('docs command parsing', () => {
   });
 });
 
-describe('harness docs', () => {
+describe('enactment docs', () => {
   it('fetches every source, writes the bundle and reports what it stored', async () => {
     const space = await workspace();
     const result = await docs(space);

@@ -154,7 +154,7 @@ describe('the downloader container', () => {
     const { spec } = recorder.ran[0] as Recorder['ran'][number];
 
     expect(spec.image).toBe(IMAGES.verifier.id);
-    expect(spec.network).toBe(`ai-harness-net-${ATTEMPT}-documentation-egress`);
+    expect(spec.network).toBe(`enactment-net-${ATTEMPT}-documentation-egress`);
     expect(spec.env?.HTTPS_PROXY).toBe('http://proxy:8888');
   });
 
@@ -175,8 +175,8 @@ describe('the downloader container', () => {
     const removed = dockerCalls.filter((args) => args[0] === 'network' && args[1] === 'rm');
 
     expect(created.map((args) => args.at(-1))).toEqual([
-      `ai-harness-net-${ATTEMPT}-documentation-egress`,
-      `ai-harness-net-${ATTEMPT}-documentation-proxy-egress`,
+      `enactment-net-${ATTEMPT}-documentation-egress`,
+      `enactment-net-${ATTEMPT}-documentation-proxy-egress`,
     ]);
     expect(created[0]).toContain('--internal');
     expect(created[1]).not.toContain('--internal');

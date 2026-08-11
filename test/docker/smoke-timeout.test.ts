@@ -20,7 +20,7 @@ import { ORIGIN_PORT, startOriginContainer } from '../helpers/origin-server.js';
 import { runtimeImages } from '../helpers/images.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
-const ORIGIN = 'ai-harness-smoke-origin';
+const ORIGIN = 'enactment-smoke-origin';
 
 let repo: TargetRepo;
 let tar: Buffer;
@@ -32,7 +32,7 @@ beforeAll(async () => {
   images = await runtimeImages();
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
-  storeRoot = await mkdtemp(join(tmpdir(), 'harness-smoke-'));
+  storeRoot = await mkdtemp(join(tmpdir(), 'enactment-smoke-'));
   store = new ArtifactStore(storeRoot);
 }, 120_000);
 

@@ -102,7 +102,7 @@ describe('workspace volume', () => {
     const [first, second] = await Promise.all([seed(), seed()]);
 
     expect(first).not.toBe(second);
-    expect(first).toContain('ai-harness');
+    expect(first).toContain('enactment');
 
     await inWorkspace(first, ['sh', '-c', 'echo mutated > /workspace/README.md']);
 

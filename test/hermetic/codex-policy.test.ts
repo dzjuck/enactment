@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-codex-home-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-codex-home-'));
   dirs.push(dir);
   return dir;
 }

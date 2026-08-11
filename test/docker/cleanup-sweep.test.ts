@@ -8,7 +8,7 @@ import { attemptLabels, networkName, newAttemptId, workspaceVolumeName } from '.
 import { createVolume } from '../../src/volume/workspace.js';
 import { runtimeImages } from '../helpers/images.js';
 
-const LABEL = 'ai-harness.attempt';
+const LABEL = 'enactment.attempt';
 
 const strays: string[] = [];
 
@@ -49,7 +49,7 @@ async function leakAttempt(): Promise<string> {
 
   await createVolume(workspaceVolumeName(attempt), attemptLabels(attempt, 'workspace'));
 
-  const container = `ai-harness-stray-${attempt}`;
+  const container = `enactment-stray-${attempt}`;
   strays.push(container);
   await execa('docker', [
     'run',

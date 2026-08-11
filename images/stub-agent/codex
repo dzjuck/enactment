@@ -8,7 +8,7 @@
 # path would make every restoration test vacuous.
 set -e
 
-case "${HARNESS_PHASE:-agent}" in
+case "${ENACTMENT_PHASE:-agent}" in
   tests)
     STUB_MODE="${STUB_MODE_TESTS-${STUB_MODE-events}}"
     STUB_EVENTS="${STUB_EVENTS_TESTS-${STUB_EVENTS-}}"

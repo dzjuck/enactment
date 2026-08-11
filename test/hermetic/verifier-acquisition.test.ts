@@ -49,7 +49,7 @@ let snapshot: StoredArtifact;
 
 beforeEach(async () => {
   calls.length = 0;
-  dir = await mkdtemp(join(tmpdir(), 'harness-verifier-acq-'));
+  dir = await mkdtemp(join(tmpdir(), 'enactment-verifier-acq-'));
   snapshot = await new ArtifactStore(join(dir, 'artifacts')).put(Buffer.from('snapshot'));
 });
 
@@ -82,7 +82,7 @@ describe('verifier acquisition rollback', () => {
 
     // The workspace volume existed before the failure, so it has to be released — and the
     // dependency volume was never acquired, so it must not be referenced during cleanup.
-    expect(removed).toEqual(['ai-harness-ws-attempt-1-verify']);
+    expect(removed).toEqual(['enactment-ws-attempt-1-verify']);
   });
 
   it('releases both volumes when restore fails after acquiring them', async () => {
@@ -95,8 +95,8 @@ describe('verifier acquisition rollback', () => {
 
     expect((failure as Error).message).toContain('snapshot does not match');
     expect(removed).toEqual([
-      'ai-harness-deps-attempt-1-verify-verifier',
-      'ai-harness-ws-attempt-1-verify',
+      'enactment-deps-attempt-1-verify-verifier',
+      'enactment-ws-attempt-1-verify',
     ]);
   });
 
@@ -130,8 +130,8 @@ describe('verifier acquisition rollback', () => {
 
     expect(result.status).toBe('pass');
     expect(removed).toEqual([
-      'ai-harness-deps-attempt-1-verify-verifier',
-      'ai-harness-ws-attempt-1-verify',
+      'enactment-deps-attempt-1-verify-verifier',
+      'enactment-ws-attempt-1-verify',
     ]);
   });
 });
@@ -163,8 +163,8 @@ describe('withVerifierWorkspace', () => {
       removeVolume: () => Promise.resolve(),
     });
 
-    expect(workspace.workspaceVolume).toBe('ai-harness-ws-attempt-1-verify');
-    expect(workspace.dependencyVolume).toBe('ai-harness-deps-attempt-1-verify-verifier');
+    expect(workspace.workspaceVolume).toBe('enactment-ws-attempt-1-verify');
+    expect(workspace.dependencyVolume).toBe('enactment-deps-attempt-1-verify-verifier');
     expect(workspace.mounts).toEqual([
       { type: 'volume', source: workspace.workspaceVolume, target: WORKSPACE_PATH },
       { type: 'volume', source: workspace.dependencyVolume, target: DEPENDENCY_PATH },
@@ -179,8 +179,8 @@ describe('withVerifierWorkspace', () => {
     });
 
     expect(removed).toEqual([
-      'ai-harness-deps-attempt-1-verify-verifier',
-      'ai-harness-ws-attempt-1-verify',
+      'enactment-deps-attempt-1-verify-verifier',
+      'enactment-ws-attempt-1-verify',
     ]);
   });
 
@@ -192,7 +192,7 @@ describe('withVerifierWorkspace', () => {
       removeVolume: async (name) => void removed.push(name),
     }).catch(() => undefined);
 
-    expect(removed).toEqual(['ai-harness-ws-attempt-1-verify']);
+    expect(removed).toEqual(['enactment-ws-attempt-1-verify']);
   });
 
   it('keeps the scope failure primary when the rollback fails too', async () => {

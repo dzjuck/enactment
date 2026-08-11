@@ -80,7 +80,7 @@ describe('review result normalization', () => {
     expect(result).toEqual({
       findings: [
         {
-          ruleId: 'opt.ai-harness.rules.spawn-shell-true',
+          ruleId: 'opt.enactment.rules.spawn-shell-true',
           path: 'src/run.js',
           severity: 'critical',
           location: {
@@ -141,7 +141,7 @@ describe('introduced finding subtraction', () => {
 
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]).toMatchObject({
-      ruleId: 'opt.ai-harness.rules.detect-pseudoRandomBytes',
+      ruleId: 'opt.enactment.rules.detect-pseudoRandomBytes',
       path: 'src/random.js',
       severity: 'warning',
       location: { start: { line: 5, column: 24 } },

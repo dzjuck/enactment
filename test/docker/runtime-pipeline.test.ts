@@ -25,7 +25,7 @@ import { planDocument } from '../helpers/plan.js';
 import { commitAll, createM2Repo, git, removePlanBranches, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
-const ATTEMPT_LABEL = 'ai-harness.attempt';
+const ATTEMPT_LABEL = 'enactment.attempt';
 
 /** Listens only when the harness sets PORT, so the same module is importable by the suite. */
 const SERVER = `import http from 'node:http';
@@ -90,9 +90,9 @@ const PASSING_TEST_SOURCE = `describe('health', () => {
 `;
 
 /** Committed outside every agent-writable scope, as the V1 authoring rule requires. */
-const CHECKER = `const url = process.env.HARNESS_APP_URL;
+const CHECKER = `const url = process.env.ENACTMENT_APP_URL;
 if (!url) {
-  console.error('HARNESS_APP_URL is not set');
+  console.error('ENACTMENT_APP_URL is not set');
   process.exit(2);
 }
 
@@ -141,15 +141,15 @@ const dirs: string[] = [];
 beforeAll(async () => {
   stub = await stubAgentImage();
   repo = await createM2Repo();
-  root = await mkdtemp(join(tmpdir(), 'harness-m6-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-m6-'));
 
   const source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
   await writeFile(join(source, AUTH_FILE), JSON.stringify({ tokens: { access_token: 'm6-canary' } }));
 
-  await mkdir(join(repo.dir, 'harness-checks'), { recursive: true });
-  await writeFile(join(repo.dir, 'harness-checks/health-check.mjs'), CHECKER);
-  await writeFile(join(repo.dir, 'harness-checks/failing-check.mjs'), FAILING_CHECKER);
+  await mkdir(join(repo.dir, 'enactment-checks'), { recursive: true });
+  await writeFile(join(repo.dir, 'enactment-checks/health-check.mjs'), CHECKER);
+  await writeFile(join(repo.dir, 'enactment-checks/failing-check.mjs'), FAILING_CHECKER);
   repo.commit = await commitAll(repo.dir, 'Add behavioral checkers');
 }, 900_000);
 
@@ -179,7 +179,7 @@ function runtimeLines(block: RuntimeBlock | undefined): string[] {
     `    port: ${String(block.port ?? 3000)}`,
     `    readiness_path: ${block.readinessPath ?? '/health'}`,
     '    behavioral_commands:',
-    ...(block.behavioralCommands ?? [['node', 'harness-checks/health-check.mjs']]).map(
+    ...(block.behavioralCommands ?? [['node', 'enactment-checks/health-check.mjs']]).map(
       (command) => `      - ${JSON.stringify(command)}`,
     ),
   ];
@@ -263,7 +263,7 @@ async function run(
   env: Record<string, string>,
   attempt = newAttemptId(),
 ): Promise<RunOutcome> {
-  const artifacts = await mkdtemp(join(tmpdir(), 'harness-m6-artifacts-'));
+  const artifacts = await mkdtemp(join(tmpdir(), 'enactment-m6-artifacts-'));
   dirs.push(artifacts);
 
   const phases: RunPhase[] = [];
@@ -327,7 +327,7 @@ async function expectNoResources(attempt: string): Promise<void> {
 }
 
 function branchExists(): Promise<boolean> {
-  return git(repo.dir, ['rev-parse', '--verify', 'refs/heads/ai-harness/harness-test-plan'])
+  return git(repo.dir, ['rev-parse', '--verify', 'refs/heads/enactment/harness-test-plan'])
     .then(() => true)
     .catch(() => false);
 }
@@ -407,7 +407,7 @@ describe('runtime-gated task step', () => {
     'does not let the application replace its behavioral checker',
     async () => {
       const plan = await taskPlan({
-        runtime: { behavioralCommands: [['node', 'harness-checks/failing-check.mjs']] },
+        runtime: { behavioralCommands: [['node', 'enactment-checks/failing-check.mjs']] },
       });
       const { report, events, artifacts } = await run(plan, taskEnv(CHECKER_REWRITING_SERVER));
 
@@ -430,7 +430,7 @@ describe('runtime-gated task step', () => {
     'reports verification_failed for a behavioral failure, with no candidate and no branch',
     async () => {
       const plan = await taskPlan({
-        runtime: { behavioralCommands: [['node', 'harness-checks/failing-check.mjs']] },
+        runtime: { behavioralCommands: [['node', 'enactment-checks/failing-check.mjs']] },
       });
       const { report, events, artifacts, attempt } = await run(plan, taskEnv());
 

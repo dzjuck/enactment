@@ -24,7 +24,7 @@ beforeAll(async () => {
   stub = await stubAgentImage();
 
   repo = await createTargetRepo();
-  root = await mkdtemp(join(tmpdir(), 'harness-orphan-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-orphan-'));
 
   const source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
@@ -60,8 +60,8 @@ beforeAll(async () => {
       "import { appendFile } from 'node:fs/promises';",
       `import { runSinglePlanStep } from ${JSON.stringify(join(process.cwd(), 'dist/run/bridge.js'))};`,
       'await runSinglePlanStep({',
-      '  ...JSON.parse(process.env.HARNESS_TEST_RUN),',
-      '  onPhase: (phase) => appendFile(process.env.HARNESS_TEST_PHASES, `${phase}\\n`),',
+      '  ...JSON.parse(process.env.ENACTMENT_TEST_RUN),',
+      '  onPhase: (phase) => appendFile(process.env.ENACTMENT_TEST_PHASES, `${phase}\\n`),',
       '});',
       '',
     ].join('\n'),
@@ -117,15 +117,15 @@ describe('orphans left by a run that was killed outright', () => {
    */
   it('labels every container it starts, so the sweep can find them', async () => {
     const attempt = `orphan${String(Date.now()).slice(-10)}`;
-    const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
+    const artifacts = await mkdtemp(join(tmpdir(), 'enactment-artifacts-'));
     const phasesFile = join(root, 'phases');
     await writeFile(phasesFile, '');
 
     const child = execa('node', [runnerScript], {
       reject: false,
       env: {
-        HARNESS_TEST_PHASES: phasesFile,
-        HARNESS_TEST_RUN: JSON.stringify({
+        ENACTMENT_TEST_PHASES: phasesFile,
+        ENACTMENT_TEST_RUN: JSON.stringify({
           planFile: join(root, 'plan.yml'),
           repoPath: repo.dir,
           artifactDir: artifacts,

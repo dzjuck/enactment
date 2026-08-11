@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 async function scratch(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-final-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-final-'));
   dirs.push(dir);
   return dir;
 }
@@ -99,7 +99,7 @@ describe('final branch verification preconditions', () => {
     controller.abort();
 
     vi.spyOn(cleanup, 'sweepAttempt').mockRejectedValueOnce(
-      new CleanupError(['volume ai-harness-final still present']),
+      new CleanupError(['volume enactment-final still present']),
     );
 
     const error = await verifyPlanHead({
@@ -114,6 +114,6 @@ describe('final branch verification preconditions', () => {
 
     expect(error).toBeInstanceOf(OwnershipError);
     expect((error as Error).message).toContain('final verification was interrupted');
-    expect((error as Error).message).toContain('volume ai-harness-final still present');
+    expect((error as Error).message).toContain('volume enactment-final still present');
   });
 });

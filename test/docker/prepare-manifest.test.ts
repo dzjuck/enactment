@@ -34,7 +34,7 @@ afterEach(async () => {
 
 describe('prepare against the real daemon', () => {
   it('records image IDs a later validation accepts unchanged', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'harness-prepare-'));
+    const dir = await mkdtemp(join(tmpdir(), 'enactment-prepare-'));
     dirs.push(dir);
 
     const planFile = join(dir, 'plan.yml');

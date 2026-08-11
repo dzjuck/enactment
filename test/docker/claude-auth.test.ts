@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 
 async function storedToken(): Promise<{ file: string; token: string }> {
-  const root = await mkdtemp(join(tmpdir(), 'harness-claude-auth-'));
+  const root = await mkdtemp(join(tmpdir(), 'enactment-claude-auth-'));
   dirs.push(root);
   const directory = join(root, 'auth', 'claude');
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -78,7 +78,7 @@ describe('authenticated Claude adapter', () => {
 
     let containers: string[] = [];
     for (let count = 0; count < 30 && containers.length === 0; count += 1) {
-      containers = await listContainers(`ai-harness.attempt=${attempt}`);
+      containers = await listContainers(`enactment.attempt=${attempt}`);
       if (containers.length === 0) await new Promise((resolve) => setTimeout(resolve, 100));
     }
 

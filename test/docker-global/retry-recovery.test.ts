@@ -38,7 +38,7 @@ afterEach(async () => {
 async function fixture(category = 'agent_failed') {
   const repo = await createM2Repo();
   repos.push(repo.dir);
-  const root = await mkdtemp(join(tmpdir(), 'harness-retry-recovery-'));
+  const root = await mkdtemp(join(tmpdir(), 'enactment-retry-recovery-'));
   roots.push(root);
   const planFile = join(root, 'plan.yml');
   await writeFile(
@@ -99,7 +99,7 @@ async function runner(root: string): Promise<string> {
       `import { loadManifest, validateManifest } from ${JSON.stringify(join(process.cwd(), 'dist/plan/execution-manifest.js'))};`,
       `import { runPlan } from ${JSON.stringify(join(process.cwd(), 'dist/run/coordinator.js'))};`,
       `import { StateStore } from ${JSON.stringify(join(process.cwd(), 'dist/state/store.js'))};`,
-      'const input = JSON.parse(process.env.HARNESS_TEST_RUN);',
+      'const input = JSON.parse(process.env.ENACTMENT_TEST_RUN);',
       'const approved = await validateManifest(await loadManifest(input.manifestPath), {',
       '  repoPath: input.repoPath,',
       '  resolveImages: () => Promise.resolve(input.images),',
@@ -135,7 +135,7 @@ function startChild(
 ): ResultPromise {
   return execa('node', [script], {
     reject: false,
-    env: { HARNESS_TEST_RUN: JSON.stringify(input) },
+    env: { ENACTMENT_TEST_RUN: JSON.stringify(input) },
   });
 }
 

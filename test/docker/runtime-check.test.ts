@@ -54,9 +54,9 @@ http
 
 /** Reaches the application by container name over Docker DNS. No host port is published. */
 const CHECKER = `
-const url = process.env.HARNESS_APP_URL;
+const url = process.env.ENACTMENT_APP_URL;
 if (!url) {
-  console.error('HARNESS_APP_URL is not set');
+  console.error('ENACTMENT_APP_URL is not set');
   process.exit(2);
 }
 
@@ -140,7 +140,7 @@ function runtime(overrides: Partial<RuntimeVerification> = {}): RuntimeVerificat
     start_command: ['node', 'src/server.js'],
     port: 3000,
     readiness_path: '/health',
-    behavioral_commands: [['node', 'harness-checks/orders.js']],
+    behavioral_commands: [['node', 'enactment-checks/orders.js']],
     ...overrides,
   };
 }
@@ -162,7 +162,7 @@ const attempts: string[] = [];
 
 beforeAll(async () => {
   images = await runtimeImages();
-  root = await mkdtemp(join(tmpdir(), 'harness-runtime-docker-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-runtime-docker-'));
 }, 600_000);
 
 afterAll(async () => {
@@ -213,7 +213,7 @@ describe('runtime check', () => {
     async () => {
       const { result, artifactDir, attempt } = await check({
         'src/server.js': SERVER,
-        'harness-checks/orders.js': CHECKER,
+        'enactment-checks/orders.js': CHECKER,
       });
 
       expect(result.status).toBe('pass');
@@ -238,8 +238,8 @@ describe('runtime check', () => {
     'isolation control: neither container can reach the internet, a proxy or a credential',
     async () => {
       const { result, artifactDir } = await check(
-        { 'src/server.js': SERVER, 'harness-checks/isolation.js': ISOLATION_CHECKER },
-        { runtime: runtime({ behavioral_commands: [['node', 'harness-checks/isolation.js']] }) },
+        { 'src/server.js': SERVER, 'enactment-checks/isolation.js': ISOLATION_CHECKER },
+        { runtime: runtime({ behavioral_commands: [['node', 'enactment-checks/isolation.js']] }) },
       );
 
       expect(result.status).toBe('pass');
@@ -256,7 +256,7 @@ describe('runtime check', () => {
     async () => {
       const { result, artifactDir } = await check({
         'src/server.js': CRASHING_SERVER,
-        'harness-checks/orders.js': CHECKER,
+        'enactment-checks/orders.js': CHECKER,
       });
 
       expect(result.status).toBe('fail');
@@ -280,14 +280,14 @@ describe('runtime check', () => {
       const { result, artifactDir } = await check(
         {
           'src/server.js': SERVER,
-          'harness-checks/orders.js': FAILING_CHECKER,
-          'harness-checks/never.js': CHECKER,
+          'enactment-checks/orders.js': FAILING_CHECKER,
+          'enactment-checks/never.js': CHECKER,
         },
         {
           runtime: runtime({
             behavioral_commands: [
-              ['node', 'harness-checks/orders.js'],
-              ['node', 'harness-checks/never.js'],
+              ['node', 'enactment-checks/orders.js'],
+              ['node', 'enactment-checks/never.js'],
             ],
           }),
         },
@@ -312,7 +312,7 @@ describe('runtime check', () => {
 
       const volume = await createWorkspaceVolume(
         attempt,
-        await tarOf({ 'src/server.js': SERVER, 'harness-checks/orders.js': CHECKER }),
+        await tarOf({ 'src/server.js': SERVER, 'enactment-checks/orders.js': CHECKER }),
         images,
       );
       volumes.push(volume);

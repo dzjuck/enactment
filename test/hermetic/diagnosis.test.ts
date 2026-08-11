@@ -30,7 +30,7 @@ afterEach(async () => {
 });
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'harness-diagnosis-'));
+  const root = await mkdtemp(join(tmpdir(), 'enactment-diagnosis-'));
   dirs.push(root);
   const artifactPath = join(root, 'run-1');
   await mkdir(join(artifactPath, 'baseline'), { recursive: true });

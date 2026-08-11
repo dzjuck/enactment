@@ -9,10 +9,10 @@ export class CliUsageError extends Error {
 
 export const CLI_USAGE = [
   'usage:',
-  '  harness prepare <plan.yml> --repo <path> --output <execution-manifest.yml> [--base <commit-ish>]',
-  '  harness run <execution-manifest.yml> --repo <path> [--artifacts <dir>]',
-  '  harness cancel <execution-manifest.yml> --repo <path> [--artifacts <dir>]',
-  '  harness docs <plan.yml>',
+  '  enactment prepare <plan.yml> --repo <path> --output <execution-manifest.yml> [--base <commit-ish>]',
+  '  enactment run <execution-manifest.yml> --repo <path> [--artifacts <dir>]',
+  '  enactment cancel <execution-manifest.yml> --repo <path> [--artifacts <dir>]',
+  '  enactment docs <plan.yml>',
 ].join('\n');
 
 /** Harness state locations only. Nothing here reaches the container contract. */
@@ -76,12 +76,12 @@ const ACCEPTED = {
 function stateLocations(env: NodeJS.ProcessEnv): StateLocations {
   const locations: StateLocations = {};
 
-  if (env.HARNESS_SOURCE_CODEX_HOME !== undefined) {
-    locations.sourceCodexHome = env.HARNESS_SOURCE_CODEX_HOME;
+  if (env.ENACTMENT_SOURCE_CODEX_HOME !== undefined) {
+    locations.sourceCodexHome = env.ENACTMENT_SOURCE_CODEX_HOME;
   }
-  if (env.HARNESS_STORE_DIR !== undefined) locations.storeDirectory = env.HARNESS_STORE_DIR;
-  if (env.HARNESS_DEPS_DIR !== undefined) locations.dependencyCacheDirectory = env.HARNESS_DEPS_DIR;
-  if (env.HARNESS_STATE_DIR !== undefined) locations.stateDirectory = env.HARNESS_STATE_DIR;
+  if (env.ENACTMENT_STORE_DIR !== undefined) locations.storeDirectory = env.ENACTMENT_STORE_DIR;
+  if (env.ENACTMENT_DEPS_DIR !== undefined) locations.dependencyCacheDirectory = env.ENACTMENT_DEPS_DIR;
+  if (env.ENACTMENT_STATE_DIR !== undefined) locations.stateDirectory = env.ENACTMENT_STATE_DIR;
 
   return locations;
 }

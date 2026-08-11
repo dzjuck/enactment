@@ -10,10 +10,10 @@ import {
 } from '../../src/docker/args.js';
 
 const base: ContainerSpec = {
-  image: 'ai-harness/agent:test',
+  image: 'enactment/agent:test',
   argv: ['echo', 'hello'],
   network: 'none',
-  name: 'harness-test',
+  name: 'enactment-test',
 };
 
 describe('buildRunArgs', () => {
@@ -22,7 +22,7 @@ describe('buildRunArgs', () => {
       'run',
       '--rm',
       '--name',
-      'harness-test',
+      'enactment-test',
       '--user',
       '1001:1001',
       '--read-only',
@@ -44,7 +44,7 @@ describe('buildRunArgs', () => {
       `${AGENT_HOME}:rw,nosuid,nodev,uid=1001,gid=1001,mode=0700`,
       '-e',
       `HOME=${AGENT_HOME}`,
-      'ai-harness/agent:test',
+      'enactment/agent:test',
       'echo',
       'hello',
     ]);
@@ -96,7 +96,7 @@ describe('buildRunArgs', () => {
       ...base,
       workdir: '/app',
       env: { PROXY: 'http://proxy:3128' },
-      labels: { 'ai-harness.attempt': 'a1' },
+      labels: { 'enactment.attempt': 'a1' },
       mounts: [
         { type: 'volume', source: 'ws-a1', target: '/workspace' },
         { type: 'bind', source: '/host/context', target: '/context', readonly: true },
@@ -104,7 +104,7 @@ describe('buildRunArgs', () => {
     });
 
     expect(args).toContain('--label');
-    expect(args).toContain('ai-harness.attempt=a1');
+    expect(args).toContain('enactment.attempt=a1');
     expect(args).toContain('type=volume,source=ws-a1,target=/workspace');
     expect(args).toContain('type=bind,source=/host/context,target=/context,readonly');
     expect(args).toContain(`HOME=${AGENT_HOME}`);

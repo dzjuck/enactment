@@ -59,7 +59,7 @@ describe('termination ladder', () => {
     });
 
     const result = await withTimeoutLadder({
-      name: 'harness-hang',
+      name: 'enactment-hang',
       work: never(),
       timeoutSeconds: 0.01,
       graceSeconds: 10,
@@ -80,7 +80,7 @@ describe('termination ladder', () => {
     });
 
     const result = await withTimeoutLadder({
-      name: 'harness-polite',
+      name: 'enactment-polite',
       work,
       timeoutSeconds: 0.01,
       graceSeconds: 10,
@@ -99,7 +99,7 @@ describe('termination ladder', () => {
     const { killer, steps } = recordingKiller();
 
     const result = await withTimeoutLadder({
-      name: 'harness-quick',
+      name: 'enactment-quick',
       work: Promise.resolve(42),
       timeoutSeconds: 60,
       graceSeconds: 10,

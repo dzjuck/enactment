@@ -103,7 +103,7 @@ export async function runSinglePlanStep(
       if (!bundle.present) {
         throw new DocumentationError(
           'bundle_missing',
-          `${options.planFile} declares documentation but ${bundleRoot} does not exist; run "harness docs ${options.planFile}" first`,
+          `${options.planFile} declares documentation but ${bundleRoot} does not exist; run "enactment docs ${options.planFile}" first`,
         );
       }
       documentation = { contextDir: contextDirFor(bundleRoot), hash: bundle.hash };
@@ -126,7 +126,7 @@ export async function runSinglePlanStep(
       repoPath: options.repoPath,
       baseBranch,
       parentCommit,
-      branch: `ai-harness/${plan.id}`,
+      branch: `enactment/${plan.id}`,
       // Always a plan's first acceptance here: one step, so there is no earlier head.
       branchExists: false,
       attempt,

@@ -79,8 +79,8 @@ const live = {
 
 const projects = [hermetic, docker];
 
-if (process.env.HARNESS_IMAGES !== undefined) projects.push(dockerImages);
-if (process.env.HARNESS_GLOBAL !== undefined) projects.push(dockerGlobal);
-if (process.env.HARNESS_LIVE !== undefined) projects.push(live);
+if (process.env.ENACTMENT_IMAGES !== undefined) projects.push(dockerImages);
+if (process.env.ENACTMENT_GLOBAL !== undefined) projects.push(dockerGlobal);
+if (process.env.ENACTMENT_LIVE !== undefined) projects.push(live);
 
 export default defineConfig({ test: { projects } });

@@ -32,7 +32,7 @@ beforeAll(async () => {
   images = await runtimeImages();
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
-  storeRoot = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
+  storeRoot = await mkdtemp(join(tmpdir(), 'enactment-artifacts-'));
   store = new ArtifactStore(storeRoot);
 });
 

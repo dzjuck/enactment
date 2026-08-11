@@ -31,7 +31,7 @@ const created: string[] = [];
 
 beforeAll(async () => {
   images = await runtimeImages();
-  root = await mkdtemp(join(tmpdir(), 'harness-auth-vol-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-auth-vol-'));
 
   source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
@@ -162,7 +162,7 @@ describe('per-run auth volume', () => {
       'ls',
       '-q',
       '--filter',
-      `label=ai-harness.attempt=${attempt}`,
+      `label=enactment.attempt=${attempt}`,
     ]);
     expect(stdout.split('\n')).toContain(volume);
   }, 120_000);

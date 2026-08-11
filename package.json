@@ -1,5 +1,6 @@
 {
-  "name": "ai-harness",
+  "name": "enactment",
+  "bin": { "enactment": "dist/cli.js" },
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,8 +9,8 @@
   },
   "scripts": {
     "test": "vitest run --project hermetic",
-    "test:docker": "HARNESS_IMAGES=1 vitest run --project docker-images --no-file-parallelism && vitest run --project docker && HARNESS_GLOBAL=1 vitest run --project docker-global --no-file-parallelism",
-    "test:live": "HARNESS_LIVE=1 vitest run --project live --no-file-parallelism",
+    "test:docker": "ENACTMENT_IMAGES=1 vitest run --project docker-images --no-file-parallelism && vitest run --project docker && ENACTMENT_GLOBAL=1 vitest run --project docker-global --no-file-parallelism",
+    "test:live": "ENACTMENT_LIVE=1 vitest run --project live --no-file-parallelism",
     "build": "tsc --project tsconfig.build.json && echo '{\"type\":\"module\"}' > dist/package.json",
     "images:build": "npm run build && node dist/images-build.js",
     "typecheck": "tsc --noEmit",

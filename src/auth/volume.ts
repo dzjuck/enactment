@@ -73,7 +73,7 @@ async function seedCodexAuthVolume(
   const script = ['set -e', 'umask 077', `cat > ${CODEX_HOME_PATH}/${AUTH_FILE}`];
 
   Object.entries(contents.policy).forEach(([name, content], index) => {
-    const variable = `HARNESS_POLICY_FILE_${String(index)}`;
+    const variable = `ENACTMENT_POLICY_FILE_${String(index)}`;
     env[variable] = content;
     script.push(`printf '%s' "$${variable}" > ${CODEX_HOME_PATH}/${name}`);
   });

@@ -60,19 +60,19 @@ async function child(): Promise<FakeChild> {
 
 describe('waitUntilListening', () => {
   it('attaches to the log stream once instead of polling', async () => {
-    const pending = waitUntilListening('ai-harness-proxy-a1');
+    const pending = waitUntilListening('enactment-proxy-a1');
     const stream = await child();
 
     stream.stderr.write(`${PROXY_READY_MARKER} on 3128 for chatgpt.com\n`);
     await expect(pending).resolves.toBeUndefined();
 
     // One process for the whole wait — the point of the change.
-    expect(calls).toEqual([['logs', '--follow', 'ai-harness-proxy-a1']]);
+    expect(calls).toEqual([['logs', '--follow', 'enactment-proxy-a1']]);
     expect(killed[0]).toBe(true);
   });
 
   it('waits through unrelated output rather than giving up on the first line', async () => {
-    const pending = waitUntilListening('ai-harness-proxy-a1');
+    const pending = waitUntilListening('enactment-proxy-a1');
     const stream = await child();
 
     stream.stderr.write('starting up\n');
@@ -87,7 +87,7 @@ describe('waitUntilListening', () => {
   });
 
   it('finds a marker split across two chunks', async () => {
-    const pending = waitUntilListening('ai-harness-proxy-a1');
+    const pending = waitUntilListening('enactment-proxy-a1');
     const stream = await child();
 
     const half = Math.floor(PROXY_READY_MARKER.length / 2);
@@ -98,7 +98,7 @@ describe('waitUntilListening', () => {
   });
 
   it('accepts the marker on stdout as well as stderr', async () => {
-    const pending = waitUntilListening('ai-harness-proxy-a1');
+    const pending = waitUntilListening('enactment-proxy-a1');
     const stream = await child();
 
     stream.stdout.write(`${PROXY_READY_MARKER} on 3128\n`);
@@ -106,18 +106,18 @@ describe('waitUntilListening', () => {
   });
 
   it('fails loudly when the stream ends without the marker', async () => {
-    const pending = waitUntilListening('ai-harness-proxy-a1');
+    const pending = waitUntilListening('enactment-proxy-a1');
     const stream = await child();
 
     stream.stderr.end();
     stream.stdout.end();
 
     await expect(pending).rejects.toThrow(ProxyContainerError);
-    await expect(pending).rejects.toThrow(/ai-harness-proxy-a1/);
+    await expect(pending).rejects.toThrow(/enactment-proxy-a1/);
   });
 
   it('fails loudly on its deadline, and kills the attached process', async () => {
-    const pending = waitUntilListening('ai-harness-proxy-a1', 0.05);
+    const pending = waitUntilListening('enactment-proxy-a1', 0.05);
     await child();
 
     await expect(pending).rejects.toThrow(ProxyContainerError);

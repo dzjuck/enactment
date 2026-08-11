@@ -52,7 +52,7 @@ function planDocument(complexity: string, risk: unknown = 'standard'): Record<st
 }
 
 async function writeDocument(document: unknown): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-plan-document-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-plan-document-'));
   const path = join(dir, 'plan.yml');
   await writeFile(path, stringify(document));
   return path;
@@ -143,7 +143,7 @@ describe('loadPlan', () => {
     expect(first.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(second.hash).toBe(first.hash);
 
-    const dir = await mkdtemp(join(tmpdir(), 'harness-plan-'));
+    const dir = await mkdtemp(join(tmpdir(), 'enactment-plan-'));
     const copy = join(dir, 'plan.yml');
     const original = await readFile(fixture('valid.yml'));
 
@@ -285,7 +285,7 @@ describe('loadPlan', () => {
       start_command: ['node', 'src/server.js'],
       port: 3000,
       readiness_path: '/health',
-      behavioral_commands: [['node', 'harness-checks/runtime-check.mjs']],
+      behavioral_commands: [['node', 'enactment-checks/runtime-check.mjs']],
     };
 
     function runtimeDocument(
@@ -318,15 +318,15 @@ describe('loadPlan', () => {
         start_command: ['node', 'src/server.js'],
         port: 3000,
         readiness_path: '/health',
-        behavioral_commands: [['node', 'harness-checks/runtime-check.mjs']],
+        behavioral_commands: [['node', 'enactment-checks/runtime-check.mjs']],
       });
       expect(plan.steps[1]?.verification.runtime).toEqual({
         start_command: ['node', 'src/server.js', '--orders'],
         port: 8080,
         readiness_path: '/ready',
         behavioral_commands: [
-          ['node', 'harness-checks/orders-check.mjs'],
-          ['node', 'harness-checks/health-check.mjs'],
+          ['node', 'enactment-checks/orders-check.mjs'],
+          ['node', 'enactment-checks/health-check.mjs'],
         ],
       });
     });

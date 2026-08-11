@@ -7,7 +7,7 @@
  * so changing one invalidates an existing approval.
  *
  * The probe's own source text is not hashed separately — it is harness code, covered by
- * `harness_version`.
+ * `enactment_version`.
  */
 
 /** The application must listen on every interface: the checker reaches it over Docker DNS. */
@@ -29,10 +29,10 @@ export const RUNTIME_COMMAND_TIMEOUT_SECONDS = 600;
 export const RUNTIME_PROBE = 'http-get-200';
 
 /** The only environment the harness sets for the application and the behavioral checkers. */
-export const RUNTIME_ENVIRONMENT: readonly string[] = ['HOST', 'PORT', 'HARNESS_APP_URL'];
+export const RUNTIME_ENVIRONMENT: readonly string[] = ['HOST', 'PORT', 'ENACTMENT_APP_URL'];
 
 /** The runtime network is internal: neither container reaches the proxy or the internet. */
 export const RUNTIME_NETWORK = 'internal';
 
 /** Name of the variable carrying the application's URL into every behavioral checker. */
-export const RUNTIME_URL_VARIABLE = 'HARNESS_APP_URL';
+export const RUNTIME_URL_VARIABLE = 'ENACTMENT_APP_URL';

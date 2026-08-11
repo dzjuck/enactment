@@ -24,10 +24,10 @@ const IMAGES: RuntimeImages = {
 
 const BASE = ['run', 'execution-manifest.yml', '--repo', '/repo'];
 
-describe('HARNESS_AGENT_ENV has no production effect', () => {
+describe('ENACTMENT_AGENT_ENV has no production effect', () => {
   it('contributes nothing to the parsed command', () => {
     const options = parseCommand(BASE, {
-      HARNESS_AGENT_ENV: JSON.stringify({
+      ENACTMENT_AGENT_ENV: JSON.stringify({
         CODEX_HOME: '/evil',
         HOME: '/evil',
         HTTPS_PROXY: 'http://evil:3128',
@@ -47,7 +47,7 @@ describe('HARNESS_AGENT_ENV has no production effect', () => {
 
     for (const entry of files) {
       const source = await readFile(join(entry.parentPath, entry.name), 'utf8');
-      expect(source, entry.name).not.toContain('HARNESS_AGENT_ENV');
+      expect(source, entry.name).not.toContain('ENACTMENT_AGENT_ENV');
       expect(source, entry.name).not.toContain('agent-image');
     }
   });

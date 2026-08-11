@@ -218,7 +218,7 @@ export async function runPlan(
   const persist = dependencies.writeReport ?? writeReport;
 
   const { approved, store } = options;
-  const branch = `ai-harness/${approved.plan.id}`;
+  const branch = `enactment/${approved.plan.id}`;
   const planRoot = join(options.artifactsRoot, approved.plan.id);
   const snapshots = new ArtifactStore(join(planRoot, 'snapshots'));
   const diagnosisResults = new Map<number, DiagnosisResult>();

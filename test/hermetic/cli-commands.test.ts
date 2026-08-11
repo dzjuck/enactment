@@ -74,7 +74,7 @@ afterEach(async () => {
 });
 
 async function scratch(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-cli-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-cli-'));
   dirs.push(dir);
   return dir;
 }
@@ -104,7 +104,7 @@ async function workspace(plan = PLAN): Promise<Workspace> {
     manifestPath: join(dir, 'execution-manifest.yml'),
     artifactDir: join(dir, 'artifacts'),
     stateDir,
-    env: { HARNESS_STATE_DIR: stateDir },
+    env: { ENACTMENT_STATE_DIR: stateDir },
   };
 }
 
@@ -112,7 +112,7 @@ const succeeded = (options: CoordinatorOptions): Promise<PlanReport> =>
   Promise.resolve({
     plan: options.approved.plan.id,
     state: 'completed',
-    branch: `ai-harness/${options.approved.plan.id}`,
+    branch: `enactment/${options.approved.plan.id}`,
     baseCommit: options.approved.baseCommit,
     head: 'c'.repeat(40),
     steps: [{ id: 'only-step', status: 'completed', attempts: [], commit: 'c'.repeat(40) }],
@@ -147,9 +147,9 @@ function acceptanceMessage(stepId: string): string {
   return [
     `${stepId}: accepted work`,
     '',
-    'AI-Harness-Plan: previous-revision',
-    `AI-Harness-Step: ${stepId}`,
-    `AI-Harness-Attempt: ${'0'.repeat(16)}`,
+    'Enactment-Plan: previous-revision',
+    `Enactment-Step: ${stepId}`,
+    `Enactment-Attempt: ${'0'.repeat(16)}`,
   ].join('\n');
 }
 
@@ -188,10 +188,10 @@ describe('command parsing', () => {
   it('accepts --base on prepare only', () => {
     expect(
       parseCommand(
-        ['prepare', 'plan.yml', '--repo', '/repo', '--output', 'm.yml', '--base', 'ai-harness/r1'],
+        ['prepare', 'plan.yml', '--repo', '/repo', '--output', 'm.yml', '--base', 'enactment/r1'],
         {},
       ),
-    ).toMatchObject({ kind: 'prepare', base: 'ai-harness/r1' });
+    ).toMatchObject({ kind: 'prepare', base: 'enactment/r1' });
 
     // Omitted, not defaulted: today's behavior is what an absent base means.
     expect(
@@ -210,19 +210,19 @@ describe('command parsing', () => {
     ['an image override', ['run', 'm.yml', '--repo', '/repo', '--agent-image', 'x']],
     ['a network override', ['run', 'm.yml', '--repo', '/repo', '--network', 'host']],
     ['an allowlist override', ['run', 'm.yml', '--repo', '/repo', '--allow-host', 'evil.test']],
-    ['a base flag on run', ['run', 'm.yml', '--repo', '/repo', '--base', 'ai-harness/r1']],
-    ['a base flag on cancel', ['cancel', 'm.yml', '--repo', '/repo', '--base', 'ai-harness/r1']],
-    ['a base flag on docs', ['docs', 'plan.yml', '--base', 'ai-harness/r1']],
+    ['a base flag on run', ['run', 'm.yml', '--repo', '/repo', '--base', 'enactment/r1']],
+    ['a base flag on cancel', ['cancel', 'm.yml', '--repo', '/repo', '--base', 'enactment/r1']],
+    ['a base flag on docs', ['docs', 'plan.yml', '--base', 'enactment/r1']],
   ])('rejects %s', (_label, argv) => {
     expect(() => parseCommand(argv, {})).toThrow(CliUsageError);
   });
 
   it('reads only the harness state environment variables', () => {
     const command = parseCommand(['run', 'm.yml', '--repo', '/repo'], {
-      HARNESS_SOURCE_CODEX_HOME: '/codex',
-      HARNESS_STORE_DIR: '/store',
-      HARNESS_DEPS_DIR: '/deps',
-      HARNESS_AGENT_ENV: JSON.stringify({ CODEX_HOME: '/evil' }),
+      ENACTMENT_SOURCE_CODEX_HOME: '/codex',
+      ENACTMENT_STORE_DIR: '/store',
+      ENACTMENT_DEPS_DIR: '/deps',
+      ENACTMENT_AGENT_ENV: JSON.stringify({ CODEX_HOME: '/evil' }),
     });
 
     expect(command).toMatchObject({
@@ -290,23 +290,23 @@ describe('prepare', () => {
 describe('prepare --base', () => {
   it('records the tip of a named ref, re-read every time it is resolved', async () => {
     const space = await workspace();
-    await git(space.repo.dir, ['branch', 'ai-harness/r1', space.repo.commit]);
+    await git(space.repo.dir, ['branch', 'enactment/r1', space.repo.commit]);
 
-    expect((await prepareWith(space, ['--base', 'ai-harness/r1'])).exitCode).toBe(0);
+    expect((await prepareWith(space, ['--base', 'enactment/r1'])).exitCode).toBe(0);
     expect((await loadManifest(space.manifestPath)).manifest.repository).toEqual({
-      base_branch: 'ai-harness/r1',
+      base_branch: 'enactment/r1',
       base_commit: space.repo.commit,
     });
 
     // The ref is resolved at prepare time, not remembered from a previous manifest.
     await writeFile(join(space.repo.dir, 'accepted.txt'), 'x\n');
     const moved = await commitAll(space.repo.dir, 'a later accepted step');
-    await git(space.repo.dir, ['branch', '-f', 'ai-harness/r1', moved]);
+    await git(space.repo.dir, ['branch', '-f', 'enactment/r1', moved]);
 
     const second = join(dirname(space.manifestPath), 'execution-manifest-r2.yml');
-    expect((await prepareWith(space, ['--base', 'ai-harness/r1'], second)).exitCode).toBe(0);
+    expect((await prepareWith(space, ['--base', 'enactment/r1'], second)).exitCode).toBe(0);
     expect((await loadManifest(second)).manifest.repository).toEqual({
-      base_branch: 'ai-harness/r1',
+      base_branch: 'enactment/r1',
       base_commit: moved,
     });
   });
@@ -325,7 +325,7 @@ describe('prepare --base', () => {
   });
 
   it.each([
-    ['a nonexistent ref', () => Promise.resolve('ai-harness/never-created')],
+    ['a nonexistent ref', () => Promise.resolve('enactment/never-created')],
     ['an object that is not a commit', (repo: TargetRepo) => git(repo.dir, ['rev-parse', 'HEAD^{tree}'])],
   ])('fails as base_unresolvable for %s, writing nothing', async (_label, resolve) => {
     const space = await workspace();
@@ -482,7 +482,7 @@ describe('run', () => {
     expect(result.report).toMatchObject({
       plan: 'demo-plan',
       state: 'completed',
-      branch: 'ai-harness/demo-plan',
+      branch: 'enactment/demo-plan',
     });
   });
 
@@ -502,7 +502,7 @@ describe('run', () => {
           Promise.resolve({
             plan: options.approved.plan.id,
             state: 'failed' as const,
-            branch: `ai-harness/${options.approved.plan.id}`,
+            branch: `enactment/${options.approved.plan.id}`,
             baseCommit: options.approved.baseCommit,
             steps: [{ id: 'only-step', status: 'pending' as const, attempts: [] }],
             failure: { step: 'only-step', category: 'agent_failed', message: 'injected' },
@@ -572,7 +572,7 @@ describe('cancel', () => {
             manifestHash: options.approved.manifestHash,
             planHash: options.approved.planHash,
             repoPath: options.approved.repoPath,
-            branch: `ai-harness/${options.approved.plan.id}`,
+            branch: `enactment/${options.approved.plan.id}`,
             baseCommit: options.approved.baseCommit,
             stepIds: options.approved.plan.steps.map((step) => step.id),
           });
@@ -581,7 +581,7 @@ describe('cancel', () => {
           return Promise.resolve({
             plan: options.approved.plan.id,
             state: 'failed' as const,
-            branch: `ai-harness/${options.approved.plan.id}`,
+            branch: `enactment/${options.approved.plan.id}`,
             baseCommit: options.approved.baseCommit,
             steps: [{ id: 'only-step', status: 'pending' as const, attempts: [] }],
             failure: { step: 'only-step', message: 'injected' },
@@ -653,7 +653,7 @@ describe('cancel', () => {
       repoPath: space.repo.dir,
       parentCommit: space.repo.commit,
       branchExists: false,
-      branch: 'ai-harness/demo-plan',
+      branch: 'enactment/demo-plan',
       planId: 'demo-plan',
       stepId: 'only-step',
       attempt: 'accepting-attempt',
@@ -688,7 +688,7 @@ describe('cancel', () => {
 
     await writeFile(join(space.repo.dir, 'accepted.txt'), 'x\n');
     const accepted = await commitAll(space.repo.dir, 'accepted step');
-    await git(space.repo.dir, ['branch', 'ai-harness/demo-plan', accepted]);
+    await git(space.repo.dir, ['branch', 'enactment/demo-plan', accepted]);
     recordAcceptance(space, accepted);
 
     const result = await cancel(space);
@@ -696,7 +696,7 @@ describe('cancel', () => {
     expect(result.exitCode).toBe(0);
     expect(result.report).toMatchObject({
       plan: 'demo-plan',
-      branch: 'ai-harness/demo-plan',
+      branch: 'enactment/demo-plan',
       head: accepted,
       base: space.repo.commit,
     });
@@ -732,7 +732,7 @@ describe('cancel', () => {
     const space = await workspace();
     await prepare(space);
     await registered(space);
-    await git(space.repo.dir, ['branch', 'ai-harness/demo-plan', space.repo.commit]);
+    await git(space.repo.dir, ['branch', 'enactment/demo-plan', space.repo.commit]);
 
     const result = await cancel(space);
 
@@ -747,12 +747,12 @@ describe('cancel', () => {
 
     await writeFile(join(space.repo.dir, 'accepted.txt'), 'accepted\n');
     const accepted = await commitAll(space.repo.dir, 'accepted step');
-    await git(space.repo.dir, ['branch', 'ai-harness/demo-plan', accepted]);
+    await git(space.repo.dir, ['branch', 'enactment/demo-plan', accepted]);
     recordAcceptance(space, accepted);
 
     await writeFile(join(space.repo.dir, 'foreign.txt'), 'foreign\n');
     const foreign = await commitAll(space.repo.dir, 'foreign movement');
-    await git(space.repo.dir, ['branch', '-f', 'ai-harness/demo-plan', foreign]);
+    await git(space.repo.dir, ['branch', '-f', 'enactment/demo-plan', foreign]);
 
     const result = await cancel(space);
 
@@ -765,7 +765,7 @@ describe('cancel', () => {
     await registered(space);
 
     // Evidence of the failed run: the plan branch, and a file under the plan's artifact tree.
-    await git(space.repo.dir, ['branch', 'ai-harness/demo-plan', space.repo.commit]);
+    await git(space.repo.dir, ['branch', 'enactment/demo-plan', space.repo.commit]);
     const evidence = join(space.artifactDir, 'demo-plan', 'reports', 'invocation-1.json');
     await mkdir(join(evidence, '..'), { recursive: true });
     await writeFile(evidence, '{"state":"failed"}\n');
@@ -781,7 +781,7 @@ describe('cancel', () => {
     expect(second.report).toMatchObject({ state: 'cancelled' });
 
     // Neither the branch nor the artifacts were touched.
-    expect(await git(space.repo.dir, ['rev-parse', 'ai-harness/demo-plan'])).toBe(
+    expect(await git(space.repo.dir, ['rev-parse', 'enactment/demo-plan'])).toBe(
       space.repo.commit,
     );
     expect(await readFile(evidence, 'utf8')).toBe('{"state":"failed"}\n');

@@ -49,7 +49,7 @@ beforeAll(async () => {
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
 
-  root = await mkdtemp(join(tmpdir(), 'harness-depvol-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-depvol-'));
   const cache = new DependencyCache(root);
   await ensureDependencySnapshot({
     cache,
@@ -244,7 +244,7 @@ describe('per-phase dependency volume', () => {
         'volume',
         'inspect',
         '--format',
-        '{{index .Labels "ai-harness.attempt"}}',
+        '{{index .Labels "enactment.attempt"}}',
         name,
       ]);
       expect(stdout.trim()).toBe(attempt);
@@ -252,7 +252,7 @@ describe('per-phase dependency volume', () => {
 
     it('refuses to clone from a template that does not exist', async () => {
       await expect(
-        cloneDependencyVolume('ai-harness-deps-template-missing', newAttemptId(), 'agent', images),
+        cloneDependencyVolume('enactment-deps-template-missing', newAttemptId(), 'agent', images),
       ).rejects.toThrow(DependencyVolumeError);
     });
   });

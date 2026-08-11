@@ -45,7 +45,7 @@ beforeAll(async () => {
   repo = await createTargetRepo();
   ({ tar } = await exportCommit(repo.dir, repo.commit));
 
-  root = await mkdtemp(join(tmpdir(), 'harness-agent-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-agent-'));
 
   const cache = new DependencyCache(join(root, 'deps'));
   await ensureDependencySnapshot({
@@ -99,7 +99,7 @@ async function attemptResources(): Promise<{ workspace: string; depsVolume: stri
   const attempt = newAttemptId();
   const workspace = await createWorkspaceVolume(attempt, tar, images);
   const depsVolume = await createDependencyVolume(attempt, 'agent', deps, images);
-  const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
+  const artifacts = await mkdtemp(join(tmpdir(), 'enactment-artifacts-'));
 
   volumes.push(workspace, depsVolume);
   artifactDirs.push(artifacts);

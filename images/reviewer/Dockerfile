@@ -7,7 +7,7 @@ FROM ${SEMGREP_IMAGE}
 ARG AGENT_UID
 ARG AGENT_GID
 
-COPY rules /opt/ai-harness/rules
+COPY rules /opt/enactment/rules
 
 # Semgrep writes a settings file and a log under $HOME. The base image has no agent home, and
 # a tmpfs or volume takes its ownership from the image's mount point, so the directory has to

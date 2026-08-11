@@ -69,7 +69,7 @@ describe('per-phase networks', () => {
     expect(names.sort()).toEqual(
       [networkName(first, 'registry'), networkName(second, 'registry')].sort(),
     );
-    expect(names.every((name) => name.startsWith('ai-harness-'))).toBe(true);
+    expect(names.every((name) => name.startsWith('enactment-'))).toBe(true);
   });
 
   it('destroys the networks when the phase ends', async () => {
@@ -139,7 +139,7 @@ describe('per-phase networks', () => {
         image: IMAGE_PINS.codex.tag,
         argv: LISTENER,
         network: networks.egress ?? '',
-        name: `ai-harness-listener-${newAttemptId()}`,
+        name: `enactment-listener-${newAttemptId()}`,
       });
       listeners.push(listener);
 

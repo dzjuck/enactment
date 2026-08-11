@@ -26,7 +26,7 @@ import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
 const AUTH_CANARY = 'sk-runtime-plan-canary';
-const CHECKER_PATH = 'harness-checks/health-check.mjs';
+const CHECKER_PATH = 'enactment-checks/health-check.mjs';
 
 const SERVER = `import http from 'node:http';
 
@@ -45,7 +45,7 @@ http
   });
 `;
 
-const CHECKER = `const url = process.env.HARNESS_APP_URL;
+const CHECKER = `const url = process.env.ENACTMENT_APP_URL;
 const response = await fetch(url + '/health');
 const body = await response.text();
 if (response.status !== 200 || body !== 'ok') {
@@ -94,11 +94,11 @@ const stores: StateStore[] = [];
 beforeAll(async () => {
   stub = await stubAgentImage();
   repo = await createM2Repo();
-  root = await mkdtemp(join(tmpdir(), 'harness-runtime-plan-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-runtime-plan-'));
 
   await writeFile(join(root, AUTH_FILE), JSON.stringify({ tokens: { access_token: AUTH_CANARY } }));
 
-  await mkdir(join(repo.dir, 'harness-checks'), { recursive: true });
+  await mkdir(join(repo.dir, 'enactment-checks'), { recursive: true });
   await writeFile(join(repo.dir, CHECKER_PATH), CHECKER);
   await git(repo.dir, ['add', '-A']);
   await git(repo.dir, ['commit', '-q', '--no-verify', '-m', 'Add behavioral checker']);
@@ -116,7 +116,7 @@ afterEach(async () => {
 });
 
 async function scratch(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-runtime-plan-run-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-runtime-plan-run-'));
   dirs.push(dir);
   return dir;
 }
@@ -174,7 +174,7 @@ describe('runtime-verified plan through the production path', () => {
       expect(report.state).toBe('completed');
       expect(report.finalVerification?.status).toBe('pass');
 
-      const branch = 'ai-harness/runtime-plan';
+      const branch = 'enactment/runtime-plan';
       expect(report.branch).toBe(branch);
       const changed = await git(repo.dir, [
         'diff-tree',
@@ -196,7 +196,7 @@ describe('runtime-verified plan through the production path', () => {
       expect(stored.status).toBe('pass');
       expect(stored.stage).toBeUndefined();
       expect(stored.startCommand).toEqual(['node', 'src/server.js']);
-      expect(stored.readinessUrl).toMatch(/^http:\/\/ai-harness-app-[0-9a-f]+:3000\/health$/);
+      expect(stored.readinessUrl).toMatch(/^http:\/\/enactment-app-[0-9a-f]+:3000\/health$/);
       expect(stored.commands).toHaveLength(1);
 
       const application = await readFile(

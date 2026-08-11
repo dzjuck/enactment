@@ -85,7 +85,7 @@ afterEach(async () => {
 });
 
 async function workspace(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-manifest-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-manifest-'));
   dirs.push(dir);
   return dir;
 }
@@ -136,7 +136,7 @@ describe('candidate execution manifest', () => {
     expect(manifest.plan_file).toBe('plans/plan.yml');
     expect(manifest.repository).toEqual({ base_branch: 'main', base_commit: BASE.commit });
     expect(manifest.runtime).toEqual({
-      harness_version: '0.1.0',
+      enactment_version: '0.1.0',
       codex_image_id: IMAGES.codex.id,
       claude_image_id: IMAGES.claude.id,
       verifier_image_id: IMAGES.verifier.id,
@@ -303,7 +303,7 @@ describe('candidate execution manifest', () => {
       readiness_timeout_seconds: 60,
       command_timeout_seconds: 600,
       probe: 'http-get-200',
-      environment: ['HOST', 'PORT', 'HARNESS_APP_URL'],
+      environment: ['HOST', 'PORT', 'ENACTMENT_APP_URL'],
       network: 'internal',
     });
   });
@@ -397,7 +397,7 @@ describe('execution manifest loading', () => {
     const loaded = await loadManifest(manifestPath);
 
     expect(loaded.planFile).toBe(planFile);
-    expect(loaded.plan.id).toBe('harness-test-plan');
+    expect(loaded.plan.id).toBe('enactment-test-plan');
     expect(loaded.hash).toBe(loaded.manifest.inputs.plan_hash);
   });
 
@@ -525,7 +525,7 @@ describe('execution manifest approval', () => {
   it('rejects a changed harness version', async () => {
     const { repo, manifestPath } = await approved();
     const loaded = await loadManifest(manifestPath);
-    loaded.manifest.runtime.harness_version = '0.0.9';
+    loaded.manifest.runtime.enactment_version = '0.0.9';
 
     const error = await validateManifest(loaded, {
       repoPath: repo.dir,
@@ -534,7 +534,7 @@ describe('execution manifest approval', () => {
 
     expect(error).toBeInstanceOf(ApprovalError);
     expect((error as ApprovalError).reason).toBe('runtime_changed');
-    expect((error as ApprovalError).message).toContain('harness_version');
+    expect((error as ApprovalError).message).toContain('enactment_version');
   });
 
   describe('documentation', () => {
@@ -616,7 +616,7 @@ describe('execution manifest approval', () => {
       const error = await build(planFile, join(dir, 'm.yml')).catch((thrown: unknown) => thrown);
 
       expect(error).toBeInstanceOf(ApprovalError);
-      expect((error as Error).message).toMatch(/harness docs/);
+      expect((error as Error).message).toMatch(/enactment docs/);
     });
 
     it('contains the fixed documentation policy and hashes every part of it', () => {

@@ -42,7 +42,7 @@ afterEach(async () => {
 });
 
 async function scratch(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-coordinator-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-coordinator-'));
   dirs.push(dir);
   return dir;
 }
@@ -155,7 +155,7 @@ const passingFinal = (): Promise<FinalVerificationResult> =>
     dependencyCacheKey: `sha256:${'f'.repeat(64)}`,
     exportHash: `sha256:${'0'.repeat(64)}`,
     runtime: {
-      harness_version: '0.1.0',
+      enactment_version: '0.1.0',
       codex_image_id: IMAGES.codex.id,
       claude_image_id: IMAGES.claude.id,
       verifier_image_id: IMAGES.verifier.id,
@@ -225,10 +225,10 @@ describe('plan progression', () => {
 
     expect(seen.map((options) => options.step.id)).toEqual(['first-step', 'second-step']);
     expect(report.state).toBe('completed');
-    expect(report.branch).toBe('ai-harness/demo-plan');
+    expect(report.branch).toBe('enactment/demo-plan');
     expect(report.steps.map((entry) => entry.status)).toEqual(['completed', 'completed']);
     expect(finalHead).toBe(report.head);
-    expect(await git(repo.dir, ['rev-parse', 'ai-harness/demo-plan'])).toBe(report.head);
+    expect(await git(repo.dir, ['rev-parse', 'enactment/demo-plan'])).toBe(report.head);
   });
 
   it('hands each step the previous step accepted commit, never the checked-out head', async () => {
@@ -339,7 +339,7 @@ describe('plan failure', () => {
     // The earlier step's acceptance is untouched, and the branch still holds it.
     expect(report.steps[0]?.status).toBe('completed');
     expect(report.steps[1]?.status).toBe('pending');
-    expect(await git(repo.dir, ['rev-parse', 'ai-harness/demo-plan'])).toBe(report.steps[0]?.commit);
+    expect(await git(repo.dir, ['rev-parse', 'enactment/demo-plan'])).toBe(report.steps[0]?.commit);
 
     const plan = store.activePlanForRepo(repo.dir);
     expect(plan?.state).toBe('failed');
@@ -365,12 +365,12 @@ describe('plan failure', () => {
     expect(report.state).toBe('failed');
     expect(report.finalVerification?.status).toBe('fail');
     expect(report.steps[0]?.status).toBe('completed');
-    expect(await git(repo.dir, ['rev-parse', 'ai-harness/demo-plan'])).toBe(report.head);
+    expect(await git(repo.dir, ['rev-parse', 'enactment/demo-plan'])).toBe(report.head);
   });
 
   it('refuses to start a plan whose branch already exists, before any step runs', async () => {
     const { repo, approved, store, artifactsRoot } = await harness();
-    await git(repo.dir, ['branch', 'ai-harness/demo-plan', repo.commit]);
+    await git(repo.dir, ['branch', 'enactment/demo-plan', repo.commit]);
     let started = false;
 
     const report = await runPlan(
@@ -386,7 +386,7 @@ describe('plan failure', () => {
 
     expect(started).toBe(false);
     expect(report.state).toBe('failed');
-    expect(report.failure?.message).toMatch(/ai-harness\/demo-plan/);
+    expect(report.failure?.message).toMatch(/enactment\/demo-plan/);
     // The amendment rule (§30), because reusing a predecessor's plan ID is how an operator
     // reaches this: it stays the same failure, with no category of its own.
     expect(report.failure?.message).toMatch(/amended plan needs its own plan ID/);
@@ -752,7 +752,7 @@ describe('snapshot retention', () => {
       manifestHash: approved.manifestHash,
       planHash: approved.planHash,
       repoPath: repo.dir,
-      branch: 'ai-harness/demo-plan',
+      branch: 'enactment/demo-plan',
       baseCommit: approved.baseCommit,
       stepIds: ['first-step'],
     });
@@ -801,7 +801,7 @@ describe('final verification failure boundary', () => {
     );
 
     expect(report.state).toBe('failed');
-    expect(report.head).toBe(await git(repo.dir, ['rev-parse', 'ai-harness/demo-plan']));
+    expect(report.head).toBe(await git(repo.dir, ['rev-parse', 'enactment/demo-plan']));
     expect(report.failure?.message).toContain('final head does not resolve');
     expect(report.steps[0]?.status).toBe('completed');
 
@@ -823,14 +823,14 @@ describe('final verification failure boundary', () => {
         verifyFinal: async (options) => ({
           ...(await passingFinal()),
           head: options.head,
-          cleanupErrors: ['volume ai-harness-ws-final still present'],
+          cleanupErrors: ['volume enactment-ws-final still present'],
         }),
       },
     );
 
     expect(report.state).toBe('failed');
     expect(report.finalVerification?.status).toBe('pass');
-    expect(report.cleanupErrors).toEqual(['volume ai-harness-ws-final still present']);
+    expect(report.cleanupErrors).toEqual(['volume enactment-ws-final still present']);
     expect(report.steps[0]?.status).toBe('completed');
   });
 

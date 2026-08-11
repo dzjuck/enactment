@@ -19,7 +19,7 @@ import {
 import { planDocument } from '../helpers/plan.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
-const LABEL = 'ai-harness.attempt';
+const LABEL = 'enactment.attempt';
 
 const SLUGIFY = `export function slugify(title) {
   return String(title)
@@ -51,7 +51,7 @@ beforeAll(async () => {
   stub = await stubAgentImage();
 
   repo = await createTargetRepo();
-  root = await mkdtemp(join(tmpdir(), 'harness-disposal-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-disposal-'));
 
   const source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
@@ -106,7 +106,7 @@ async function run(
   env: Record<string, string>,
   overrides: Partial<Parameters<typeof runSinglePlanStep>[0]> = {},
 ): Promise<{ report: RunReport; manifest: Manifest }> {
-  const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
+  const artifacts = await mkdtemp(join(tmpdir(), 'enactment-artifacts-'));
   dirs.push(artifacts);
 
   const injection: RunInjection = { codex: stub, agentEnv: env, ...overrides.injection };

@@ -53,7 +53,7 @@ let root: string;
 
 /**
  * Step 3 parses recorded output of this exact contract rather than a handwritten
- * approximation, so a scan can save its raw JSON: `HARNESS_RECORD_REVIEW=1 npm run test:docker`
+ * approximation, so a scan can save its raw JSON: `ENACTMENT_RECORD_REVIEW=1 npm run test:docker`
  * refreshes `fixtures/review/` from the pinned image.
  */
 const FIXTURES = fileURLToPath(new URL('../../fixtures/review', import.meta.url));
@@ -84,7 +84,7 @@ async function scan(
     { timeoutSeconds: 120, graceSeconds: 5 },
   );
 
-  if (record !== undefined && process.env.HARNESS_RECORD_REVIEW !== undefined) {
+  if (record !== undefined && process.env.ENACTMENT_RECORD_REVIEW !== undefined) {
     await mkdir(FIXTURES, { recursive: true });
     await writeFile(join(FIXTURES, `${record}.json`), `${run.stdout}\n`);
   }
@@ -93,7 +93,7 @@ async function scan(
 }
 
 beforeAll(async () => {
-  root = await mkdtemp(join(tmpdir(), 'harness-reviewer-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-reviewer-'));
 });
 
 afterAll(async () => {

@@ -48,7 +48,7 @@ afterEach(async () => {
 });
 
 async function scratch(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-executor-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-executor-'));
   dirs.push(dir);
   return dir;
 }
@@ -117,7 +117,7 @@ describe('step executor inputs', () => {
     expect(options.repoPath).toBe(repo.dir);
     expect(options.parentCommit).toBe(repo.commit);
     expect(options.baseBranch).toBe('main');
-    expect(options.branch).toBe('ai-harness/slugify-plan');
+    expect(options.branch).toBe('enactment/slugify-plan');
     expect(options.branchExists).toBe(false);
     expect(options.attempt).toMatch(/\S/);
     expect(options.snapshots).toBeInstanceOf(ArtifactStore);
@@ -160,7 +160,7 @@ describe('step executor inputs', () => {
     expect(started).toBe(false);
     expect(report.status).toBe('failed');
     expect(report.message).toMatch(/2 steps/);
-    expect(await git(repo.dir, ['for-each-ref', '--format=%(refname)', 'refs/heads/ai-harness/'])).toBe(
+    expect(await git(repo.dir, ['for-each-ref', '--format=%(refname)', 'refs/heads/enactment/'])).toBe(
       '',
     );
   });

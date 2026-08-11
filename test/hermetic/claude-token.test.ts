@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 async function tokenFile(content = TOKEN): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'harness-claude-token-'));
+  const root = await mkdtemp(join(tmpdir(), 'enactment-claude-token-'));
   dirs.push(root);
   const directory = join(root, 'auth', 'claude');
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -51,7 +51,7 @@ describe('static Claude token store', () => {
   ])('reports an actionable %s token without exposing content', async (_label, content) => {
     let file: string;
     if (content === undefined) {
-      const root = await mkdtemp(join(tmpdir(), 'harness-claude-missing-'));
+      const root = await mkdtemp(join(tmpdir(), 'enactment-claude-missing-'));
       dirs.push(root);
       file = join(root, 'missing-token');
     } else {

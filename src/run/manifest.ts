@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { HARNESS_VERSION } from '../config/pins.js';
+import { ENACTMENT_VERSION } from '../config/pins.js';
 import type { RuntimeImages } from '../docker/images.js';
 import type { BaselineArtifact } from '../verify/baseline.js';
 import type { GreenVerdict } from '../verify/green.js';
@@ -9,7 +9,7 @@ import type { RuntimeCheckResult } from '../verify/runtime.js';
 
 /** The `runtime` block of the DESIGN.md §20 execution manifest. */
 export interface RuntimeSection {
-  harness_version: string;
+  enactment_version: string;
   codex_image_id: string;
   claude_image_id: string;
   verifier_image_id: string;
@@ -134,7 +134,7 @@ export function networkPolicySection(
  */
 export function runtimeSection(images: RuntimeImages): RuntimeSection {
   return {
-    harness_version: HARNESS_VERSION,
+    enactment_version: ENACTMENT_VERSION,
     codex_image_id: images.codex.id,
     claude_image_id: images.claude.id,
     verifier_image_id: images.verifier.id,

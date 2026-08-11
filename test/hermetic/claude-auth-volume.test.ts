@@ -35,8 +35,8 @@ const IMAGES = Object.fromEntries(
 
 describe('provider-scoped auth volumes', () => {
   it('uses distinct provider suffixes and mount targets', () => {
-    expect(authVolumeName('codex', 'attempt')).toBe('ai-harness-auth-attempt-codex');
-    expect(authVolumeName('claude', 'attempt')).toBe('ai-harness-auth-attempt-claude');
+    expect(authVolumeName('codex', 'attempt')).toBe('enactment-auth-attempt-codex');
+    expect(authVolumeName('claude', 'attempt')).toBe('enactment-auth-attempt-claude');
     expect(authMount('claude', 'claude-volume')).toEqual({
       type: 'volume',
       source: 'claude-volume',

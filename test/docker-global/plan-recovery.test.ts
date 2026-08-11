@@ -66,7 +66,7 @@ let runnerScript: string;
 beforeAll(async () => {
   stub = await stubAgentImage();
   repo = await createM2Repo();
-  root = await mkdtemp(join(tmpdir(), 'harness-plan-recovery-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-plan-recovery-'));
 
   const source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
@@ -86,7 +86,7 @@ beforeAll(async () => {
       `import { loadManifest, validateManifest } from ${JSON.stringify(join(process.cwd(), 'dist/plan/execution-manifest.js'))};`,
       `import { runPlan } from ${JSON.stringify(join(process.cwd(), 'dist/run/coordinator.js'))};`,
       `import { StateStore } from ${JSON.stringify(join(process.cwd(), 'dist/state/store.js'))};`,
-      'const input = JSON.parse(process.env.HARNESS_TEST_RUN);',
+      'const input = JSON.parse(process.env.ENACTMENT_TEST_RUN);',
       'const approved = await validateManifest(await loadManifest(input.manifestPath), {',
       '  repoPath: input.repoPath,',
       '});',
@@ -182,7 +182,7 @@ describe('a SIGKILLed plan run', () => {
     const killed = execa('node', [runnerScript], {
       reject: false,
       env: {
-        HARNESS_TEST_RUN: JSON.stringify({
+        ENACTMENT_TEST_RUN: JSON.stringify({
           manifestPath,
           repoPath: repo.dir,
           artifactsRoot,
@@ -257,7 +257,7 @@ describe('a SIGKILLed plan run', () => {
       expect(runs.sort()).toEqual(['run-1', 'run-2']);
 
       // One linear branch, both steps, and no duplicate commit for the reran step.
-      const branch = 'ai-harness/recovery-plan';
+      const branch = 'enactment/recovery-plan';
       expect(await git(repo.dir, ['rev-list', '--count', branch])).toBe('3');
       expect(await git(repo.dir, ['show', `${report.head ?? ''}:${NOTES}`])).toBe('step\nstep');
 

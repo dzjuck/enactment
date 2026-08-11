@@ -13,8 +13,8 @@ import { listContainers } from '../helpers/docker.js';
 import { runtimeImages } from '../helpers/images.js';
 import { ORIGIN_PORT, startOriginContainer, type OriginContainer } from '../helpers/origin-server.js';
 
-const DECLARED_ORIGIN = 'ai-harness-docs-origin';
-const UNDECLARED_ORIGIN = 'ai-harness-docs-other';
+const DECLARED_ORIGIN = 'enactment-docs-origin';
+const UNDECLARED_ORIGIN = 'enactment-docs-other';
 
 const SOURCES = [{ url: `https://${DECLARED_ORIGIN}/openapi.json`, path: 'openapi.json' }];
 
@@ -121,15 +121,15 @@ describe('runDocumentationDownload leaves nothing behind', () => {
 
     const failure = await runDocumentationDownload({
       attempt,
-      sources: [{ url: 'https://ai-harness-nothing-here.invalid/spec.json', path: 'spec.json' }],
+      sources: [{ url: 'https://enactment-nothing-here.invalid/spec.json', path: 'spec.json' }],
       images,
     }).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(DocumentationSourceError);
     expect((failure as DocumentationSourceError).reason).toBe('fetch_failed');
 
-    expect(await listContainers(`ai-harness.attempt=${attempt}`)).toEqual([]);
-    expect(await networkExists(`ai-harness-net-${attempt}-documentation-egress`)).toBe(false);
-    expect(await networkExists(`ai-harness-net-${attempt}-documentation-proxy-egress`)).toBe(false);
+    expect(await listContainers(`enactment.attempt=${attempt}`)).toEqual([]);
+    expect(await networkExists(`enactment-net-${attempt}-documentation-egress`)).toBe(false);
+    expect(await networkExists(`enactment-net-${attempt}-documentation-proxy-egress`)).toBe(false);
   }, 180_000);
 });

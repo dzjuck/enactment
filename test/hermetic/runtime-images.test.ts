@@ -114,7 +114,7 @@ let dir: string;
 
 beforeEach(async () => {
   calls.length = 0;
-  dir = await mkdtemp(join(tmpdir(), 'harness-runtime-images-'));
+  dir = await mkdtemp(join(tmpdir(), 'enactment-runtime-images-'));
 });
 
 afterEach(async () => {
@@ -236,15 +236,15 @@ describe('phases execute the supplied runtime image set', () => {
   });
 
   it('initializes synthetic git with the agent image', async () => {
-    await initSyntheticGit('ai-harness-ws-attempt-1', IMAGES);
+    await initSyntheticGit('enactment-ws-attempt-1', IMAGES);
 
     expect(imagesRun()).toEqual([IMAGES.codex.id]);
   });
 
   it('snapshots and restores the workspace with the setup image', async () => {
     const store = new ArtifactStore(join(dir, 'snapshots'));
-    await snapshotWorkspace('ai-harness-ws-attempt-1', store, IMAGES);
-    await restoreWorkspace('ai-harness-ws-attempt-1', await storedArtifact(), IMAGES);
+    await snapshotWorkspace('enactment-ws-attempt-1', store, IMAGES);
+    await restoreWorkspace('enactment-ws-attempt-1', await storedArtifact(), IMAGES);
 
     expect(imagesRun()).toEqual([IMAGES.setup.id, IMAGES.setup.id]);
   });
@@ -262,7 +262,7 @@ describe('phases execute the supplied runtime image set', () => {
       attempt: 'attempt-1',
       workspaceTar: Buffer.from('tar'),
       installCommand: ['npm', 'ci', '--ignore-scripts'],
-      network: 'ai-harness-net-attempt-1-registry',
+      network: 'enactment-net-attempt-1-registry',
       images: IMAGES,
     });
 
@@ -329,8 +329,8 @@ describe('phases execute the supplied runtime image set', () => {
     const store = new ArtifactStore(join(dir, 'snapshots'));
 
     await createWorkspaceVolume('attempt-2', Buffer.from('tar'), IMAGES);
-    await initSyntheticGit('ai-harness-ws-attempt-2', IMAGES);
-    await snapshotWorkspace('ai-harness-ws-attempt-2', store, IMAGES);
+    await initSyntheticGit('enactment-ws-attempt-2', IMAGES);
+    await snapshotWorkspace('enactment-ws-attempt-2', store, IMAGES);
     await createDependencyVolume('attempt-2', 'agent', Buffer.alloc(0), IMAGES);
     await startProxyContainer({
       attempt: 'attempt-2',
@@ -376,7 +376,7 @@ describe('phases execute the supplied runtime image set', () => {
 describe('runtimeSection', () => {
   it('records exactly the six executed image IDs', () => {
     expect(runtimeSection(IMAGES)).toEqual({
-      harness_version: expect.any(String),
+      enactment_version: expect.any(String),
       codex_image_id: IDS.codex,
       claude_image_id: IDS.claude,
       verifier_image_id: IDS.verifier,

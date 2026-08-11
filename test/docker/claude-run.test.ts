@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 
 async function artifacts(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-claude-run-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-claude-run-'));
   dirs.push(dir);
   return dir;
 }

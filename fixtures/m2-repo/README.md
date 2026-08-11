@@ -5,8 +5,8 @@ Minimal reusable repository and plan for a real two-agent RED → GREEN run.
 Create a fresh repository for every run:
 
 ```sh
-repo=$(mktemp -d /tmp/ai-harness-m2.XXXXXX)
-artifacts=$(mktemp -d /tmp/ai-harness-m2-artifacts.XXXXXX)
+repo=$(mktemp -d /tmp/enactment-m2.XXXXXX)
+artifacts=$(mktemp -d /tmp/enactment-m2-artifacts.XXXXXX)
 cp -R fixtures/m2-repo/. "$repo/"
 git -C "$repo" init -q -b main
 git -C "$repo" add -A

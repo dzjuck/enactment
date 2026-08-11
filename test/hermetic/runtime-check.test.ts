@@ -60,23 +60,23 @@ const IMAGES = Object.fromEntries(
 
 const ATTEMPT = 'attempt-1';
 const APP = runtimeContainerName(ATTEMPT);
-const NETWORK = `ai-harness-net-${ATTEMPT}-runtime`;
+const NETWORK = `enactment-net-${ATTEMPT}-runtime`;
 
 const RUNTIME: RuntimeVerification = {
   start_command: ['node', 'dist/server.js'],
   port: 3000,
   readiness_path: '/health',
   behavioral_commands: [
-    ['node', 'harness-checks/orders.mjs'],
-    ['node', 'harness-checks/health.mjs'],
+    ['node', 'enactment-checks/orders.mjs'],
+    ['node', 'enactment-checks/health.mjs'],
   ],
 };
 
 const MOUNTS: Mount[] = [
-  { type: 'volume', source: 'ai-harness-ws-attempt-1-verify', target: '/workspace' },
+  { type: 'volume', source: 'enactment-ws-attempt-1-verify', target: '/workspace' },
   {
     type: 'volume',
-    source: 'ai-harness-deps-attempt-1-verify-verifier',
+    source: 'enactment-deps-attempt-1-verify-verifier',
     target: '/workspace/node_modules',
   },
 ];
@@ -106,7 +106,7 @@ beforeEach(async () => {
   dockerCalls.length = 0;
   delete dockerFailure.match;
   delete dockerFailure.stderr;
-  dir = await mkdtemp(join(tmpdir(), 'harness-runtime-'));
+  dir = await mkdtemp(join(tmpdir(), 'enactment-runtime-'));
   recorder = { started: [], ran: [], events: [] };
 });
 
@@ -179,7 +179,7 @@ describe('runtime check naming and topology', () => {
   it('names the application container and its network per attempt', async () => {
     await check();
 
-    expect(APP).toBe('ai-harness-app-attempt-1');
+    expect(APP).toBe('enactment-app-attempt-1');
     expect(recorder.started[0]?.name).toBe(APP);
     expect(recorder.started[0]?.network).toBe(NETWORK);
     expect(recorder.started[0]?.labels).toEqual({
@@ -240,7 +240,7 @@ describe('readiness', () => {
     // The validated URL is a separate argv value, never interpolated into the probe source.
     expect(readiness.spec.argv).toContain(`http://${APP}:3000/health`);
     expect(readiness.spec.argv[2]).not.toContain(APP);
-    expect(readiness.spec.env?.HARNESS_APP_URL).toBe(`http://${APP}:3000`);
+    expect(readiness.spec.env?.ENACTMENT_APP_URL).toBe(`http://${APP}:3000`);
     expect(readiness.options.timeoutSeconds).toBe(RUNTIME_READINESS_TIMEOUT_SECONDS);
   });
 
@@ -272,7 +272,7 @@ describe('readiness', () => {
   it('names the readiness container per attempt, so it can be terminated by name', async () => {
     await check();
 
-    expect(runtimeReadinessContainerName(ATTEMPT)).toBe('ai-harness-ready-attempt-1');
+    expect(runtimeReadinessContainerName(ATTEMPT)).toBe('enactment-ready-attempt-1');
     expect(recorder.ran[0]?.spec.name).toBe(runtimeReadinessContainerName(ATTEMPT));
   });
 
@@ -426,7 +426,7 @@ describe('behavioral commands', () => {
       expect(spec.image).toBe(IMAGES.verifier.id);
       expect(spec.network).toBe(NETWORK);
       expect(spec.mounts).toEqual(MOUNTS.map((mount) => ({ ...mount, readonly: true })));
-      expect(spec.env?.HARNESS_APP_URL).toBe(`http://${APP}:3000`);
+      expect(spec.env?.ENACTMENT_APP_URL).toBe(`http://${APP}:3000`);
       expect(options.timeoutSeconds).toBe(RUNTIME_COMMAND_TIMEOUT_SECONDS);
     }
 

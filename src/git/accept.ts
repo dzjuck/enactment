@@ -15,10 +15,10 @@ export class AcceptError extends Error {
 }
 
 const COMMIT_ENV = {
-  GIT_AUTHOR_NAME: 'AI Harness',
-  GIT_AUTHOR_EMAIL: 'harness@localhost',
-  GIT_COMMITTER_NAME: 'AI Harness',
-  GIT_COMMITTER_EMAIL: 'harness@localhost',
+  GIT_AUTHOR_NAME: 'Enactment',
+  GIT_AUTHOR_EMAIL: 'enactment@localhost',
+  GIT_COMMITTER_NAME: 'Enactment',
+  GIT_COMMITTER_EMAIL: 'enactment@localhost',
 };
 
 /** `git update-ref` reads an empty old value as "the ref must not exist". */
@@ -30,7 +30,7 @@ export interface AcceptOptions {
   parentCommit: string;
   /** False for a plan's first acceptance, where the branch must not exist yet. */
   branchExists: boolean;
-  /** `ai-harness/<plan-id>`: one stable branch per plan. */
+  /** `enactment/<plan-id>`: one stable branch per plan. */
   branch: string;
   planId: string;
   stepId: string;
@@ -160,7 +160,7 @@ export async function acceptChanges(options: AcceptOptions): Promise<AcceptResul
     throw new AcceptError('refusing to commit an empty change set');
   }
 
-  const parent = await mkdtemp(join(tmpdir(), 'harness-worktree-'));
+  const parent = await mkdtemp(join(tmpdir(), 'enactment-worktree-'));
   const worktree = join(parent, 'tree');
 
   try {
@@ -178,7 +178,7 @@ export async function acceptChanges(options: AcceptOptions): Promise<AcceptResul
       'commit',
       '--no-verify',
       '--message',
-      options.message ?? `${options.stepId}: apply harness-verified changes`,
+      options.message ?? `${options.stepId}: apply enactment-verified changes`,
       '--trailer',
       `${TRAILERS.plan}: ${options.planId}`,
       '--trailer',

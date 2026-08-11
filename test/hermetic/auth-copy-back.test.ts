@@ -54,7 +54,7 @@ afterEach(async () => {
 
 /** A fresh store per test: copy-back rewrites it, so sharing one leaks state between them. */
 async function store(): Promise<AuthStore> {
-  const root = await mkdtemp(join(tmpdir(), 'harness-copyback-'));
+  const root = await mkdtemp(join(tmpdir(), 'enactment-copyback-'));
   dirs.push(root);
   await writeFile(join(root, AUTH_FILE), STORED);
 
@@ -62,7 +62,7 @@ async function store(): Promise<AuthStore> {
 }
 
 /** The volume is irrelevant where reading it is the injected step. */
-const VOLUME = 'ai-harness-auth-a1';
+const VOLUME = 'enactment-auth-a1';
 
 describe('the auth reader', () => {
   it('turns a non-zero helper exit into an AuthError, not an absent file', async () => {

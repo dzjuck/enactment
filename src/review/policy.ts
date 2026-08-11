@@ -18,7 +18,7 @@ export const REVIEW_BEFORE_ROOT = `${REVIEW_ROOT}/before`;
 export const REVIEW_AFTER_ROOT = `${REVIEW_ROOT}/after`;
 
 /** Vendored rules, baked into the image and read-only at runtime. */
-export const REVIEW_RULES_DIR = '/opt/ai-harness/rules';
+export const REVIEW_RULES_DIR = '/opt/enactment/rules';
 
 /**
  * The exact argument array, minus the two roots the caller appends after `--`.

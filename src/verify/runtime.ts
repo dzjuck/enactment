@@ -81,7 +81,7 @@ export interface RuntimeCheckResult {
   /** Present when the stage alone would not explain the verdict. */
   reason?: string;
   startCommand: string[];
-  /** What the behavioral checkers receive as `HARNESS_APP_URL`. */
+  /** What the behavioral checkers receive as `ENACTMENT_APP_URL`. */
   url: string;
   readinessUrl: string;
   readiness: RuntimeReadinessResult;

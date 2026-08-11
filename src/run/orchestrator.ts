@@ -533,7 +533,7 @@ export async function runStep(options: StepExecutionOptions): Promise<RunReport>
                   // may add to the container, never redirect its egress.
                   env: {
                     ...options.injection?.agentEnv,
-                    HARNESS_PHASE: agentPhase,
+                    ENACTMENT_PHASE: agentPhase,
                     ...proxied,
                   },
                   // The documentation mount is here and nowhere else: no verifier, reviewer,

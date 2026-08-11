@@ -34,7 +34,7 @@ const IMAGES: RuntimeImages = {
   proxy: { role: 'proxy', id: `sha256:${'d'.repeat(64)}` },
 };
 
-const BRANCH = 'ai-harness/demo-plan';
+const BRANCH = 'enactment/demo-plan';
 
 const dirs: string[] = [];
 const repos: string[] = [];
@@ -47,7 +47,7 @@ afterEach(async () => {
 });
 
 async function scratch(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-recovery-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-recovery-'));
   dirs.push(dir);
   return dir;
 }
@@ -168,7 +168,7 @@ const passingFinal = (): Promise<FinalVerificationResult> =>
     dependencyCacheKey: `sha256:${'f'.repeat(64)}`,
     exportHash: `sha256:${'0'.repeat(64)}`,
     runtime: {
-      harness_version: '0.1.0',
+      enactment_version: '0.1.0',
       codex_image_id: IMAGES.codex.id,
       claude_image_id: IMAGES.claude.id,
       verifier_image_id: IMAGES.verifier.id,
@@ -518,7 +518,7 @@ describe('an attempt left in accepting', () => {
     );
 
     const message = await git(h.repo.dir, ['log', '-1', '--format=%B', report.head ?? '']);
-    expect(message).toContain(`AI-Harness-Idempotency-Key: ${key}`);
+    expect(message).toContain(`Enactment-Idempotency-Key: ${key}`);
   });
 });
 
@@ -696,7 +696,7 @@ describe('a commit whose teardown failed', () => {
             status: 'failed' as const,
             category: 'internal_error' as const,
             message: 'cleanup failed: run credential could not be saved',
-            cleanupErrors: ['volume ai-harness-auth-x still present'],
+            cleanupErrors: ['volume enactment-auth-x still present'],
           };
         },
         verifyFinal: passingFinal,
@@ -706,7 +706,7 @@ describe('a commit whose teardown failed', () => {
     // Only the first step ran, and the plan stopped.
     expect(seen.map((options) => options.step.id)).toEqual(['first-step']);
     expect(report.state).toBe('failed');
-    expect(report.cleanupErrors).toEqual(['volume ai-harness-auth-x still present']);
+    expect(report.cleanupErrors).toEqual(['volume enactment-auth-x still present']);
     expect(report.failure?.message).toContain('credential');
 
     // The acceptance Git made visible is recorded: step completed, head moved to it.

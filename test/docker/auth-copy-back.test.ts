@@ -45,7 +45,7 @@ const dirs: string[] = [];
 beforeAll(async () => {
   stub = await stubAgentImage();
   repo = await createTargetRepo();
-  root = await mkdtemp(join(tmpdir(), 'harness-copyback-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-copyback-'));
 
   const source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
@@ -101,7 +101,7 @@ async function runRotating(
   env: Record<string, string>,
   overrides: Partial<Parameters<typeof runSinglePlanStep>[0]> = {},
 ): Promise<Outcome> {
-  const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
+  const artifacts = await mkdtemp(join(tmpdir(), 'enactment-artifacts-'));
   dirs.push(artifacts);
 
   stores += 1;

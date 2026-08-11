@@ -10,14 +10,14 @@ import { containerLogs, removeContainer, runContainer, startContainer } from '..
 import { imageEnvNames, listContainers } from '../helpers/docker.js';
 
 const IMAGE = IMAGE_PINS.codex.tag;
-const TEST_LABEL = 'ai-harness.test=run';
+const TEST_LABEL = 'enactment.test=run';
 
 function spec(argv: string[], overrides: Partial<ContainerSpec> = {}): ContainerSpec {
   return {
     image: IMAGE,
     argv,
     network: 'none',
-    labels: { 'ai-harness.test': 'run' },
+    labels: { 'enactment.test': 'run' },
     ...overrides,
   };
 }
@@ -67,7 +67,7 @@ describe('runContainer', () => {
   });
 
   it('passes no host environment beyond what the harness declared', async () => {
-    process.env.HARNESS_HOST_CANARY = 'must-not-leak';
+    process.env.ENACTMENT_HOST_CANARY = 'must-not-leak';
 
     const result = await runContainer(spec(['env']));
     const present = result.stdout
@@ -80,7 +80,7 @@ describe('runContainer', () => {
 
     // Names only, never values.
     expect(surplus).toEqual([]);
-    expect(present).not.toContain('HARNESS_HOST_CANARY');
+    expect(present).not.toContain('ENACTMENT_HOST_CANARY');
   });
 
   it('gives the agent a home with no dotfiles', async () => {

@@ -23,7 +23,7 @@ import {
   stubClaudeImage,
 } from '../helpers/stub-agent.js';
 
-const LABEL = 'ai-harness.attempt';
+const LABEL = 'enactment.attempt';
 const NOTES = 'notes.txt';
 
 /**
@@ -81,7 +81,7 @@ beforeAll(async () => {
   stub = await stubAgentImage();
   claudeStub = await stubClaudeImage();
   repo = await createM2Repo();
-  root = await mkdtemp(join(tmpdir(), 'harness-plan-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-plan-'));
 
   await writeFile(
     join(root, AUTH_FILE),
@@ -107,7 +107,7 @@ afterEach(async () => {
 });
 
 async function scratch(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-plan-run-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-plan-run-'));
   dirs.push(dir);
   return dir;
 }
@@ -170,7 +170,7 @@ describe('autonomous two-step plan', () => {
     expect(report.finalVerification?.status).toBe('pass');
 
     // One stable branch, advanced linearly: base → step 1 → step 2.
-    const branch = 'ai-harness/two-step-plan';
+    const branch = 'enactment/two-step-plan';
     expect(report.branch).toBe(branch);
     expect(await git(repo.dir, ['rev-parse', branch])).toBe(report.head);
     expect(await git(repo.dir, ['rev-list', '--count', branch])).toBe('3');
@@ -194,8 +194,8 @@ describe('autonomous two-step plan', () => {
 
     // Trailers name the plan and the step that produced each commit.
     const message = await git(repo.dir, ['log', '-1', '--format=%B', second?.commit ?? '']);
-    expect(message).toContain('AI-Harness-Plan: two-step-plan');
-    expect(message).toContain('AI-Harness-Step: second-step');
+    expect(message).toContain('Enactment-Plan: two-step-plan');
+    expect(message).toContain('Enactment-Step: second-step');
 
     // Evidence is per attempt and non-overwriting; snapshots are pruned once nothing needs them.
     const planRoot = join(artifactsRoot, 'two-step-plan');
@@ -300,7 +300,7 @@ describe('bounded stronger retry', () => {
       { kind: 'normal', state: 'failed' },
       { kind: 'stronger', state: 'completed' },
     ]);
-    expect(await git(repo.dir, ['rev-list', '--count', 'ai-harness/retry-plan'])).toBe('2');
+    expect(await git(repo.dir, ['rev-list', '--count', 'enactment/retry-plan'])).toBe('2');
     expect(await git(repo.dir, ['show', `${report.head ?? ''}:retry-note.txt`])).toBe('clean retry');
     await expect(
       git(repo.dir, ['cat-file', '-e', `${report.head ?? ''}:outside-scope.txt`]),

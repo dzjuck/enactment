@@ -169,7 +169,7 @@ and readiness fails on its deadline. The harness sets `HOST` and `PORT`; use the
 | --- | --- | --- |
 | `HOST` | the application | `0.0.0.0` |
 | `PORT` | the application | the declared `port` |
-| `HARNESS_APP_URL` | every behavioral command | `http://<app-container>:<port>` |
+| `ENACTMENT_APP_URL` | every behavioral command | `http://<app-container>:<port>` |
 
 An application that exits before it becomes ready does not consume that budget: the harness
 watches the container from the host — the checkers have no Docker socket and cannot — and fails
@@ -306,7 +306,7 @@ execution_manifest:
     policy_hash: sha256:...    # the fixed network and dependency policies
     documentation_hash: sha256:...   # only when the plan declares documentation
   runtime:
-    harness_version: 0.1.0
+    enactment_version: 0.1.0
     codex_image_id: sha256:...
     claude_image_id: sha256:...
     verifier_image_id: sha256:...
@@ -344,7 +344,7 @@ to approve:
 
 | Warning | Meaning | Fix |
 | --- | --- | --- |
-| `step "<id>" is already carried by commit <sha>` | An `AI-Harness-Step` trailer reachable from the approved base already names that step, so the plan probably still lists work that is done. | Remove the step if it is already done, or rename it if it is genuinely different work. |
+| `step "<id>" is already carried by commit <sha>` | An `Enactment-Step` trailer reachable from the approved base already names that step, so the plan probably still lists work that is done. | Remove the step if it is already done, or rename it if it is genuinely different work. |
 
 It is a warning and not a refusal. Step IDs stay reachable forever once a revision branch is merged
 into the base branch, and ordinary slugs — `persist-runs`, `add-tests` — collide across unrelated
@@ -384,13 +384,13 @@ verdict and severity counts. The same report is
 stored under `<artifacts>/<plan-id>/reports/invocation-<n>.json`, and earlier reports are never
 replaced.
 
-Commits land on `ai-harness/<plan-id>` — one stable branch per plan, advanced linearly — with
-hooks disabled and the `AI-Harness-Plan`, `AI-Harness-Step`, `AI-Harness-Attempt` and
-`AI-Harness-Idempotency-Key` trailers. Nothing is merged and nothing is pushed:
+Commits land on `enactment/<plan-id>` — one stable branch per plan, advanced linearly — with
+hooks disabled and the `Enactment-Plan`, `Enactment-Step`, `Enactment-Attempt` and
+`Enactment-Idempotency-Key` trailers. Nothing is merged and nothing is pushed:
 
 ```sh
-git log --oneline main..ai-harness/<plan-id>
-git show ai-harness/<plan-id>
+git log --oneline main..enactment/<plan-id>
+git show enactment/<plan-id>
 ```
 
 The harness only ever advances that ref from where it last left it. A branch that already exists
@@ -441,7 +441,7 @@ The report names the plan, its branch, and both commits an amendment could build
 
 ```json
 { "plan": "collector-dashboard", "state": "cancelled",
-  "branch": "ai-harness/collector-dashboard",
+  "branch": "enactment/collector-dashboard",
   "head": "9c1f...", "base": "0b6f..." }
 ```
 
@@ -482,7 +482,7 @@ Step 1 is worth the minute it costs: a candidate that was verified but never com
 the plan is cancelled, and that run is what lets its commit reach the branch. It is unavailable in
 exactly one case — see "After a harness upgrade" below.
 
-The amended plan needs **its own plan id**. `ai-harness/<plan-id>` is harness-owned and the harness
+The amended plan needs **its own plan id**. `enactment/<plan-id>` is harness-owned and the harness
 never adopts a ref it did not create, so reusing the previous id stops the run before any step
 executes. Each revision gets its own branch, created at its base by its first acceptance; the newest
 branch contains every accepted commit, and the chain of revision branches is linear.
@@ -519,13 +519,13 @@ The rule that follows: **your own commits go on your own branch, created at the 
 and `--base` points at that branch.
 
 ```sh
-git branch amend-deps ai-harness/collector-dashboard
+git branch amend-deps enactment/collector-dashboard
 git switch amend-deps
 # ... commit the change ...
 node dist/cli.js prepare plan-r2.yml --repo . --base amend-deps --output execution-manifest-r2.yml
 ```
 
-Never commit onto `ai-harness/*` — those refs are harness-owned, and a plan whose branch moved
+Never commit onto `enactment/*` — those refs are harness-owned, and a plan whose branch moved
 behind its back stops rather than adopting the change. Committing on the base branch instead is the
 quiet failure: the manifest prepares, the run works, and the accepted work is simply missing from
 the amendment's history.
@@ -568,10 +568,10 @@ Optional environment (state locations only; nothing here reaches the container c
 
 | Variable | Meaning |
 | --- | --- |
-| `HARNESS_STATE_DIR` | Harness state root. Default `~/.local/state/ai-harness`. Holds `state.db`. |
-| `HARNESS_STORE_DIR` | Credential store directory. |
-| `HARNESS_DEPS_DIR` | Dependency cache directory. |
-| `HARNESS_SOURCE_CODEX_HOME` | Where the store is seeded from. Default `~/.codex`. |
+| `ENACTMENT_STATE_DIR` | Harness state root. Default `~/.local/state/enactment`. Holds `state.db`. |
+| `ENACTMENT_STORE_DIR` | Credential store directory. |
+| `ENACTMENT_DEPS_DIR` | Dependency cache directory. |
+| `ENACTMENT_SOURCE_CODEX_HOME` | Where the store is seeded from. Default `~/.codex`. |
 
 ## 5. Read the artifacts
 
@@ -631,18 +631,18 @@ behind goes at the start of the next run of that plan, or when the plan is cance
 remain in `run-manifest.json` either way, so a run stays reproducible without storing every tree
 forever.
 
-Persistent state lives outside the artifact directory, under `HARNESS_STATE_DIR`: `auth/` (the
+Persistent state lives outside the artifact directory, under `ENACTMENT_STATE_DIR`: `auth/` (the
 credential store, mode `0600`), `dependency-cache/`, and `state.db`.
 
 ### The plan database
 
-`${HARNESS_STATE_DIR}/state.db` records plans, steps and attempts, with foreign keys and WAL
+`${ENACTMENT_STATE_DIR}/state.db` records plans, steps and attempts, with foreign keys and WAL
 enabled. It is what makes a rerun resume rather than restart. Git remains authoritative for
 whether an acceptance became externally visible; the database is reconciled against it at the
 start of every run.
 
 ```sh
-sqlite3 "${HARNESS_STATE_DIR:-$HOME/.local/state/ai-harness}/state.db" \
+sqlite3 "${ENACTMENT_STATE_DIR:-$HOME/.local/state/enactment}/state.db" \
   'select plan_id, state, head_commit from plans;'
 ```
 
@@ -660,7 +660,7 @@ the store has to be removed first, so the next run seeds it again:
 
 ```sh
 codex login
-rm -f "${HARNESS_STORE_DIR:-${HARNESS_STATE_DIR:-$HOME/.local/state/ai-harness}/auth}/auth.json"
+rm -f "${ENACTMENT_STORE_DIR:-${ENACTMENT_STATE_DIR:-$HOME/.local/state/enactment}/auth}/auth.json"
 ```
 
 The next run re-seeds the store from `~/.codex/auth.json`. Do this after any failure that says
@@ -672,12 +672,12 @@ Claude auth is a private static token file, not the Codex store. Provision it on
 
 ```sh
 claude setup-token
-install -d -m 0700 "${HARNESS_STATE_DIR:-$HOME/.local/state/ai-harness}/auth/claude"
-chmod 0700 "${HARNESS_STATE_DIR:-$HOME/.local/state/ai-harness}/auth/claude"
+install -d -m 0700 "${ENACTMENT_STATE_DIR:-$HOME/.local/state/enactment}/auth/claude"
+chmod 0700 "${ENACTMENT_STATE_DIR:-$HOME/.local/state/enactment}/auth/claude"
 umask 077
 read -r -s CLAUDE_SETUP_TOKEN
 printf '%s\n' "$CLAUDE_SETUP_TOKEN" > \
-  "${HARNESS_STATE_DIR:-$HOME/.local/state/ai-harness}/auth/claude/token"
+  "${ENACTMENT_STATE_DIR:-$HOME/.local/state/enactment}/auth/claude/token"
 unset CLAUDE_SETUP_TOKEN
 ```
 
@@ -692,9 +692,9 @@ A run that ends normally — success or failure — releases everything it creat
 outright (SIGKILL, a crash) cannot, and leaves labelled resources behind:
 
 ```sh
-docker ps -a --filter label=ai-harness.attempt
-docker volume ls --filter label=ai-harness.attempt
-docker network ls --filter label=ai-harness.attempt
+docker ps -a --filter label=enactment.attempt
+docker volume ls --filter label=enactment.attempt
+docker network ls --filter label=enactment.attempt
 ```
 
 The next `run` removes all of them at startup, before it validates the manifest or opens the
@@ -732,7 +732,7 @@ parent — stops the plan without changing either side.
 | `documentation_changed` | The documentation bundle is missing, edited, incomplete, carries an undeclared file, or hashes differently from the approved one. Nothing started. Delete the whole `documentation/` directory, re-run `docs`, and re-prepare if the content really changed. |
 | `base_unresolvable` from `run` | The approved base commit does not exist in this repository. Wrong `--repo`, or the commit was garbage-collected. |
 | `base_unresolvable` from `prepare` | `--base` names a ref this repository does not have, or an object that is not a commit. Nothing was written; check the ref, and remember the plan branch exists only once a plan has accepted a step. |
-| `already exists but this plan has accepted nothing` | `ai-harness/<plan-id>` exists from an earlier plan or a person. An amended plan needs its own plan id; otherwise rename or delete the ref. |
+| `already exists but this plan has accepted nothing` | `enactment/<plan-id>` exists from an earlier plan or a person. An amended plan needs its own plan id; otherwise rename or delete the ref. |
 | `refusing to move a ref the harness no longer recognises` | The plan branch and the recorded head disagree. Nothing was changed; reconcile by hand, or cancel the plan and start a new one. |
 | `is owned by plan ... cancel it before registering a different manifest` | Another plan owns this repository. Finish it, or `cancel` its manifest. |
 

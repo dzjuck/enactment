@@ -31,7 +31,7 @@ export interface TargetRepo {
 
 /** Materialize a fixture repository into a temp dir and make it a git repository. */
 export async function createRepo(fixture: string): Promise<TargetRepo> {
-  const dir = await mkdtemp(join(tmpdir(), 'harness-repo-'));
+  const dir = await mkdtemp(join(tmpdir(), 'enactment-repo-'));
   await cp(join(FIXTURES, fixture), dir, { recursive: true, verbatimSymlinks: true });
   await git(dir, ['init', '-q', '-b', 'main']);
   const commit = await commitAll(dir, 'Initial commit');
@@ -57,7 +57,7 @@ export async function removeRepo(dir: string): Promise<void> {
 }
 
 /**
- * Delete every `ai-harness/*` branch in a repository.
+ * Delete every `enactment/*` branch in a repository.
  *
  * A plan branch is stable per plan id and the harness refuses to adopt one it did not
  * create, so a fixture repository shared by several runs of the same plan needs the previous
@@ -67,7 +67,7 @@ export async function removePlanBranches(dir: string): Promise<void> {
   const refs = await git(dir, [
     'for-each-ref',
     '--format=%(refname)',
-    'refs/heads/ai-harness/',
+    'refs/heads/enactment/',
   ]);
 
   for (const ref of refs.split('\n').filter((line) => line !== '')) {

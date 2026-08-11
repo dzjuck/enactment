@@ -14,7 +14,7 @@ import { commitAll, createTargetRepo, git, removeRepo, type TargetRepo } from '.
 const PLAN_ID = 'slugify-plan';
 const STEP_ID = 'add-slugify';
 const ATTEMPT = 'attempt-1';
-const BRANCH = `ai-harness/${PLAN_ID}`;
+const BRANCH = `enactment/${PLAN_ID}`;
 const MANIFEST_HASH = `sha256:${'a'.repeat(64)}`;
 
 const SLUGIFY = 'export const slugify = (t) => String(t).toLowerCase();\n';
@@ -129,7 +129,7 @@ describe('plan branch acceptance', () => {
     expect(message).toContain(`${TRAILERS.step}: ${STEP_ID}`);
     expect(message).toContain(`${TRAILERS.attempt}: ${ATTEMPT}`);
     expect(message).toContain(`${TRAILERS.idempotencyKey}: ${keyFor()}`);
-    expect(message).not.toContain('AI-Harness-Task');
+    expect(message).not.toContain('Enactment-Task');
   });
 
   it('refuses the first acceptance when the plan branch already exists', async () => {
@@ -218,7 +218,7 @@ describe('plan-scoped idempotency key', () => {
   );
 });
 
-describe('harness-owned commit', () => {
+describe('enactment-owned commit', () => {
   it('leaves the user checked-out branch and working tree untouched', async () => {
     await writeFile(join(repo.dir, 'README.md'), 'user was editing this\n');
 

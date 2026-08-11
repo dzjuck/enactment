@@ -32,7 +32,7 @@ let stub: RuntimeImage;
 beforeAll(async () => {
   stub = await stubAgentImage();
   repo = await createTargetRepo();
-  root = await mkdtemp(join(tmpdir(), 'harness-restart-'));
+  root = await mkdtemp(join(tmpdir(), 'enactment-restart-'));
 
   const source = join(root, 'codex-source');
   await mkdir(source, { recursive: true });
@@ -70,8 +70,8 @@ beforeAll(async () => {
       "import { appendFile } from 'node:fs/promises';",
       `import { runSinglePlanStep } from ${JSON.stringify(join(process.cwd(), 'dist/run/bridge.js'))};`,
       'await runSinglePlanStep({',
-      '  ...JSON.parse(process.env.HARNESS_TEST_RUN),',
-      '  onPhase: (phase) => appendFile(process.env.HARNESS_TEST_PHASES, `${phase}\\n`),',
+      '  ...JSON.parse(process.env.ENACTMENT_TEST_RUN),',
+      '  onPhase: (phase) => appendFile(process.env.ENACTMENT_TEST_PHASES, `${phase}\\n`),',
       '});',
       '',
     ].join('\n'),
@@ -115,15 +115,15 @@ async function settled(): Promise<void> {
 
 describe('a SIGKILLed run is cleaned up by the next production CLI start', () => {
   it('removes the orphans before the new attempt, without touching the killed run itself', async () => {
-    const artifacts = await mkdtemp(join(tmpdir(), 'harness-artifacts-'));
+    const artifacts = await mkdtemp(join(tmpdir(), 'enactment-artifacts-'));
     const phasesFile = join(root, 'phases');
     await writeFile(phasesFile, '');
 
     const killed = execa('node', [runnerScript], {
       reject: false,
       env: {
-        HARNESS_TEST_PHASES: phasesFile,
-        HARNESS_TEST_RUN: JSON.stringify({
+        ENACTMENT_TEST_PHASES: phasesFile,
+        ENACTMENT_TEST_RUN: JSON.stringify({
           planFile,
           repoPath: repo.dir,
           artifactDir: artifacts,
@@ -166,7 +166,7 @@ describe('a SIGKILLed run is cleaned up by the next production CLI start', () =>
       const prepared = await execa(
         'node',
         ['dist/cli.js', 'prepare', planFile, '--repo', repo.dir, '--output', manifestPath],
-        { reject: false, env: { HARNESS_STATE_DIR: join(root, 'state') } },
+        { reject: false, env: { ENACTMENT_STATE_DIR: join(root, 'state') } },
       );
       expect(prepared.exitCode, prepared.stderr).toBe(0);
 
@@ -184,7 +184,7 @@ describe('a SIGKILLed run is cleaned up by the next production CLI start', () =>
           '--artifacts',
           artifacts,
         ],
-        { reject: false, env: { HARNESS_STATE_DIR: join(root, 'state') } },
+        { reject: false, env: { ENACTMENT_STATE_DIR: join(root, 'state') } },
       );
 
       expect(restarted.exitCode).toBe(1);

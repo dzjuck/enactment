@@ -1,4 +1,4 @@
-export const HARNESS_VERSION = '0.1.0';
+export const ENACTMENT_VERSION = '0.1.0';
 
 /**
  * DESIGN.md §7: the provider allowlist and the container contract are version-specific,
@@ -92,26 +92,26 @@ const COMMON_BUILD_ARGS = {
 export const IMAGE_PINS: Record<ImageRole, ImagePin> = {
   codex: {
     role: 'codex',
-    tag: `ai-harness/codex:${HARNESS_VERSION}`,
+    tag: `enactment/codex:${ENACTMENT_VERSION}`,
     context: 'images/codex',
     buildArgs: { ...COMMON_BUILD_ARGS, CODEX_VERSION },
   },
   claude: {
     role: 'claude',
-    tag: `ai-harness/claude:${HARNESS_VERSION}`,
+    tag: `enactment/claude:${ENACTMENT_VERSION}`,
     context: 'images/claude',
     buildArgs: { ...COMMON_BUILD_ARGS, CLAUDE_VERSION },
   },
   verifier: {
     role: 'verifier',
-    tag: `ai-harness/verifier:${HARNESS_VERSION}`,
+    tag: `enactment/verifier:${ENACTMENT_VERSION}`,
     context: 'images/verifier',
     buildArgs: { ...COMMON_BUILD_ARGS },
   },
   // The only role that is not a Node image: the scanner and its vendored rules, nothing else.
   reviewer: {
     role: 'reviewer',
-    tag: `ai-harness/reviewer:${HARNESS_VERSION}`,
+    tag: `enactment/reviewer:${ENACTMENT_VERSION}`,
     context: 'images/reviewer',
     buildArgs: {
       SEMGREP_IMAGE,
@@ -121,14 +121,14 @@ export const IMAGE_PINS: Record<ImageRole, ImagePin> = {
   },
   setup: {
     role: 'setup',
-    tag: `ai-harness/setup:${HARNESS_VERSION}`,
+    tag: `enactment/setup:${ENACTMENT_VERSION}`,
     context: 'images/setup',
     buildArgs: { ...COMMON_BUILD_ARGS },
   },
   // Built from the repository root: the proxy sources are compiled inside the image.
   proxy: {
     role: 'proxy',
-    tag: `ai-harness/proxy:${HARNESS_VERSION}`,
+    tag: `enactment/proxy:${ENACTMENT_VERSION}`,
     context: '.',
     dockerfile: 'images/proxy/Dockerfile',
     buildArgs: { ...COMMON_BUILD_ARGS, TYPESCRIPT_VERSION, TYPES_NODE_VERSION },
