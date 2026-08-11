@@ -1431,11 +1431,11 @@ images/reviewer/rule-packs/
 The image exposes the pack root as `/opt/enactment/rules` and Semgrep discovers rules recursively
 from there, so adding a language pack changes the build and nothing in the runtime orchestration.
 
-Initial coverage is JavaScript and TypeScript only. Python is a follow-up, and until parser
-fixtures exist for a claimed version, no Python support is claimed. Framework packs are
-deliberately excluded: a step is reviewed for the shape of mistake an agent makes, not for
-framework conventions. The packs therefore make the gate deterministic; they do not make it
-complete.
+Initial coverage is JavaScript. TypeScript coverage is limited: six rules declare TypeScript, and
+only three have upstream TypeScript fixtures. Python is a follow-up, and until parser fixtures
+exist for a claimed version, no Python support is claimed. Framework packs are deliberately
+excluded: a step is reviewed for the shape of mistake an agent makes, not for framework
+conventions. The packs therefore make the gate deterministic; they do not make it complete.
 
 Every rule ships with the upstream annotated fixture that proves it, and an unproven rule is not
 included. Selection excludes any rule declaring `paths:`, because review scans copies under

@@ -742,9 +742,10 @@ treated as an addition, so moved vulnerable legacy code can block. CE analysis i
 is a narrow deterministic gate, not proof of security or a replacement for human branch review.
 
 The rules are vendored language packs under `images/reviewer/rule-packs/`, pinned to an exact
-upstream commit and baked into the image. Coverage is JavaScript and TypeScript only; Python is a
-follow-up. Framework rules are deliberately out of scope. `PROVENANCE.md` beside the packs names the
-upstream repository, the commit, the selected files and why each candidate was excluded;
+upstream commit and baked into the image. Coverage is JavaScript. TypeScript coverage is limited:
+six rules declare TypeScript, and only three have upstream TypeScript fixtures. Python is a
+follow-up. Framework rules are deliberately out of scope. `PROVENANCE.md` beside the packs names
+the upstream repository, the commit, the selected files and why each candidate was excluded;
 `THIRD_PARTY_NOTICES.md` maps each subtree to its license. Enactment itself is Apache-2.0; the rules
 are third-party MIT and LGPL-3.0 material, redistributed unmodified.
 
