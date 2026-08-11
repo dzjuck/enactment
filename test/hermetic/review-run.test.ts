@@ -25,8 +25,10 @@ import { compileReviewArgv } from '../../src/review/targets.js';
 
 const FIXTURES = fileURLToPath(new URL('../../fixtures/review', import.meta.url));
 const SECRET = 'review-secret-canary-9921';
-const CRITICAL = `const { spawn } = require('child_process');
-spawn('ls', ['-la'], { shell: true });
+const CRITICAL = `const serialize = require('node-serialize');
+module.exports = (payload) => serialize.unserialize(payload);
+`;
+const WARNING = `module.exports = () => Math.random();
 `;
 
 const IMAGES = Object.fromEntries(
@@ -212,9 +214,7 @@ describe('offline review execution', () => {
     ['standard', 'critical', 'blocked'],
     ['high', 'critical', 'blocked'],
   ] as const)('%s risk with a %s finding produces %s', async (risk, fixtureName, verdict) => {
-    const source = fixtureName === 'critical' ? CRITICAL : `const crypto = require('crypto');
-module.exports = () => crypto.pseudoRandomBytes(16);
-`;
+    const source = fixtureName === 'critical' ? CRITICAL : WARNING;
     let calls = 0;
     const result = await runReview({
       attempt: `attempt-${risk}-${fixtureName}`,

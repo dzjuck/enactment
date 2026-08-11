@@ -115,10 +115,13 @@ describe('runtime images', () => {
   });
 
   it('builds a reviewer image with the vendored rules and no provider binary or auth path', async () => {
+    // Recursive: the packs are one licensed subtree per language, and Semgrep discovers rules
+    // recursively from the one directory it is given. A flat glob would read a nested pack as
+    // an empty rule set and pass this image as rule-free.
     const rules = await runInImage(IMAGE_PINS.reviewer.tag, [
       'sh',
       '-c',
-      `ls ${REVIEW_RULES_DIR}/*.yaml | wc -l`,
+      `find ${REVIEW_RULES_DIR} -name '*.yml' -o -name '*.yaml' | wc -l`,
     ]);
     expect(Number(rules.stdout.trim())).toBeGreaterThan(0);
 

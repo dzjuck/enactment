@@ -21,11 +21,11 @@ import { newAttemptId } from '../../src/volume/naming.js';
 import { runtimeImages } from '../helpers/images.js';
 
 const SECRET = 'review-source-secret-canary-1842';
-const WARNING = `const crypto = require('crypto');
-module.exports = () => crypto.pseudoRandomBytes(16);
+const WARNING = `module.exports = () => Math.random();
 `;
-const CRITICAL = `const { spawn } = require('child_process');
-spawn('${SECRET}', [], { shell: true });
+// The canary sits inside the region the rule matches, so a leaked artifact would carry it.
+const CRITICAL = `const serialize = require('node-serialize');
+module.exports = () => serialize.unserialize('${SECRET}');
 `;
 
 function file(path: string, content: string): FileEntry {

@@ -12,22 +12,22 @@ import {
   REVIEW_ARGS,
   REVIEW_BEFORE_ROOT,
   REVIEW_ROOT,
+  REVIEW_RULES_DIR,
 } from '../../src/review/policy.js';
 
 /**
- * Fixtures deliberately trip *search*-mode rules. Half the vendored set is taint mode with
- * narrow sources — an enclosing function's argument, or browser `location` — so a plausible
- * looking sample can produce an honest zero-finding scan and prove nothing about the image.
+ * Fixtures deliberately trip *search*-mode rules. Part of the vendored set is taint mode with
+ * narrow sources — an enclosing Express handler's argument — so a plausible looking sample can
+ * produce an honest zero-finding scan and prove nothing about the image.
  */
 
-/** Trips `spawn-shell-true`, an ERROR rule: `spawn(..., {shell: $SHELL})`. */
-const CRITICAL = `const { spawn } = require('child_process');
-spawn('ls', ['-la'], { shell: true });
+/** Trips `rule-node-deserialize`, an ERROR rule: `$MOD.unserialize(...)` on `node-serialize`. */
+const CRITICAL = `const serialize = require('node-serialize');
+module.exports = (payload) => serialize.unserialize(payload);
 `;
 
-/** Trips `detect-pseudoRandomBytes`, a WARNING rule: `crypto.pseudoRandomBytes`. */
-const WARNING = `const crypto = require('crypto');
-module.exports = () => crypto.pseudoRandomBytes(16);
+/** Trips `rule-node-insecure-random-generator`, a WARNING rule: `Math.random(...)`. */
+const WARNING = `module.exports = () => Math.random();
 `;
 
 const CLEAN = `export function add(a, b) {
@@ -115,6 +115,32 @@ describe('pinned reviewer image', () => {
     expect(result.stdout.trim()).toBe(SEMGREP_VERSION);
   }, 300_000);
 
+  it('bakes in the whole rule pack, recursively, with the licenses it is redistributed under', async () => {
+    const result = await runContainer(
+      {
+        image: IMAGE_PINS.reviewer.tag,
+        // The image ships BusyBox, so this stays POSIX: no `grep --include`, no GNU options.
+        argv: [
+          'sh',
+          '-c',
+          `find ${REVIEW_RULES_DIR} -name '*.yml' -o -name '*.yaml' | wc -l; ` +
+            `find ${REVIEW_RULES_DIR} -name '*.yml' -exec ` +
+            `grep -hE '^[[:space:]]*-[[:space:]]+id:' {} + | wc -l; ` +
+            `ls ${REVIEW_RULES_DIR}/LICENSES; ` +
+            `test -s ${REVIEW_RULES_DIR}/THIRD_PARTY_NOTICES.md && echo notices`,
+        ],
+        network: 'none',
+      },
+      { timeoutSeconds: 120, graceSeconds: 5 },
+    );
+
+    // Semgrep discovers rules recursively from one directory, so the count has to be recursive
+    // too: a pack that lands one level deeper than expected would otherwise read as empty.
+    const [files, rules, ...rest] = result.stdout.trim().split('\n').map((line) => line.trim());
+    expect([files, rules]).toEqual(['20', '20']);
+    expect(rest).toEqual(['GPL-3.0.txt', 'GitLab-MIT.txt', 'LGPL-3.0.txt', 'notices']);
+  }, 300_000);
+
   it('runs as the fixed non-root identity with no network', async () => {
     const result = await runContainer(
       {
@@ -147,7 +173,7 @@ describe('pinned reviewer image', () => {
     expect(json.results).toHaveLength(1);
     const [finding] = json.results;
     expect(finding?.extra.severity).toBe('ERROR');
-    expect(finding?.check_id).toContain('spawn-shell-true');
+    expect(finding?.check_id).toContain('rule-node-deserialize');
     expect(finding?.path).toBe(`${REVIEW_AFTER_ROOT}/src/run.js`);
     expect(finding?.start.line).toBeGreaterThan(0);
     expect(finding?.end.line).toBeGreaterThan(0);

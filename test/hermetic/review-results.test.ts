@@ -12,12 +12,16 @@ import type { ReviewTargets } from '../../src/review/targets.js';
 
 const FIXTURES = fileURLToPath(new URL('../../fixtures/review', import.meta.url));
 
-const CRITICAL = `const { spawn } = require('child_process');
-spawn('ls', ['-la'], { shell: true });
+const CRITICAL = `const serialize = require('node-serialize');
+module.exports = (payload) => serialize.unserialize(payload);
 `;
-const WARNING = `const crypto = require('crypto');
-module.exports = () => crypto.pseudoRandomBytes(16);
+const WARNING = `module.exports = () => Math.random();
 `;
+
+/** Semgrep derives a local check ID from the config directory, so the pack layout is in it. */
+const RULES_PREFIX = 'opt.enactment.rules.javascript.gitlab-lgpl';
+const CRITICAL_RULE = `${RULES_PREFIX}.eval.rules_lgpl_javascript_eval_rule-node-deserialize`;
+const WARNING_RULE = `${RULES_PREFIX}.crypto.rules_lgpl_javascript_crypto_rule-node-insecure-random-generator`;
 const SHIFTED_DUPLICATE = `// a new leading comment
 ${WARNING}${WARNING}`;
 
@@ -80,17 +84,19 @@ describe('review result normalization', () => {
     expect(result).toEqual({
       findings: [
         {
-          ruleId: 'opt.enactment.rules.spawn-shell-true',
+          ruleId: CRITICAL_RULE,
           path: 'src/run.js',
           severity: 'critical',
           location: {
-            start: { line: 2, column: 1 },
-            end: { line: 2, column: 38 },
+            start: { line: 2, column: 31 },
+            end: { line: 2, column: 61 },
           },
         },
       ],
     });
-    expect(JSON.stringify(result)).not.toMatch(/message|spawn\('ls'|requires login|\/review\/after/);
+    expect(JSON.stringify(result)).not.toMatch(
+      /message|serialize\.unserialize|requires login|\/review\/after/,
+    );
   });
 
   it.each([
@@ -141,10 +147,10 @@ describe('introduced finding subtraction', () => {
 
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]).toMatchObject({
-      ruleId: 'opt.enactment.rules.detect-pseudoRandomBytes',
+      ruleId: WARNING_RULE,
       path: 'src/random.js',
       severity: 'warning',
-      location: { start: { line: 5, column: 24 } },
+      location: { start: { line: 3, column: 24 } },
     });
   });
 

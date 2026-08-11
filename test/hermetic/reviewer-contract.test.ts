@@ -180,16 +180,22 @@ describe('vendored reviewer rule packs', () => {
 });
 
 describe('reviewer image build contract', () => {
-  it('copies the vendored rules to the fixed rules directory and clears the entrypoint', async () => {
+  it('copies the vendored packs to the fixed rules directory and clears the entrypoint', async () => {
     const dockerfile = await readFile(
       join(REPO_ROOT, IMAGE_PINS.reviewer.context, 'Dockerfile'),
       'utf8',
     );
 
-    expect(dockerfile).toContain(`COPY rules ${REVIEW_RULES_DIR}`);
+    expect(dockerfile).toContain(`COPY rule-packs ${REVIEW_RULES_DIR}`);
     expect(dockerfile).toContain('ENTRYPOINT []');
     // No credential, no registry login, no rule download at build time.
     expect(dockerfile).not.toMatch(/TOKEN|SEMGREP_APP|login|--config=p\//i);
+  });
+
+  it('leaves no non-redistributable rule bundle in the build context', async () => {
+    const context = await readdir(join(REPO_ROOT, IMAGE_PINS.reviewer.context));
+
+    expect(context.sort()).toEqual(['Dockerfile', 'rule-packs']);
   });
 });
 
