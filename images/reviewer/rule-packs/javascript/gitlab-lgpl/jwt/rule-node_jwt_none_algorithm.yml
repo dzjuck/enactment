@@ -1,0 +1,36 @@
+# yamllint disable
+# License: GNU Lesser General Public License v3.0
+# source (original): https://github.com/ajinabraham/njsscan/blob/master/njsscan/rules/semantic_grep/jwt/jwt_none_algorithm.yaml
+# hash: e7a0a61
+# yamllint enable
+---
+rules:
+- id: "rules_lgpl_javascript_jwt_rule-node-jwt-none-algorithm"
+  mode: "taint"
+  pattern-sources:
+  - pattern: $JWT = require("jsonwebtoken")
+  - pattern: import $JWT from "jsonwebtoken"
+  pattern-sinks:
+  - pattern: $JWT.verify($P, $X, {...,algorithms:[...,'none',...],...},...)
+  - pattern: $JWT.sign($P, $X, {...,algorithm:'none',...},...)
+  message: |
+    Use of `{algorithm:'none'}` detected with `jsonwebtoken`. 
+    Using none as the algorithm for jsonwebtoken can directly impact the integrity of the information transfer through the JWT token.
+    Consider using a secure algorithm to sign your JWT token such as HMAC or RSA.
+    Some safe usage examples:
+    ```
+    let token = jwt.sign({user:"user1"}, 'secret', {algorithm: 'HS256'});  
+    ```
+    Using a secure algorithm can protect the integrity of the token information. 
+    Avoid using none as the algorithm when signing jwt tokens since it can violate the integrity of the JWT information.
+  languages:
+  - "javascript"
+  severity: "ERROR"
+  metadata:
+    owasp: 
+    - "A3:2017-Sensitive Data Exposure"
+    - "A02:2021-Cryptographic Failures"
+    cwe: "CWE-327"
+    shortDescription: "Use of a broken or risky cryptographic algorithm"
+    security-severity: "CRITICAL"
+    category: "security"

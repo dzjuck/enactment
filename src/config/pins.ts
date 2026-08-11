@@ -44,14 +44,16 @@ export const SEMGREP_IMAGE =
   'semgrep/semgrep:1.172.0@sha256:65dcd4408adda7c183a6b4550cb1e9b19f7f627a6fbb7e0559bd466bedc44d7b';
 
 /**
- * Provenance of the vendored rules. The rule *content* lives in the reviewer image, so a rule
- * edit changes `reviewer_image_id` and re-approval is already required; these constants exist
- * so the vendored copy can be traced back to an exact upstream tree.
+ * Provenance of the vendored rule packs. The rule *content* lives in the reviewer image, so a
+ * rule edit changes `reviewer_image_id` and re-approval is already required; these constants
+ * exist so the vendored copy can be traced back to an exact upstream tree.
+ *
+ * The selection is an explicit multi-path allowlist, not one subtree, so it is not a constant:
+ * `images/reviewer/rule-packs/PROVENANCE.md` owns it and the reviewer contract test asserts it.
  */
-export const SEMGREP_RULES_REPOSITORY = 'https://github.com/semgrep/semgrep-rules';
-export const SEMGREP_RULES_COMMIT = '40b8c63f75dc7c22c8a77482d73bfb864b146f7e';
-/** The selected subtree: language-level Node/JS security rules, no framework packs. */
-export const SEMGREP_RULES_PATH = 'javascript/lang/security';
+export const SEMGREP_RULES_REPOSITORY =
+  'https://gitlab.com/gitlab-org/security-products/sast-rules';
+export const SEMGREP_RULES_COMMIT = 'd580dedc604363a7606bc0a7192f4edf3e675cae';
 
 /** DESIGN.md §5/§36: fixed numeric identity, so `--user` and tmpfs ownership agree. */
 export const AGENT_UID = 1001;

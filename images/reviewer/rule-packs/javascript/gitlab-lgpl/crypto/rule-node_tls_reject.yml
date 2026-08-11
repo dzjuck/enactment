@@ -1,0 +1,57 @@
+# yamllint disable
+# License: GNU Lesser General Public License v3.0
+# yamllint enable
+---
+rules:
+  - id: "rules_lgpl_javascript_crypto_rule-node-tls-reject"
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $X.env.NODE_TLS_REJECT_UNAUTHORIZED = $VAL
+          - pattern: |
+              $X.env['NODE_TLS_REJECT_UNAUTHORIZED']= $VAL
+      - metavariable-pattern:
+          metavariable: $VAL
+          pattern-either:
+            - pattern: |
+                '0'
+            - pattern: |
+                0
+    message: |
+      The application sets NODE_TLS_REJECT_UNAUTHORIZED to '0', which instructs Node.js to disable TLS/SSL certificate validation. 
+      This configuration allows the application to accept self-signed certificates or certificates from untrusted authorities, 
+      undermining the TLS security model. Disabling TLS/SSL certificate validation compromises the integrity and confidentiality 
+      of data in transit between the client and server. It makes the application vulnerable to man-in-the-middle (MITM) attacks, 
+      where an attacker could intercept or alter the data being exchanged.
+      
+      Mitigation Strategy:
+      Do not disable TLS/SSL certificate validation in production environments. Ensure that NODE_TLS_REJECT_UNAUTHORIZED is 
+      set to '1' or is removed entirely from the production configuration (as the default configuration of validating SSL 
+      certificate is safe).
+
+      Secure Code Example:
+      ```
+      const https = require('https')
+      process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '1'
+      const req = https.request(options, res => {
+        let data = ''
+        res.on('data', chunk => {
+          data += chunk
+        })
+        res.on('end', () => {
+          console.log('Response Body:', data)
+        })
+      })
+      req.end()
+      ```
+    languages:
+      - "javascript"
+    severity: "WARNING"
+    metadata:
+      owasp:
+        - "A6:2017-Security Misconfiguration"
+        - "A05:2021-Security Misconfiguration"
+      cwe: "CWE-295"
+      shortDescription: "Improper Certificate Validation"
+      security-severity: "MEDIUM"
+      category: "security"

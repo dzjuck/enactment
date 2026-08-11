@@ -1,0 +1,88 @@
+# yamllint disable
+# License: GNU Lesser General Public License v3.0
+# source (original): https://github.com/ajinabraham/njsscan/blob/master/njsscan/rules/semantic_grep/eval/eval_require.yaml
+# hash: e7a0a61
+# yamllint enable
+---
+rules:
+- id: "rules_lgpl_javascript_eval_rule-eval-require"
+  mode: taint
+  pattern-sources:
+  - patterns:
+    - pattern-inside: |
+        function ($REQ, $RES, ...) {...}
+    - focus-metavariable: $REQ
+  pattern-sinks:
+  - patterns:
+    - pattern: |
+        require($REQ, ...)
+    - focus-metavariable: $REQ
+  pattern-sanitizers:
+  - patterns:
+    - pattern-either:
+      - pattern: |
+          if($VALIDATION){
+          ...
+          require($REQ, ...) 
+          ...
+          } 
+      - pattern: |
+          $A = $VALIDATION
+          ...
+          if($A){
+          ...
+          require($REQ, ...)
+          ...
+          }
+    - metavariable-pattern:
+        metavariable: $VALIDATION
+        pattern-either:
+        - pattern: |
+            $AL.includes(...)  
+        - pattern: |
+            $AL.indexOf(...) !== -1
+        - pattern: |
+            $AL.find(...) !== undefined
+        - pattern: |
+            $ALS.has(...)
+  message: |
+    Passing untrusted user input directly into the require() function without proper 
+    validation or sanitization can possibly cause a vulnerability known as remote code execution (RCE). 
+    An attacker could manipulate the input to load and execute arbitrary code from external sources, 
+    potentially leading to severe security breaches such as data theft, system compromise, 
+    or unauthorized access.
+    To mitigate this risk, it's crucial to validate and sanitize user input
+    thoroughly before passing it to functions like require(), ensuring that only trusted and safe inputs are utilized.
+
+    Following is an example of secure validation against allowlist to prevent the vulnerability:
+    ```
+    // Define a list of explicitly allowed packages for require
+    const allowedPkgs = [
+        'package1',
+        'package2',
+        'package3'
+    ];
+
+    app.get("/eval/require/7", async (req, res) => {
+        var isAllowed = allowedPkgs.includes(req.query.name);  
+        if (isAllowed) {
+            // ok: rules_lgpl_javascript_eval_rule-eval-require
+            var cp = require(req.query.name);
+            cp.exec('ls', (error, stdout, stderr) => {
+                console.log("exec output : \n", stdout)
+            });        
+        }
+        res.send("Please check console logs.");
+    });
+    ```
+  severity: "ERROR"
+  languages:
+  - "javascript"
+  metadata:
+    cwe: "CWE-706"
+    shortDescription: "Use of incorrectly-resolved name or reference"
+    category: "security"
+    owasp:
+    - "A1:2017-Injection"
+    - "A03:2021-Injection"
+    security-severity: "CRITICAL"
