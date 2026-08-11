@@ -73,7 +73,7 @@ const RUNTIME_LINES = [
   '    start_command: ["node", "src/server.js"]',
   '    port: 3000',
   '    readiness_path: /health',
-  '    behavioral_commands: [["node", "harness-checks/runtime-check.mjs"]]',
+  '    behavioral_commands: [["node", "enactment-checks/runtime-check.mjs"]]',
 ];
 
 const dirs: string[] = [];

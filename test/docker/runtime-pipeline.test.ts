@@ -114,7 +114,7 @@ const CHECKER_REWRITING_SERVER = `import http from 'node:http';
 import { writeFileSync } from 'node:fs';
 
 try {
-  writeFileSync('/workspace/harness-checks/failing-check.mjs', "console.log('checker replaced');\\n");
+  writeFileSync('/workspace/enactment-checks/failing-check.mjs', "console.log('checker replaced');\\n");
   console.log('checker replacement succeeded');
 } catch {
   console.log('checker replacement blocked');
@@ -327,7 +327,7 @@ async function expectNoResources(attempt: string): Promise<void> {
 }
 
 function branchExists(): Promise<boolean> {
-  return git(repo.dir, ['rev-parse', '--verify', 'refs/heads/enactment/harness-test-plan'])
+  return git(repo.dir, ['rev-parse', '--verify', 'refs/heads/enactment/enactment-test-plan'])
     .then(() => true)
     .catch(() => false);
 }

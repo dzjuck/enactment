@@ -17,7 +17,7 @@ steps:
         port: 3000
         readiness_path: /health
         behavioral_commands:
-          - ["node", "harness-checks/runtime-check.mjs"]
+          - ["node", "enactment-checks/runtime-check.mjs"]
   - type: code_behavior
     complexity: medium
     risk: high
@@ -37,8 +37,8 @@ steps:
         port: 8080
         readiness_path: /ready
         behavioral_commands:
-          - ["node", "harness-checks/orders-check.mjs"]
-          - ["node", "harness-checks/health-check.mjs"]
+          - ["node", "enactment-checks/orders-check.mjs"]
+          - ["node", "enactment-checks/health-check.mjs"]
 final_verification:
   commands:
     - ["npx", "--no-install", "vitest", "run"]

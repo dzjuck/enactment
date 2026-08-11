@@ -68,7 +68,7 @@ describe('termination ladder', () => {
     });
 
     expect(result.timedOut).toBe(true);
-    expect(steps).toEqual(['SIGTERM harness-hang', 'grace', 'SIGKILL harness-hang']);
+    expect(steps).toEqual(['SIGTERM enactment-hang', 'grace', 'SIGKILL enactment-hang']);
     expect(sleep).toHaveBeenCalledWith(10_000);
   });
 
@@ -91,8 +91,8 @@ describe('termination ladder', () => {
     });
 
     expect(result.value).toBe('exited politely');
-    expect(steps).toEqual(['SIGTERM harness-polite']);
-    expect(steps).not.toContain('SIGKILL harness-polite');
+    expect(steps).toEqual(['SIGTERM enactment-polite']);
+    expect(steps).not.toContain('SIGKILL enactment-polite');
   });
 
   it('does not touch work that finishes before the timeout', async () => {

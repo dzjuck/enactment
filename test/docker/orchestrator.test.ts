@@ -230,7 +230,7 @@ describe('orchestrator', () => {
     expect(report.commit).toMatch(/^[0-9a-f]{40}$/);
 
     const message = await git(repo.dir, ['log', '-1', '--format=%B', report.commit ?? '']);
-    expect(message).toContain('Enactment-Plan: harness-test-plan');
+    expect(message).toContain('Enactment-Plan: enactment-test-plan');
     expect(message).toContain('Enactment-Step: add-slugify');
 
     const files = (await walk(artifacts)).map((path) => path.replace(`${artifacts}/`, ''));
