@@ -741,6 +741,22 @@ dependencies or canonical Git. Findings already present in the parent are subtra
 treated as an addition, so moved vulnerable legacy code can block. CE analysis is intra-file: this
 is a narrow deterministic gate, not proof of security or a replacement for human branch review.
 
+The rules are vendored language packs under `images/reviewer/rule-packs/`, pinned to an exact
+upstream commit and baked into the image. Coverage is JavaScript and TypeScript only; Python is a
+follow-up. Framework rules are deliberately out of scope. `PROVENANCE.md` beside the packs names the
+upstream repository, the commit, the selected files and why each candidate was excluded;
+`THIRD_PARTY_NOTICES.md` maps each subtree to its license. Enactment itself is Apache-2.0; the rules
+are third-party MIT and LGPL-3.0 material, redistributed unmodified.
+
+A finding's rule ID carries the pack path, because Semgrep derives a local check ID from the config
+directory:
+
+```text
+opt.enactment.rules.javascript.gitlab-lgpl.eval.rules_lgpl_javascript_eval_rule-node-deserialize
+```
+
 There is no waiver. Resolve a false-positive critical finding by changing the code, or change the
-vendored rules/reviewer image and re-prepare for explicit approval. Rule, scanner, policy or image
-changes always require rebuild plus re-approval.
+vendored rules/reviewer image and re-prepare for explicit approval. To change the rules: select
+them, vendor them and their upstream fixtures from an exact commit, review the licenses, run
+`npm run images:build`, then `prepare` again so the new `reviewer_image_id` is approved. Rule,
+scanner, policy or image changes always require rebuild plus re-approval.

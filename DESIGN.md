@@ -1403,16 +1403,63 @@ commit-plus-cleanup failures are not diagnosed or retried.
 
 ## 29. Review policy
 
-The V1 reviewer is pinned Semgrep CE with a small vendored JavaScript/TypeScript security-rule
-subset. It runs once per verified step with no model, network, provider credentials, dependencies or
-canonical Git. `high_risk_steps: required` means critical findings always block and warnings also
-block steps whose required `risk` is `high`; standard-step warnings are recorded and continue.
+The V1 reviewer is pinned Semgrep CE with vendored, pinned language rule packs. It runs once per
+verified step with no model, network, provider credentials, dependencies or canonical Git.
+`high_risk_steps: required` means critical findings always block and warnings also block steps whose
+required `risk` is `high`; standard-step warnings are recorded and continue.
 
 Review scans the same changed regular files before and after, then subtracts the parent multiset by
 rule ID, repository-relative path and exact matched-text hash. Added files have no baseline;
 deletions and symlinks are not targets. A rename is therefore an addition. Semgrep CE is intra-file,
 so this is a narrow deterministic gate, not proof of security and not a replacement for human branch
 review. There are no waivers, suppressions or project-supplied rules in V1.
+
+### Rule packs
+
+Rules are not a scanner default and not a registry pack. They are an explicit allowlist, vendored
+byte-for-byte from a pinned upstream commit and laid out one licensed subtree per language:
+
+```text
+images/reviewer/rule-packs/
+  PROVENANCE.md
+  THIRD_PARTY_NOTICES.md
+  LICENSES/
+  javascript/gitlab-mit/
+  javascript/gitlab-lgpl/
+```
+
+The image exposes the pack root as `/opt/enactment/rules` and Semgrep discovers rules recursively
+from there, so adding a language pack changes the build and nothing in the runtime orchestration.
+
+Initial coverage is JavaScript and TypeScript only. Python is a follow-up, and until parser
+fixtures exist for a claimed version, no Python support is claimed. Framework packs are
+deliberately excluded: a step is reviewed for the shape of mistake an agent makes, not for
+framework conventions. The packs therefore make the gate deterministic; they do not make it
+complete.
+
+Every rule ships with the upstream annotated fixture that proves it, and an unproven rule is not
+included. Selection excludes any rule declaring `paths:`, because review scans copies under
+`/review/before` and `/review/after` and the prefix would silently defeat an include/exclude filter;
+and any `INFO`-severity rule, because warnings block high-risk steps and a style finding must not be
+able to stop a plan.
+
+Semgrep derives a local check ID from the config directory, so the pack layout is part of the rule
+ID a finding is reported by.
+
+### Licensing
+
+Enactment is Apache-2.0. The vendored rules are third-party material redistributed under their own
+terms — MIT and LGPL-3.0 — with full license texts and a subtree-to-license map beside them.
+Upstream rule text is never edited: Enactment owns selection, pinning, packaging and gate behavior
+only.
+
+### Updating rules
+
+Select the rules, vendor them and their fixtures from an exact upstream commit, review the licenses,
+rebuild the reviewer image, and run `prepare` again so an operator approves the new
+`reviewer_image_id`. There is no runtime rule download, no automatic update and no per-plan rule
+selection. Rule content is deliberately outside `policy_hash`: it lives in the image, so a rule
+change is an image change and re-approval is already required.
 
 The harness never merges automatically.
 
