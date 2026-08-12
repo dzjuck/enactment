@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="550" viewBox="0 0 1200 550" role="img" aria-labelledby="title description">
+  <title id="title">How Enactment runs a plan</title>
+  <desc id="description">An approved plan implements each plan step in order, repeats for the next step, runs final verification, and produces a branch for review.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+    <style>
+      text {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        fill: #172554;
+        font-size: 18px;
+        text-anchor: middle;
+      }
+      .title { fill: #f8fafc; font-size: 20px; font-weight: 600; }
+      .strong { font-weight: 600; }
+      .flow { fill: none; stroke: #94a3b8; stroke-width: 2; marker-end: url(#arrow); }
+      .agent { fill: #dbeafe; stroke: #2563eb; stroke-width: 2; }
+      .gate { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; }
+      .commit { fill: #fef3c7; stroke: #d97706; stroke-width: 2; }
+      .endpoint { fill: #f3f4f6; stroke: #64748b; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <!-- Level 1: approved plan -->
+  <rect class="endpoint" x="510" y="20" width="180" height="52" rx="26"/>
+  <text class="strong" x="600" y="53">Approved plan</text>
+  <path class="flow" d="M 600 72 V 94"/>
+
+  <!-- Level 1: one repeated plan step -->
+  <rect x="100" y="100" width="1000" height="220" rx="8" fill="#0f172a" stroke="#64748b" stroke-width="2"/>
+  <text class="title" x="600" y="137">For each plan step</text>
+
+  <rect class="agent" x="135" y="174" width="140" height="88" rx="4"/>
+  <text x="205" y="211">Agent</text>
+  <text class="strong" x="205" y="237">Write tests</text>
+
+  <path class="flow" d="M 275 218 H 319"/>
+
+  <rect class="gate" x="325" y="166" width="170" height="104" rx="4"/>
+  <text x="410" y="197">Enactment</text>
+  <text class="strong" x="410" y="223">Prove RED</text>
+  <text x="410" y="249">Freeze tests</text>
+
+  <path class="flow" d="M 495 218 H 539"/>
+
+  <rect class="agent" x="545" y="174" width="140" height="88" rx="4"/>
+  <text x="615" y="211">Agent</text>
+  <text class="strong" x="615" y="237">Write code</text>
+
+  <path class="flow" d="M 685 218 H 729"/>
+
+  <rect class="gate" x="735" y="154" width="200" height="128" rx="4"/>
+  <text x="835" y="181">Enactment</text>
+  <text class="strong" x="835" y="207">Prove GREEN</text>
+  <text x="835" y="233">Check scope</text>
+  <text x="835" y="259">Review change</text>
+
+  <path class="flow" d="M 935 218 H 979"/>
+
+  <rect class="commit" x="985" y="184" width="90" height="68" rx="4"/>
+  <text class="strong" x="1030" y="224">Commit</text>
+
+  <!-- The next-step loop is outside the repeated block. -->
+  <path class="flow" d="M 1100 170 H 1155 Q 1170 170 1170 185 V 255 Q 1170 270 1155 270 H 1100"/>
+
+  <!-- Level 1: final verification and review branch -->
+  <path class="flow" d="M 600 320 V 364"/>
+  <rect class="gate" x="505" y="370" width="190" height="56" rx="4"/>
+  <text class="strong" x="600" y="404">Final verification</text>
+  <path class="flow" d="M 600 426 V 464"/>
+  <rect class="endpoint" x="510" y="470" width="180" height="52" rx="26"/>
+  <text class="strong" x="600" y="503">Branch to review</text>
+</svg>
