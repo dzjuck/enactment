@@ -1,0 +1,44 @@
+version: 1
+id: task-summary
+steps:
+  - type: code_behavior
+    complexity: low
+    risk: standard
+    id: summarize-tasks
+    observable_behavior: |
+      Add summarize(tasks) in src/summary.js. It returns the total task count and counts for
+      todo, doing, and done. A status with no tasks has count zero.
+    implementation_paths:
+      - src/summary.js
+    test_paths:
+      - test/summary.test.js
+    expected_test_ids:
+      - summarize counts every task
+      - summarize groups tasks by status
+      - summarize reports zero for a status with no tasks
+    verification:
+      test_command: ["npx", "--no-install", "vitest", "run"]
+
+  # Medium: this edits a running server, must preserve two routes, and has a live runtime check.
+  - type: task
+    complexity: medium
+    risk: standard
+    id: summary-endpoint
+    observable_behavior: |
+      Add GET /api/tasks/summary. It returns the result of summarize(tasks) as JSON without
+      changing GET /health, GET /api/tasks, or the 404 response for unknown routes.
+    implementation_paths:
+      - src/server.js
+    verification:
+      commands:
+        - ["npx", "--no-install", "vitest", "run"]
+      runtime:
+        start_command: ["node", "src/server.js"]
+        port: 3000
+        readiness_path: /health
+        behavioral_commands:
+          - ["node", "check/summary.mjs"]
+
+final_verification:
+  commands:
+    - ["npx", "--no-install", "vitest", "run"]
