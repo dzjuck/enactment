@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+case "${ENACTMENT_PHASE:-}" in
+  tests)
+    source=/answers/test/summary.test.js
+    target=/workspace/test/summary.test.js
+    ;;
+  implementation)
+    source=/answers/src/summary.js
+    target=/workspace/src/summary.js
+    ;;
+  *)
+    echo "unsupported Codex phase: ${ENACTMENT_PHASE:-unset}" >&2
+    exit 64
+    ;;
+esac
+
+mkdir -p "$(dirname "$target")"
+cp "$source" "$target"
+
+printf '%s\n' \
+  '{"type":"thread.started","thread_id":"thread_demo"}' \
+  '{"type":"turn.started"}' \
+  '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Applied recorded demo answer."}}' \
+  '{"type":"turn.completed","model":"gpt-5.6-luna","usage":{"input_tokens":10,"output_tokens":4,"cached_input_tokens":0}}'

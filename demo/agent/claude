@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+token_file=/run/claude-auth/token
+if [ -s "$token_file" ] && [ "${CLAUDE_CODE_OAUTH_TOKEN:-}" != "$(cat "$token_file")" ]; then
+  echo 'Claude launcher did not export the mounted token' >&2
+  exit 65
+fi
+
+if [ "${ENACTMENT_PHASE:-}" != agent ]; then
+  echo "unsupported Claude phase: ${ENACTMENT_PHASE:-unset}" >&2
+  exit 64
+fi
+
+cp /answers/src/server.js /workspace/src/server.js
+
+printf '%s\n' \
+  '{"type":"system","subtype":"init","model":"claude-sonnet-5"}' \
+  '{"type":"result","subtype":"success","is_error":false,"result":"Applied recorded demo answer.","duration_ms":25,"usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}'
