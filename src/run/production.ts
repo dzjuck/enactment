@@ -28,6 +28,7 @@ import { stateDirectory } from '../state/paths.js';
 import { StateStore } from '../state/store.js';
 import { sweepHarness } from './cleanup.js';
 import { runPlan, type CoordinatorOptions, type PlanReport } from './coordinator.js';
+import { createProgressWriter } from './progress.js';
 import { acceptedPlanHead } from './recovery.js';
 import type { CancelCommand, Command, DocsCommand, PrepareCommand, RunCommand } from './options.js';
 
@@ -36,6 +37,7 @@ export interface ProductionDependencies {
   resolveImages?: () => Promise<RuntimeImages>;
   coordinate?: (options: CoordinatorOptions) => Promise<PlanReport>;
   download?: (options: DocumentationDownloadOptions) => Promise<DocumentationDownloadResult>;
+  progress?: (text: string) => void;
 }
 
 export interface CommandResult {
@@ -122,25 +124,35 @@ async function run(
   signal?: AbortSignal,
 ): Promise<CommandResult> {
   const coordinate = dependencies.coordinate ?? runPlan;
+  const progress =
+    dependencies.progress ??
+    ((text: string): void => {
+      process.stderr.write(text);
+    });
+  const progressWriter = createProgressWriter({ write: progress, now: Date.now });
+  let report: PlanReport | undefined;
+  let store: StateStore | undefined;
 
-  await (dependencies.sweep ?? sweepHarness)();
-
-  const loaded = await loadManifest(command.manifestPath);
-  const approved = await validateManifest(loaded, {
-    repoPath: command.repoPath,
-    ...(dependencies.resolveImages === undefined
-      ? {}
-      : { resolveImages: dependencies.resolveImages }),
-  });
-
-  const store = StateStore.open(databasePath(command));
+  progress('      preparing\n');
 
   try {
-    const report = await coordinate({
+    await (dependencies.sweep ?? sweepHarness)();
+
+    const loaded = await loadManifest(command.manifestPath);
+    const approved = await validateManifest(loaded, {
+      repoPath: command.repoPath,
+      ...(dependencies.resolveImages === undefined
+        ? {}
+        : { resolveImages: dependencies.resolveImages }),
+    });
+
+    store = StateStore.open(databasePath(command));
+    report = await coordinate({
       approved,
       store,
       artifactsRoot: command.artifactDir,
       manifestPath: command.manifestPath,
+      onProgress: progressWriter.event,
       ...(command.sourceCodexHome === undefined
         ? {}
         : { sourceCodexHome: command.sourceCodexHome }),
@@ -153,7 +165,8 @@ async function run(
 
     return { report, exitCode: report.state === 'completed' ? 0 : 1 };
   } finally {
-    store.close();
+    progressWriter.finish(report);
+    store?.close();
   }
 }
 
