@@ -41,6 +41,34 @@ npm run build            # compiles the harness into dist/
 Docker image ID and executes that ID; if an image is missing, the run stops before any container
 starts and names this command.
 
+## Demo
+
+Run the published plan without provider credentials:
+
+```sh
+npm run demo
+```
+
+The replay builds `enactment/demo-agent`, copies `demo/repo` to a new temporary Git repository,
+prepares `demo/plan.yml`, and runs it through the production command. It keeps the repository,
+state database and artifacts. The output names their locations. The replay uses recorded answers,
+so it proves execution, gates, commits and evidence. It does not prove that a live model can do the
+work.
+
+The runtime images must already exist. Run `npm run images:build` first. The first replay also needs
+the npm registry to populate `demo/.cache/deps`; later runs reuse that cache. The replay is
+credential-free, not offline.
+
+For a live run, copy the demo repository, initialize Git, then use the normal commands:
+
+```sh
+node dist/cli.js prepare demo/plan.yml --repo /tmp/task-board --output /tmp/task-board/manifest.yml
+node dist/cli.js run /tmp/task-board/manifest.yml --repo /tmp/task-board
+```
+
+Live Codex and Claude authentication is required. See [`demo/README.md`](demo/README.md) for the
+complete setup and the limits of each mode.
+
 ## 2. Declare a plan
 
 Work is declared as a plan: an ordered step list plus the commands that verify the finished

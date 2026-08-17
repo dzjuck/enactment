@@ -45,7 +45,55 @@ An eligible failure gets one policy-controlled retry.
 
 ## Example
 
-<!-- TODO: a plan file, the branch it produces, a commit with its trailers, the artifact tree. -->
+The published demo adds a task-summary function, then exposes it over HTTP:
+
+```yaml
+version: 1
+id: task-summary
+steps:
+  - type: code_behavior
+    id: summarize-tasks
+    implementation_paths: [src/summary.js]
+    test_paths: [test/summary.test.js]
+    # complexity, risk, behavior, expected tests and verification are in demo/plan.yml
+  - type: task
+    id: summary-endpoint
+    implementation_paths: [src/server.js]
+    # includes a live HTTP runtime check
+```
+
+It creates `enactment/task-summary`. Each commit records its origin:
+
+```text
+summarize-tasks: apply enactment-verified changes
+
+Enactment-Plan: task-summary
+Enactment-Step: summarize-tasks
+Enactment-Attempt: <attempt-id>
+Enactment-Idempotency-Key: sha256:<hash>
+```
+
+Evidence is separate from the Git branch:
+
+```text
+artifacts/task-summary/
+  final/run-1/
+  reports/invocation-1.json
+  steps/
+    summarize-tasks/<attempt-id>/run-1/
+    summary-endpoint/<attempt-id>/run-1/
+```
+
+Run the credential-free replay:
+
+```sh
+npm ci
+npm run images:build
+npm run demo
+```
+
+The replay uses recorded answers. It proves the control plane, not model capability. See
+[`demo/README.md`](demo/README.md).
 
 ## Compared to an interactive coding agent
 
@@ -116,18 +164,21 @@ source and rebuild. That changes the approval hash, so every manifest needs a ne
 records, and the results of `baseline`, `tests`, `red`, `implementation`, `green`, `verify`,
 `runtime` and `review`.
 
-## Try it
+## Try it live
 
-You need Docker or OrbStack, Node.js 22.13 or later, and a provider subscription. Run `codex login`
+You need Docker or OrbStack, Node.js 22.13 or later, and provider subscriptions. Run `codex login`
 once. For Claude steps, run `claude setup-token` once and store the token as `RUNBOOK.md` describes.
 
 ```sh
-npm ci
-npm run images:build
-npm run build
+repo=$(mktemp -d)
+cp -R demo/repo/. "$repo/"
+git -C "$repo" init -q -b main
+git -C "$repo" add -A
+git -C "$repo" -c user.name=Demo -c user.email=demo@enactment.invalid \
+  commit -q -m 'Initial task board'
 
-enactment prepare plan.yml --repo /path/to/repo --output manifest.yml
-enactment run manifest.yml --repo /path/to/repo
+node dist/cli.js prepare demo/plan.yml --repo "$repo" --output "$repo/manifest.yml"
+node dist/cli.js run "$repo/manifest.yml" --repo "$repo"
 ```
 
 `prepare` writes the approval. Running the manifest is the approval.
