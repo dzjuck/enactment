@@ -95,6 +95,9 @@ npm run demo
 The replay uses recorded answers. It proves the control plane, not model capability. See
 [`demo/README.md`](demo/README.md).
 
+Measured from a clean clone on the development host: the first replay took 31.29 seconds; the
+second replay, with the dependency cache warm, took 27.14 seconds.
+
 ## Compared to an interactive coding agent
 
 | | Interactive agent | Enactment |
