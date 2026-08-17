@@ -68,6 +68,22 @@ describe('published replay demo', () => {
     expect(output.indexOf('summarize-tasks')).toBeGreaterThanOrEqual(0);
     expect(output.indexOf('summary-endpoint')).toBeGreaterThan(output.indexOf('summarize-tasks'));
 
+    expect(output).toContain('summarize-tasks: apply enactment-verified changes');
+    expect(output).toContain('summary-endpoint: apply enactment-verified changes');
+    expect(output.match(/Enactment-Plan: task-summary/g)).toHaveLength(2);
+    expect(output).toContain('Enactment-Step: summarize-tasks');
+    expect(output).toContain('Enactment-Step: summary-endpoint');
+    expect(output).toContain('src/summary.js');
+    expect(output).toContain('test/summary.test.js');
+    expect(output).toContain('src/server.js');
+    expect(output).toContain('artifacts\n  final/\n    run-1/');
+    expect(output).toContain('  reports/\n    invocation-1.json');
+    expect(output).toMatch(
+      / {2}steps\/\n {4}summarize-tasks\/\n {6}[^\n]+\/\n {8}run-1\//,
+    );
+    expect(output).toMatch(/ {4}summary-endpoint\/\n {6}[^\n]+\/\n {8}run-1\//);
+    expect(output).toContain('agent     recorded replay; no provider was called\n');
+
     await expect(access(result.repoPath)).resolves.toBeUndefined();
     await expect(access(join(result.stateDirectory, 'state.db'))).resolves.toBeUndefined();
     await expect(access(join(result.artifactDir, 'task-summary'))).resolves.toBeUndefined();

@@ -1,6 +1,6 @@
 /* global process */
 
-import { chmod, cp, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL, URL } from 'node:url';
@@ -45,6 +45,70 @@ async function buildDemoAgent() {
   );
 
   return resolveImageId(DEMO_AGENT_TAG);
+}
+
+function indent(text) {
+  return text
+    .split('\n')
+    .map((line) => `  ${line}`)
+    .join('\n');
+}
+
+async function artifactTree(root, maxDepth = 4) {
+  const lines = [];
+
+  const walk = async (directory, depth) => {
+    if (depth > maxDepth) return;
+    const entries = await readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => {
+      if (left.isDirectory() !== right.isDirectory()) return left.isDirectory() ? -1 : 1;
+      return left.name.localeCompare(right.name);
+    });
+
+    for (const entry of entries) {
+      lines.push(`${'  '.repeat(depth)}${entry.name}${entry.isDirectory() ? '/' : ''}`);
+      if (entry.isDirectory() && depth < maxDepth) {
+        await walk(join(directory, entry.name), depth + 1);
+      }
+    }
+  };
+
+  await walk(root, 1);
+  return lines.join('\n');
+}
+
+async function writeTour({ write, result, repoPath, stateDirectory, artifactDir, baseCommit }) {
+  const planRoot = join(artifactDir, 'task-summary');
+
+  if (result.exitCode !== 0) {
+    const failedStep = result.report?.failure?.step;
+    const step = result.report?.steps?.find((entry) => entry.id === failedStep);
+    const attempt = step?.attempts?.at(-1)?.id;
+    write(`\nrepo       ${repoPath}\n`);
+    write(`state      ${stateDirectory}\n`);
+    write(`artifacts  ${planRoot}\n`);
+    if (failedStep !== undefined && attempt !== undefined) {
+      write(`evidence   ${join(planRoot, 'steps', failedStep, attempt, 'run-1')}\n`);
+    }
+    return;
+  }
+
+  const commits = await git(repoPath, [
+    'log',
+    '--reverse',
+    '--format=%B',
+    `${baseCommit}..enactment/task-summary`,
+  ]);
+  const diffstat = await git(repoPath, [
+    'diff',
+    '--stat',
+    `${baseCommit}..enactment/task-summary`,
+  ]);
+
+  write(`\ncommits\n${indent(commits)}\n`);
+  write(`\ndiffstat\n${indent(diffstat)}\n`);
+  write(`\nartifacts\n${await artifactTree(planRoot)}\n`);
+  write('agent     recorded replay; no provider was called\n');
 }
 
 export async function runDemo({ write }) {
@@ -131,6 +195,8 @@ export async function runDemo({ write }) {
         }),
     },
   );
+
+  await writeTour({ write, result, repoPath, stateDirectory, artifactDir, baseCommit });
 
   return {
     ...result,
