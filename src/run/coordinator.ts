@@ -39,7 +39,40 @@ export interface CoordinatorOptions {
   dependencyCacheDirectory?: string;
   injection?: RunInjection;
   signal?: AbortSignal;
+  onProgress?: (event: PlanProgress) => void;
 }
+
+export type PlanProgress =
+  | {
+      kind: 'plan';
+      planId: string;
+      steps: number;
+      repoPath: string;
+      baseBranch: string;
+      baseCommit: string;
+      branch: string;
+      artifactsRoot: string;
+    }
+  | {
+      kind: 'step';
+      index: number;
+      total: number;
+      stepId: string;
+      stepType: 'task' | 'code_behavior';
+      attempt: 'normal' | 'stronger';
+      provider: 'codex' | 'claude';
+      model: string;
+      effort: string;
+    }
+  | { kind: 'phase'; name: string }
+  | {
+      kind: 'stepDone';
+      status: 'committed' | 'failed';
+      commit?: string;
+      category?: string;
+      message?: string;
+      evidence?: string;
+    };
 
 export interface CoordinatorDependencies {
   execute?: (options: StepExecutionOptions) => Promise<RunReport>;
@@ -233,6 +266,17 @@ export async function runPlan(
     stepIds: approved.plan.steps.map((step) => step.id),
   });
 
+  options.onProgress?.({
+    kind: 'plan',
+    planId: approved.plan.id,
+    steps: approved.plan.steps.length,
+    repoPath: approved.repoPath,
+    baseBranch: approved.baseBranch,
+    baseCommit: approved.baseCommit,
+    branch,
+    artifactsRoot: planRoot,
+  });
+
   const state = (): PlanRecord => store.planByRow(plan.row) as PlanRecord;
 
   /** The report as it reads right now. Composing and writing are separate so that completion
@@ -390,6 +434,7 @@ export async function runPlan(
 
     let advisoryContext: string | undefined;
     if (selection.kind === 'stronger') {
+      options.onProgress?.({ kind: 'phase', name: 'diagnosis' });
       const parentRow = selection.retryOfAttemptRow;
       const failed = parentRow === undefined ? undefined : store.attemptByRow(parentRow);
       if (failed === undefined) throw new Error('stronger retry has no failed parent attempt');
@@ -454,6 +499,18 @@ export async function runPlan(
     // Persisted before execution, so a second crash allocates `run-3` rather than reusing 2.
     if (crashed !== undefined) store.recordRecoveryRun(attempt.row, artifactDir);
 
+    options.onProgress?.({
+      kind: 'step',
+      index: pending.position + 1,
+      total: approved.plan.steps.length,
+      stepId: pending.stepId,
+      stepType: step.type,
+      attempt: selection.kind,
+      provider: selection.profile.provider,
+      model: selection.profile.model,
+      effort: selection.profile.effort,
+    });
+
     const outcome = await execute({
       step,
       profile: selection.profile,
@@ -479,7 +536,10 @@ export async function runPlan(
       injection: options.injection,
       signal: options.signal,
       onEvent: (event) => {
-        if (event.kind === 'phase') store.setAttemptPhase(attempt.row, event.phase);
+        if (event.kind === 'phase') {
+          store.setAttemptPhase(attempt.row, event.phase);
+          options.onProgress?.({ kind: 'phase', name: event.phase });
+        }
         if (event.kind === 'candidate') store.setAttemptCandidate(attempt.row, event.snapshot, key);
         if (event.kind === 'accepting') store.setAttemptState(attempt.row, 'accepting');
       },
@@ -490,6 +550,13 @@ export async function runPlan(
         planRow: plan.row,
         attemptRow: attempt.row,
         failure: `${outcome.category ?? 'internal_error'}: ${outcome.message ?? 'step failed'}`,
+      });
+      options.onProgress?.({
+        kind: 'stepDone',
+        status: 'failed',
+        category: outcome.category ?? 'internal_error',
+        message: outcome.message ?? 'step failed',
+        evidence: artifactDir,
       });
       await pruneSnapshots(store, plan.row, snapshots);
 
@@ -528,6 +595,7 @@ export async function runPlan(
       attemptRow: attempt.row,
       commit: outcome.commit,
     });
+    options.onProgress?.({ kind: 'stepDone', status: 'committed', commit: outcome.commit });
     await pruneSnapshots(store, plan.row, snapshots);
 
     // The acceptance stands; the invocation does not. The plan stops here so the operator sees
@@ -557,6 +625,7 @@ export async function runPlan(
   // report — an exception escaping here would leave a running plan with no record of why.
   let finalVerification: FinalVerificationResult;
   try {
+    options.onProgress?.({ kind: 'phase', name: 'final' });
     finalVerification = await verifyFinal({
       repoPath: approved.repoPath,
       head,
