@@ -39,6 +39,7 @@ export function createProgressWriter(options: ProgressWriterOptions): ProgressWr
       artifactsRoot = progress.artifactsRoot;
       options.write(
         `plan     ${progress.planId}\n` +
+          `file     ${progress.planFile}\n` +
           `repo     ${progress.repoPath}\n` +
           `base     ${progress.baseBranch} ${short(progress.baseCommit)}\n` +
           `branch   ${progress.branch}\n\n`,

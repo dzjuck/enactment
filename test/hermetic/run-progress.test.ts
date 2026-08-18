@@ -127,6 +127,7 @@ describe('run progress wiring', () => {
         options.onProgress?.({
           kind: 'plan',
           planId: options.approved.plan.id,
+          planFile: options.approved.planFile,
           steps: 1,
           repoPath: options.approved.repoPath,
           baseBranch: options.approved.baseBranch,
@@ -153,6 +154,7 @@ describe('run progress wiring', () => {
     });
 
     expect(output).toContain('      preparing\n');
+    expect(output).toContain(`file     ${space.planFile}\n`);
     expect(output).toContain('[1/1] only-step  task  codex gpt-5.6-luna/medium\n');
     expect(output).toContain('completed  1 steps  1 commits');
     expect(result.exitCode).toBe(0);

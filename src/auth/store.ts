@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -35,12 +35,20 @@ async function writePrivate(path: string, content: string): Promise<void> {
   await chmod(path, 0o600);
 }
 
+function validateSource(path: string, content: string): void {
+  try {
+    JSON.parse(content);
+  } catch {
+    throw new AuthError(`${path} is not valid JSON; re-run \`codex login\``);
+  }
+}
+
 /**
- * The harness keeps its own credential store, seeded once from the user's Codex home.
+ * The harness keeps its own credential store, seeded from the user's Codex home.
  *
- * Once established the store is the source of truth for the refresh chain: Codex rotates
- * `tokens.refresh_token` in place, so re-seeding from a stale source would hand back a spent
- * token. The user's real Codex home is read exactly once and never written.
+ * Codex and Enactment can each rotate the credential. The newer file is the current refresh
+ * chain. A later `codex login` therefore replaces the Enactment copy. The user's Codex home is
+ * never written.
  */
 export async function seedAuthStore(
   storeDirectory: string,
@@ -53,10 +61,19 @@ export async function seedAuthStore(
   };
 
   const existing = await readIfPresent(store.file);
-  if (existing !== undefined) return store;
-
   const sourceFile = join(sourceCodexHome, AUTH_FILE);
   const source = await readIfPresent(sourceFile);
+
+  if (existing !== undefined) {
+    if (source === undefined) return store;
+
+    const [storedMetadata, sourceMetadata] = await Promise.all([stat(store.file), stat(sourceFile)]);
+    if (sourceMetadata.mtimeMs <= storedMetadata.mtimeMs) return store;
+
+    validateSource(sourceFile, source);
+    await writePrivate(store.file, source);
+    return store;
+  }
 
   if (source === undefined) {
     throw new AuthError(
@@ -64,12 +81,7 @@ export async function seedAuthStore(
     );
   }
 
-  try {
-    JSON.parse(source);
-  } catch {
-    // The message names the file, never its content.
-    throw new AuthError(`${sourceFile} is not valid JSON; re-run \`codex login\``);
-  }
+  validateSource(sourceFile, source);
 
   await writePrivate(store.file, source);
   return store;

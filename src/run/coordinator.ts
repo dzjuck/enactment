@@ -46,6 +46,7 @@ export type PlanProgress =
   | {
       kind: 'plan';
       planId: string;
+      planFile: string;
       steps: number;
       repoPath: string;
       baseBranch: string;
@@ -269,6 +270,7 @@ export async function runPlan(
   options.onProgress?.({
     kind: 'plan',
     planId: approved.plan.id,
+    planFile: approved.planFile,
     steps: approved.plan.steps.length,
     repoPath: approved.repoPath,
     baseBranch: approved.baseBranch,

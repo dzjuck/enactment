@@ -218,7 +218,7 @@ describe('candidate execution manifest', () => {
     expect(policy.providers).toEqual({
       codex: {
         version: '0.146.0',
-        allowed_hosts: ['chatgpt.com'],
+        allowed_hosts: ['chatgpt.com', 'auth.openai.com'],
         authentication_mode: 'rotating_subscription_json',
         policy: {
           files: codex.files,

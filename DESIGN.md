@@ -410,9 +410,11 @@ Codex works with only:
 ```yaml
 allowed_hosts:
   - chatgpt.com
+  - auth.openai.com
 ```
 
-Deny `ab.chatgpt.com` and every other host.
+`chatgpt.com` carries model traffic. `auth.openai.com` refreshes the ChatGPT login. Deny
+`ab.chatgpt.com` and every other host.
 
 This allowlist is version-specific. Re-run domain discovery whenever:
 
@@ -1236,6 +1238,7 @@ codex:
   network:
     allowed_hosts:
       - chatgpt.com
+      - auth.openai.com
 
   container:
     user: "1001:1001"
@@ -1929,7 +1932,7 @@ Regression suite:
 * non-root execution;
 * read-only root filesystem;
 * Codex inner sandbox disabled;
-* exact `chatgpt.com` egress;
+* exact `chatgpt.com` and `auth.openai.com` egress;
 * `ab.chatgpt.com` denied;
 * WebSocket works through CONNECT;
 * direct egress unavailable;
@@ -2161,7 +2164,7 @@ Milestone 1 is feasible with a simpler security model than earlier drafts assume
 
 ```text
 hardened Docker container
-+ exact chatgpt.com egress
++ exact chatgpt.com and auth.openai.com egress
 + Codex inner sandbox disabled
 + strict configuration validation
 + mandatory timeouts

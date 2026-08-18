@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { CODEX_PROVIDER_ALLOWLIST } from '../../src/config/pins.js';
 import { PROXY_RECORDS_FILE } from '../../src/proxy/container.js';
 import type { PlanReport } from '../../src/run/coordinator.js';
 import { parseCommand } from '../../src/run/options.js';
@@ -142,8 +143,10 @@ describe('real Codex tests-first run', () => {
       .map((line) => JSON.parse(line) as ProxyRecord);
 
     expect(records.some((record) => record.allowed)).toBe(true);
-    expect(records.filter((record) => record.allowed).every((r) => r.hostname === 'chatgpt.com')).toBe(
-      true,
-    );
+    expect(
+      records
+        .filter((record) => record.allowed)
+        .every((record) => CODEX_PROVIDER_ALLOWLIST.includes(record.hostname)),
+    ).toBe(true);
   }, 1_800_000);
 });

@@ -12,14 +12,14 @@ import { networkPolicySection } from '../../src/run/manifest.js';
 
 describe('provider allowlist', () => {
   it('keeps exact, provider-specific allowlists', () => {
-    expect([...CODEX_PROVIDER_ALLOWLIST]).toEqual(['chatgpt.com']);
+    expect([...CODEX_PROVIDER_ALLOWLIST]).toEqual(['chatgpt.com', 'auth.openai.com']);
     expect([...CLAUDE_PROVIDER_ALLOWLIST]).toEqual(['api.anthropic.com']);
   });
 
   it('is hashed into the run manifest', () => {
     const section = networkPolicySection(CODEX_PROVIDER_ALLOWLIST, CODEX_VERSION);
 
-    expect(section.allowed_hosts).toEqual(['chatgpt.com']);
+    expect(section.allowed_hosts).toEqual(['chatgpt.com', 'auth.openai.com']);
     expect(section.network_policy_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(
       networkPolicySection(['chatgpt.com', 'ab.chatgpt.com'], CODEX_VERSION).network_policy_hash,
@@ -30,7 +30,7 @@ describe('provider allowlist', () => {
   // for none of them. A Claude attempt recording `codex_version: 2.1.221` is wrong evidence.
   it('records the provider CLI version the list was discovered against', () => {
     expect(networkPolicySection(CODEX_PROVIDER_ALLOWLIST, CODEX_VERSION)).toMatchObject({
-      allowed_hosts: ['chatgpt.com'],
+      allowed_hosts: ['chatgpt.com', 'auth.openai.com'],
       cli_version: CODEX_VERSION,
     });
 

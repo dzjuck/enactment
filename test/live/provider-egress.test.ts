@@ -13,6 +13,7 @@ import { newAttemptId } from '../../src/volume/naming.js';
 import { runtimeImages } from '../helpers/images.js';
 
 const PROVIDER = 'chatgpt.com';
+const AUTH_PROVIDER = 'auth.openai.com';
 const DENIED = 'ab.chatgpt.com';
 const CLAUDE_PROVIDER = 'api.anthropic.com';
 const CLAUDE_DENIED = 'platform.claude.com';
@@ -22,7 +23,7 @@ const CLAUDE_DENIED = 'platform.claude.com';
  * this proves the destination, and that the allowlist is neither too narrow nor too wide.
  */
 describe('real provider egress', () => {
-  it('reaches chatgpt.com through the proxy, denies ab.chatgpt.com, and has no direct egress', async () => {
+  it('reaches the Codex API and auth hosts, denies other hosts, and has no direct egress', async () => {
     const attempt = newAttemptId();
     const images = await runtimeImages();
 
@@ -49,6 +50,15 @@ describe('real provider egress', () => {
             images,
           });
           expect(smoke.ok).toBe(true);
+
+          const authSmoke = await providerSmokeTest({
+            url: `https://${AUTH_PROVIDER}/`,
+            network,
+            env,
+            timeoutSeconds: 30,
+            images,
+          });
+          expect(authSmoke.ok).toBe(true);
 
           // A real upgrade request over the tunnel: the response is an HTTP status from
           // the provider, not a connection failure.
@@ -94,8 +104,13 @@ describe('real provider egress', () => {
 
           const records = await handle.records();
           expect(records.some((r) => r.hostname === PROVIDER && r.allowed)).toBe(true);
+          expect(records.some((r) => r.hostname === AUTH_PROVIDER && r.allowed)).toBe(true);
           expect(records.some((r) => r.hostname === DENIED && !r.allowed)).toBe(true);
-          expect(records.filter((r) => r.allowed).every((r) => r.hostname === PROVIDER)).toBe(true);
+          expect(
+            records
+              .filter((r) => r.allowed)
+              .every((r) => CODEX_PROVIDER_ALLOWLIST.includes(r.hostname)),
+          ).toBe(true);
         },
       );
     });

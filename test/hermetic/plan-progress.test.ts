@@ -181,6 +181,7 @@ describe('plan progress', () => {
       {
         kind: 'plan',
         planId: 'demo-plan',
+        planFile: approved.planFile,
         steps: 2,
         repoPath: approved.repoPath,
         baseBranch: approved.baseBranch,

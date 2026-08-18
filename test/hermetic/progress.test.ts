@@ -46,6 +46,7 @@ function harness(start = 0): {
 const plan: PlanProgress = {
   kind: 'plan',
   planId: 'task-summary',
+  planFile: '/tmp/demo/plan.yml',
   steps: 2,
   repoPath: '/tmp/enactment-demo-a1b2c3',
   baseBranch: 'main',
@@ -62,6 +63,7 @@ describe('progress writer', () => {
 
     expect(progress.output()).toBe(
       'plan     task-summary\n' +
+        'file     /tmp/demo/plan.yml\n' +
         'repo     /tmp/enactment-demo-a1b2c3\n' +
         'base     main 4f2a1c9\n' +
         'branch   enactment/task-summary\n\n',
@@ -169,7 +171,7 @@ describe('progress writer', () => {
     progress.finish(report());
 
     expect(progress.output()).toContain(
-      '      final 9s\ncompleted  2 steps  0 commits  9s\n',
+      '      final 9s\ncompleted  2 steps  2 commits  9s\n',
     );
   });
 

@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -64,12 +64,26 @@ describe('auth store', () => {
     expect(await readFile(store.file, 'utf8')).toBe(authJson(CANARY));
   });
 
-  it('never overwrites an established store from the source', async () => {
+  it('imports a newer source credential into an established store', async () => {
     const storeDir = await tempDir('store');
-    await seedAuthStore(storeDir, await sourceHome('first'));
+    const store = await seedAuthStore(storeDir, await sourceHome('first'));
+    const source = await sourceHome('second');
+    await utimes(store.file, new Date(1_000), new Date(1_000));
+    await utimes(join(source, AUTH_FILE), new Date(2_000), new Date(2_000));
 
-    // The store owns the refresh chain once established; a stale source must not clobber it.
-    const store = await seedAuthStore(storeDir, await sourceHome('second'));
+    await seedAuthStore(storeDir, source);
+
+    expect(await readFile(store.file, 'utf8')).toBe(authJson('second'));
+  });
+
+  it('does not overwrite a newer store from an older source', async () => {
+    const storeDir = await tempDir('store');
+    const store = await seedAuthStore(storeDir, await sourceHome('first'));
+    const source = await sourceHome('second');
+    await utimes(store.file, new Date(2_000), new Date(2_000));
+    await utimes(join(source, AUTH_FILE), new Date(1_000), new Date(1_000));
+
+    await seedAuthStore(storeDir, source);
 
     expect(await readFile(store.file, 'utf8')).toBe(authJson('first'));
   });

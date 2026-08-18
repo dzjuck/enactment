@@ -10,10 +10,10 @@ export const CODEX_VERSION = '0.146.0';
 export const CLAUDE_VERSION = '2.1.221';
 
 /**
- * DESIGN.md §7: exactly this, exact-match, no wildcards. Measured, not guessed —
- * `ab.chatgpt.com` appears but is not required, and denying it costs nothing.
+ * DESIGN.md §7: exact-match, no wildcards. Codex uses chatgpt.com for model traffic and
+ * auth.openai.com to refresh a ChatGPT login. `ab.chatgpt.com` is not required.
  */
-export const CODEX_PROVIDER_ALLOWLIST: readonly string[] = ['chatgpt.com'];
+export const CODEX_PROVIDER_ALLOWLIST: readonly string[] = ['chatgpt.com', 'auth.openai.com'];
 
 /**
  * The Codex version domain discovery was actually run against. Kept as its own literal so
