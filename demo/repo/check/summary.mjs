@@ -19,8 +19,16 @@ if (!response.ok) {
   throw new Error(`GET /api/tasks/summary returned ${String(response.status)}`);
 }
 
+// Compared field by field, not as JSON text: the key order of the response is the
+// implementer's choice, and a correct summary must not fail because it differs.
 const actual = await response.json();
-if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+const matches =
+  actual?.total === expected.total &&
+  Object.keys(expected.byStatus).every(
+    (status) => actual?.byStatus?.[status] === expected.byStatus[status],
+  );
+
+if (!matches) {
   throw new Error(
     `summary mismatch: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`,
   );

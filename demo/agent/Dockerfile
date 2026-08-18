@@ -4,10 +4,6 @@ FROM ${NODE_BASE_IMAGE}
 ARG AGENT_UID
 ARG AGENT_GID
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends git \
- && rm -rf /var/lib/apt/lists/*
-
 RUN groupadd -g "${AGENT_GID}" agent \
  && useradd -u "${AGENT_UID}" -g agent -m -d /home/agent -s /bin/bash agent \
  && mkdir -p /run/agent-auth /run/claude-auth \
