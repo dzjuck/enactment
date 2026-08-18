@@ -15,6 +15,7 @@ import {
 } from '../../src/plan/execution-manifest.js';
 import { runPlan, type PlanReport } from '../../src/run/coordinator.js';
 import { StateStore } from '../../src/state/store.js';
+import { DEPENDENCY_CACHE } from '../helpers/deps.js';
 import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import {
   cannedClaudeEvents,
@@ -153,7 +154,7 @@ describe('autonomous two-step plan', () => {
       manifestPath,
       sourceCodexHome: root,
       storeDirectory: join(root, 'store'),
-      dependencyCacheDirectory: join(root, 'deps'),
+      dependencyCacheDirectory: DEPENDENCY_CACHE,
       injection: {
         codex: stub,
         agentEnv: {
@@ -274,7 +275,7 @@ describe('bounded stronger retry', () => {
       sourceCodexHome: root,
       claudeTokenFile,
       storeDirectory: join(root, 'store'),
-      dependencyCacheDirectory: join(root, 'deps'),
+      dependencyCacheDirectory: DEPENDENCY_CACHE,
       injection: {
         codex: stub,
         claude: claudeStub,

@@ -3,3 +3,4 @@ node_modules/
 dist/
 /artifacts/
 /demo/.cache/
+/test/.cache/

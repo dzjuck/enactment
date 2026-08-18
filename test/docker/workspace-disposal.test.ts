@@ -9,6 +9,7 @@ import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
 import { runSinglePlanStep, type RunPhase, type RunReport } from '../../src/run/bridge.js';
+import { DEPENDENCY_CACHE } from '../helpers/deps.js';
 import {
   createTargetRepo,
   git,
@@ -117,7 +118,7 @@ async function run(
     artifactDir: artifacts,
     sourceCodexHome: join(root, 'codex-source'),
     storeDirectory: join(root, 'store'),
-    dependencyCacheDirectory: join(root, 'deps'),
+    dependencyCacheDirectory: DEPENDENCY_CACHE,
     ...overrides,
     injection,
   });

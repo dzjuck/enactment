@@ -22,10 +22,14 @@ let proxy: ProxyServer;
 let records: ProxyRecord[];
 
 async function startWith(hosts: string[], ports: number[]): Promise<void> {
-  records = [];
+  // The sink is captured rather than read from the module binding when a record arrives. A
+  // connection a previous test left pending emits after this one has started, and would
+  // otherwise be pushed into this test's array.
+  const sink: ProxyRecord[] = [];
+  records = sink;
   proxy = await startProxy({
     allowlist: createAllowlist({ hosts, ports }),
-    onRecord: (record) => records.push(record),
+    onRecord: (record) => sink.push(record),
   });
 }
 

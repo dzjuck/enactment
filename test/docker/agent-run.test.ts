@@ -17,6 +17,7 @@ import { runContainer } from '../../src/docker/run.js';
 import { usageSection } from '../../src/run/manifest.js';
 import { newAttemptId } from '../../src/volume/naming.js';
 import { createWorkspaceVolume, removeVolume, workspaceMount } from '../../src/volume/workspace.js';
+import { DEPENDENCY_CACHE } from '../helpers/deps.js';
 import { createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { runtimeImages } from '../helpers/images.js';
 import {
@@ -47,7 +48,7 @@ beforeAll(async () => {
 
   root = await mkdtemp(join(tmpdir(), 'enactment-agent-'));
 
-  const cache = new DependencyCache(join(root, 'deps'));
+  const cache = new DependencyCache(DEPENDENCY_CACHE);
   await ensureDependencySnapshot({
     cache,
     key: 'sha256:agent-run-tests',

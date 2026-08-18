@@ -21,6 +21,7 @@ import { TEST_RESULTS_ARTIFACT } from '../../src/verify/test-run.js';
 import { newAttemptId } from '../../src/volume/naming.js';
 import { dependencyVolumeName, workspaceVolumeName } from '../../src/volume/naming.js';
 import { volumeExists } from '../../src/volume/workspace.js';
+import { DEPENDENCY_CACHE } from '../helpers/deps.js';
 import { runtimeImages } from '../helpers/images.js';
 import { commitAll, createTargetRepo, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
@@ -104,7 +105,7 @@ beforeAll(async () => {
   const { tar: done } = await exportCommit(repo.dir, implemented);
   passing = await store.put(done);
 
-  const cache = new DependencyCache(join(root, 'deps'));
+  const cache = new DependencyCache(DEPENDENCY_CACHE);
   await ensureDependencySnapshot({
     cache,
     key: 'sha256:verification-tests',

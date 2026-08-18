@@ -13,6 +13,7 @@ import {
   FINAL_VERIFICATION_ARTIFACT,
   type FinalVerificationResult,
 } from '../../src/verify/final.js';
+import { DEPENDENCY_CACHE } from '../helpers/deps.js';
 import { commitAll, createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 
 const LABEL = 'enactment.attempt';
@@ -89,7 +90,7 @@ async function run(
     commands,
     artifactDir: artifacts,
     snapshots: new ArtifactStore(join(root, 'snapshots')),
-    dependencyCacheDirectory: join(root, 'deps'),
+    dependencyCacheDirectory: DEPENDENCY_CACHE,
     images,
     ...overrides,
     attempt,

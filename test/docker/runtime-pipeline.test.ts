@@ -21,6 +21,7 @@ import {
 } from '../../src/verify/runtime.js';
 import { RUNTIME_READINESS_TIMEOUT_SECONDS } from '../../src/verify/runtime-policy.js';
 import { newAttemptId, runtimeContainerName } from '../../src/volume/naming.js';
+import { DEPENDENCY_CACHE } from '../helpers/deps.js';
 import { planDocument } from '../helpers/plan.js';
 import { commitAll, createM2Repo, git, removePlanBranches, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
@@ -275,7 +276,7 @@ async function run(
     artifactDir: artifacts,
     sourceCodexHome: join(root, 'codex-source'),
     storeDirectory: join(root, 'store'),
-    dependencyCacheDirectory: join(root, 'deps'),
+    dependencyCacheDirectory: DEPENDENCY_CACHE,
     injection: { codex: stub, agentEnv: env, attempt },
     onPhase: (phase) => void phases.push(phase),
     onEvent: (event) => void events.push(event),

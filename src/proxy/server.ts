@@ -109,10 +109,15 @@ export async function startProxy(options: ProxyOptions): Promise<ProxyServer> {
     });
 
     upstream.on('error', () => {
+      // `end` closes once the status line has flushed. Destroying the socket on the next
+      // line instead would discard it whenever the write had not already reached the kernel,
+      // and the caller would see a silent close where the allowed-but-unreachable verdict
+      // should be.
       if (!established && clientSocket.writable) {
         clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+      } else {
+        clientSocket.destroy();
       }
-      clientSocket.destroy();
       record('error', true);
     });
 

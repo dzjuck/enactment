@@ -10,6 +10,7 @@ import type { RuntimeImage } from '../../src/docker/images.js';
 import type { RunInjection } from '../../src/run/inject.js';
 import { runSinglePlanStep } from '../../src/run/bridge.js';
 import { authVolumeName } from '../../src/volume/naming.js';
+import { DEPENDENCY_CACHE } from '../helpers/deps.js';
 import { planDocument } from '../helpers/plan.js';
 import { createTargetRepo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import {
@@ -138,7 +139,7 @@ async function run(
     sourceCodexHome: auth.sourceCodexHome,
     claudeTokenFile: auth.claudeTokenFile,
     storeDirectory: join(root, 'store'),
-    dependencyCacheDirectory: join(root, 'deps'),
+    dependencyCacheDirectory: DEPENDENCY_CACHE,
     injection,
     onPhase: async (phase) => {
       if (phase === 'agent') mountedAuth = await authVolumes(attempt);

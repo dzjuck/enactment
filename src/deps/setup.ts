@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -43,10 +43,18 @@ export class DependencyCache {
     const path = this.pathFor(key);
     await mkdir(this.root, { recursive: true });
 
-    const staging = `${path}.staging`;
-    await writeFile(staging, bytes);
-    await rm(path, { force: true });
-    await rename(staging, path);
+    // Staged under a unique name because the cache directory is shared: two installs of the
+    // same lockfile running at once would otherwise interleave their bytes in one staging
+    // file and rename the result into place. Every writer produces identical content, so the
+    // rename staying atomic is all the ordering this needs.
+    const staging = `${path}.${randomUUID()}.staging`;
+    try {
+      await writeFile(staging, bytes);
+      await rm(path, { force: true });
+      await rename(staging, path);
+    } finally {
+      await rm(staging, { force: true });
+    }
     await chmod(path, 0o444);
 
     return path;

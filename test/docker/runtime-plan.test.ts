@@ -22,6 +22,7 @@ import {
   RUNTIME_RESULT_FILE,
   type RuntimeCheckResult,
 } from '../../src/verify/runtime.js';
+import { DEPENDENCY_CACHE } from '../helpers/deps.js';
 import { createM2Repo, git, removeRepo, type TargetRepo } from '../helpers/repo.js';
 import { cannedEvents, stubAgentImage } from '../helpers/stub-agent.js';
 
@@ -158,7 +159,7 @@ describe('runtime-verified plan through the production path', () => {
         manifestPath,
         sourceCodexHome: root,
         storeDirectory: join(root, 'store'),
-        dependencyCacheDirectory: join(root, 'deps'),
+        dependencyCacheDirectory: DEPENDENCY_CACHE,
         injection: {
           codex: stub,
           agentEnv: {

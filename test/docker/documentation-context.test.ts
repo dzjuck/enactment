@@ -8,6 +8,7 @@ import { AUTH_FILE } from '../../src/auth/store.js';
 import type { RuntimeImage } from '../../src/docker/images.js';
 import { bundleRootFor, writeBundle } from '../../src/docs/bundle.js';
 import { runSinglePlanStep, type RunReport } from '../../src/run/bridge.js';
+import { DEPENDENCY_CACHE } from '../helpers/deps.js';
 import {
   createTargetRepo,
   git,
@@ -107,7 +108,7 @@ async function run(documented: boolean): Promise<{ report: RunReport; artifacts:
     artifactDir: artifacts,
     sourceCodexHome: join(root, 'codex-source'),
     storeDirectory: join(root, 'store'),
-    dependencyCacheDirectory: join(root, 'deps'),
+    dependencyCacheDirectory: DEPENDENCY_CACHE,
     injection: {
       codex: stub,
       agentEnv: {

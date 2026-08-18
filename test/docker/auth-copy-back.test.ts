@@ -10,6 +10,7 @@ import type { RuntimeImage } from '../../src/docker/images.js';
 import { runSinglePlanStep, type RunPhase, type RunReport } from '../../src/run/bridge.js';
 import { authVolumeName } from '../../src/volume/naming.js';
 import { volumeExists } from '../../src/volume/workspace.js';
+import { DEPENDENCY_CACHE } from '../helpers/deps.js';
 import {
   createTargetRepo,
   removePlanBranches,
@@ -113,7 +114,7 @@ async function runRotating(
     artifactDir: artifacts,
     sourceCodexHome: join(root, 'codex-source'),
     storeDirectory,
-    dependencyCacheDirectory: join(root, 'deps'),
+    dependencyCacheDirectory: DEPENDENCY_CACHE,
     ...overrides,
     injection: {
       codex: stub,

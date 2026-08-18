@@ -14,6 +14,7 @@ import {
   type RunPhase,
   type RunReport,
 } from '../../src/run/bridge.js';
+import { DEPENDENCY_CACHE } from '../helpers/deps.js';
 import {
   commitAll,
   createM2Repo,
@@ -142,7 +143,7 @@ async function run(
     artifactDir: artifacts,
     sourceCodexHome: join(root, 'codex-source'),
     storeDirectory: join(root, 'store'),
-    dependencyCacheDirectory: join(root, 'deps'),
+    dependencyCacheDirectory: DEPENDENCY_CACHE,
     injection,
     ...overrides,
   });

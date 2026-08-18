@@ -4,6 +4,13 @@ FROM ${NODE_BASE_IMAGE}
 ARG AGENT_UID
 ARG AGENT_GID
 
+# git is here for the harness, not for the entry points below. `initSyntheticGit` runs
+# `git init` in a container built from the codex image, and the demo resolves the codex role
+# to this image, so a slim base without git fails every step before the agent is reached.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd -g "${AGENT_GID}" agent \
  && useradd -u "${AGENT_UID}" -g agent -m -d /home/agent -s /bin/bash agent \
  && mkdir -p /run/agent-auth /run/claude-auth \
