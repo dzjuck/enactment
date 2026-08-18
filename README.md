@@ -89,14 +89,15 @@ Run the credential-free replay:
 ```sh
 npm ci
 npm run images:build
-npm run demo
+npm run demo:replay
 ```
 
 The replay uses recorded answers. It proves the control plane, not model capability. See
-[`demo/README.md`](demo/README.md).
+[`demo/README.md`](demo/README.md). Demo output is human-readable. The complete report remains at
+the printed `artifacts/task-summary/reports/invocation-<n>.json` path.
 
-Measured from a clean clone on the development host: the first replay took 31.29 seconds; the
-second replay, with the dependency cache warm, took 27.14 seconds.
+Measured from a clean clone on the development host with `npm run demo:replay`: the first replay
+took 31.29 seconds; the second, with the dependency cache warm, took 27.14 seconds.
 
 ## Compared to an interactive coding agent
 
@@ -171,6 +172,17 @@ records, and the results of `baseline`, `tests`, `red`, `implementation`, `green
 
 You need Docker or OrbStack, Node.js 22.13 or later, and provider subscriptions. Run `codex login`
 once. For Claude steps, run `claude setup-token` once and store the token as `RUNBOOK.md` describes.
+Build the runtime images first, then run the same project and plan with live providers:
+
+```sh
+npm run images:build
+npm run demo
+```
+
+This command uses real credentials and provider quota. Results are nondeterministic. It keeps the
+temporary repository, plan database, artifacts, and detailed report, then prints their locations.
+
+For lower-level operator control, prepare and run a repository directly:
 
 ```sh
 repo=$(mktemp -d)
@@ -184,7 +196,8 @@ node dist/cli.js prepare demo/plan.yml --repo "$repo" --output "$repo/manifest.y
 node dist/cli.js run "$repo/manifest.yml" --repo "$repo"
 ```
 
-`prepare` writes the approval. Running the manifest is the approval.
+`prepare` writes the approval. Running the manifest is the approval. Direct CLI commands write
+JSON to stdout; demo commands write a human-readable progress and evidence tour.
 
 ## Documentation
 

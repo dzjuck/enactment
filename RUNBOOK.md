@@ -43,10 +43,10 @@ starts and names this command.
 
 ## Demo
 
-Run the published plan without provider credentials:
+Run the published plan with recorded answers and no provider credentials:
 
 ```sh
-npm run demo
+npm run demo:replay
 ```
 
 The replay builds `enactment/demo-agent`, copies `demo/repo` to a new temporary Git repository,
@@ -59,15 +59,22 @@ The runtime images must already exist. Run `npm run images:build` first. The fir
 the npm registry to populate `demo/.cache/deps`; later runs reuse that cache. The replay is
 credential-free, not offline.
 
-For a live run, copy the demo repository, initialize Git, then use the normal commands:
+For the full live-provider demo, first complete the Codex and Claude authentication prerequisites,
+then run:
 
 ```sh
-node dist/cli.js prepare demo/plan.yml --repo /tmp/task-board --output /tmp/task-board/manifest.yml
-node dist/cli.js run /tmp/task-board/manifest.yml --repo /tmp/task-board
+npm run demo
 ```
 
-Live Codex and Claude authentication is required. See [`demo/README.md`](demo/README.md) for the
-complete setup and the limits of each mode.
+The live demo uses real provider quota. Results are nondeterministic. Its repository, plan database
+and artifacts are temporary and retained after exit. Its credentials are not temporary: it uses
+the normal persistent Codex store and the Claude token under `ENACTMENT_STATE_DIR`. The output
+names the retained paths.
+
+Both demo commands write human-readable progress and an evidence tour. They do not dump the JSON
+report. The complete report remains under the printed `artifacts/task-summary/reports/` path.
+Direct `prepare` and `run` commands remain the lower-level operator interface and write JSON to
+stdout. See [`demo/README.md`](demo/README.md) for the limits of each mode.
 
 ## 2. Declare a plan
 
