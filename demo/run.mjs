@@ -1,18 +1,12 @@
 /* global process */
 
-import { chmod, cp, mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL, URL } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 
 import { execa } from 'execa';
-
-import { AGENT_GID, AGENT_UID, NODE_BASE_IMAGE } from '../dist/config/pins.js';
-import {
-  resolveImageId,
-  resolveRuntimeImages,
-} from '../dist/docker/images.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DEMO_ROOT = fileURLToPath(new URL('.', import.meta.url));
@@ -30,6 +24,10 @@ async function git(repoPath, args) {
 }
 
 async function buildDemoAgent() {
+  const [{ AGENT_GID, AGENT_UID, NODE_BASE_IMAGE }, { resolveImageId }] = await Promise.all([
+    import('../dist/config/pins.js'),
+    import('../dist/docker/images.js'),
+  ]);
   await execa(
     'docker',
     [
@@ -52,9 +50,14 @@ async function buildDemoAgent() {
   return resolveImageId(DEMO_AGENT_TAG);
 }
 
+async function resolveProductionImages() {
+  const { resolveRuntimeImages } = await import('../dist/docker/images.js');
+  return resolveRuntimeImages();
+}
+
 export async function resolveDemoMode(
   mode,
-  { buildReplayImage = buildDemoAgent, resolveImages = resolveRuntimeImages } = {},
+  { buildReplayImage = buildDemoAgent, resolveImages = resolveProductionImages } = {},
 ) {
   const selectedMode = parseDemoMode(mode);
   const productionImages = await resolveImages();
@@ -148,8 +151,8 @@ async function writeTour({ mode, write, result, repoPath, stateDirectory, artifa
   write(`\nartifacts\n${await artifactTree(planRoot)}\n`);
   write(
     mode === 'replay'
-      ? 'agent     recorded replay; no provider was called\n'
-      : 'agent     live providers; results are nondeterministic\n',
+      ? 'execution: replay; recorded answers; no provider called\n'
+      : '\nexecution: live; provider results are nondeterministic\n',
   );
 }
 
@@ -329,9 +332,101 @@ function writeDemoFailure(write, error) {
   }
 }
 
+function needsCredentialSetup(mode, result) {
+  if (mode !== 'live' || result.exitCode === 0) return false;
+  const message = result.report?.failure?.message;
+  return typeof message === 'string' && /auth\.json|Claude token/i.test(message);
+}
+
 export async function runDemoMain({ mode, write, run = runDemo }) {
   try {
-    return await run({ mode, write });
+    const result = await run({ mode, write });
+    if (needsCredentialSetup(mode, result)) {
+      write('\ncredentials: missing or invalid\n');
+      write('fix: follow README.md#try-it-live, then run npm run demo again\n');
+    }
+    return result;
+  } catch (error) {
+    writeDemoFailure(write, error);
+    return { exitCode: 1 };
+  }
+}
+
+async function validJsonFile(path) {
+  try {
+    JSON.parse(await readFile(path, 'utf8'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function validClaudeToken(path) {
+  try {
+    const [token, file, directory] = await Promise.all([
+      readFile(path, 'utf8'),
+      stat(path),
+      stat(dirname(path)),
+    ]);
+    return (
+      token.trim() !== '' &&
+      (file.mode & 0o777) === 0o600 &&
+      (directory.mode & 0o777) === 0o700
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function findMissingLiveCredentials() {
+  const stateRoot = process.env.ENACTMENT_STATE_DIR ??
+    join(homedir(), '.local', 'state', 'enactment');
+  const codexStore = join(stateRoot, 'auth', 'auth.json');
+  const codexSource = join(homedir(), '.codex', 'auth.json');
+  const claudeToken = join(stateRoot, 'auth', 'claude', 'token');
+  const [storedCodex, sourceCodex, claude] = await Promise.all([
+    validJsonFile(codexStore),
+    validJsonFile(codexSource),
+    validClaudeToken(claudeToken),
+  ]);
+  return [storedCodex || sourceCodex ? undefined : 'codex', claude ? undefined : 'claude'].filter(
+    (provider) => provider !== undefined,
+  );
+}
+
+function writeCredentialFailure(write, missing) {
+  write('LIVE DEMO NOT STARTED\n\n');
+  write('Missing or invalid provider credentials:\n');
+  if (missing.includes('codex')) write('- Codex: run `codex login`\n');
+  if (missing.includes('claude')) {
+    write('- Claude: run `claude setup-token`, then save the token as documented\n');
+  }
+  write('\nSetup guide: https://github.com/dzjuck/enactment#try-it-live\n');
+}
+
+async function buildHarness() {
+  await execa('npm', ['run', '--silent', 'build'], { cwd: REPOSITORY_ROOT });
+}
+
+export async function runDemoCommand({
+  mode,
+  write,
+  checkCredentials = findMissingLiveCredentials,
+  build = buildHarness,
+  main = runDemoMain,
+}) {
+  try {
+    const selectedMode = parseDemoMode(mode);
+    if (selectedMode === 'live') {
+      const missing = await checkCredentials();
+      if (missing.length > 0) {
+        writeCredentialFailure(write, missing);
+        return { exitCode: 1 };
+      }
+    }
+
+    await build();
+    return await main({ mode: selectedMode, write });
   } catch (error) {
     writeDemoFailure(write, error);
     return { exitCode: 1 };
@@ -339,7 +434,7 @@ export async function runDemoMain({ mode, write, run = runDemo }) {
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const result = await runDemoMain({
+  const result = await runDemoCommand({
     mode: process.argv.length === 3 ? process.argv[2] : undefined,
     write: (text) => {
       process.stderr.write(text);

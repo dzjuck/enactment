@@ -24,12 +24,45 @@ const RESULT = {
 } as unknown as DemoResult;
 
 describe('demo direct entry', () => {
+  it('stops before build and execution when live credentials are unavailable', async () => {
+    const { runDemoCommand } = await import('../../demo/run.mjs');
+    let output = '';
+    const build = vi.fn(() => Promise.resolve());
+    const main = vi.fn(() => Promise.resolve(RESULT));
+
+    const result = await runDemoCommand({
+      mode: 'live',
+      write: (text) => {
+        output += text;
+      },
+      checkCredentials: () => Promise.resolve(['codex', 'claude']),
+      build,
+      main,
+    });
+
+    expect(result).toEqual({ exitCode: 1 });
+    expect(build).not.toHaveBeenCalled();
+    expect(main).not.toHaveBeenCalled();
+    expect(output).toBe(
+      [
+        'LIVE DEMO NOT STARTED',
+        '',
+        'Missing or invalid provider credentials:',
+        '- Codex: run `codex login`',
+        '- Claude: run `claude setup-token`, then save the token as documented',
+        '',
+        'Setup guide: https://github.com/dzjuck/enactment#try-it-live',
+        '',
+      ].join('\n'),
+    );
+  });
+
   it('returns the structured result without serializing its report', async () => {
     const { runDemoMain } = await import('../../demo/run.mjs');
     let output = '';
     const run = vi.fn(async ({ write }: { write: (text: string) => void }) => {
       write('completed  2 steps  2 commits\n');
-      write('agent     recorded replay; no provider was called\n');
+      write('execution: replay; recorded answers; no provider called\n');
       return RESULT;
     });
 
@@ -86,5 +119,43 @@ describe('demo direct entry', () => {
     expect(output).not.toContain('nested');
     expect(output).not.toContain('\u001b');
     expect(output).not.toContain('{');
+  });
+
+  it('points a live credential failure to the setup guide', async () => {
+    const { runDemoMain } = await import('../../demo/run.mjs');
+    let output = '';
+    const failure = {
+      ...RESULT,
+      exitCode: 1,
+      report: {
+        plan: 'task-summary',
+        state: 'failed',
+        branch: 'enactment/task-summary',
+        baseCommit: 'a'.repeat(40),
+        steps: [],
+        failure: {
+          category: 'internal_error',
+          message: 'no auth.json in /user/.codex: run `codex login` once, then retry',
+        },
+      },
+    } as unknown as DemoResult;
+
+    const result = await runDemoMain({
+      mode: 'live',
+      write: (text) => {
+        output += text;
+      },
+      run: () => Promise.resolve(failure),
+    });
+
+    expect(result).toBe(failure);
+    expect(output).toBe(
+      [
+        '',
+        'credentials: missing or invalid',
+        'fix: follow README.md#try-it-live, then run npm run demo again',
+        '',
+      ].join('\n'),
+    );
   });
 });

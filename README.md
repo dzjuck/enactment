@@ -171,8 +171,9 @@ records, and the results of `baseline`, `tests`, `red`, `implementation`, `green
 ## Try it live
 
 You need Docker or OrbStack, Node.js 22.13 or later, and provider subscriptions. Run `codex login`
-once. For Claude steps, run `claude setup-token` once and store the token as `RUNBOOK.md` describes.
-Build the runtime images first, then run the same project and plan with live providers:
+once. For Claude steps, run `claude setup-token` once and follow the
+[Claude token storage instructions](RUNBOOK.md#6-re-authenticating). Build the runtime images
+first, then run the same project and plan with live providers:
 
 ```sh
 npm run images:build

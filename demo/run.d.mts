@@ -47,3 +47,18 @@ export function runDemoMain(options: {
     write: (text: string) => void;
   }) => Promise<DemoResult>;
 }): Promise<DemoResult | { exitCode: 1 }>;
+
+export type DemoProvider = 'codex' | 'claude';
+
+export function findMissingLiveCredentials(): Promise<DemoProvider[]>;
+
+export function runDemoCommand(options: {
+  mode: string | undefined;
+  write: (text: string) => void;
+  checkCredentials?: () => Promise<DemoProvider[]>;
+  build?: () => Promise<void>;
+  main?: (options: {
+    mode: DemoMode;
+    write: (text: string) => void;
+  }) => Promise<DemoResult | { exitCode: 1 }>;
+}): Promise<DemoResult | { exitCode: 1 }>;

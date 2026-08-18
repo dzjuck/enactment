@@ -86,7 +86,7 @@ describe('published replay demo', () => {
       / {2}steps\/\n {4}summarize-tasks\/\n {6}[^\n]+\/\n {8}run-1\//,
     );
     expect(output).toMatch(/ {4}summary-endpoint\/\n {6}[^\n]+\/\n {8}run-1\//);
-    expect(output).toContain('agent     recorded replay; no provider was called\n');
+    expect(output).toContain('execution: replay; recorded answers; no provider called\n');
     expect(output).not.toContain('"finalVerification"');
     expect(output).not.toContain('\u001b');
 

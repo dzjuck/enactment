@@ -14,15 +14,13 @@ const IMAGES: RuntimeImages = {
 };
 
 describe('demo modes', () => {
-  it('publishes explicit replay and live package commands', async () => {
+  it('publishes explicit replay and live package commands without nested npm output', async () => {
     const packageJson = JSON.parse(await readFile('package.json', 'utf8')) as {
       scripts: Record<string, string>;
     };
 
-    expect(packageJson.scripts['demo:replay']).toBe(
-      'npm run build && node demo/run.mjs replay',
-    );
-    expect(packageJson.scripts.demo).toBe('npm run build && node demo/run.mjs live');
+    expect(packageJson.scripts['demo:replay']).toBe('node demo/run.mjs replay');
+    expect(packageJson.scripts.demo).toBe('node demo/run.mjs live');
   });
 
   it('accepts only replay and live before resolving images', async () => {
