@@ -30,15 +30,15 @@ afterAll(async () => {
 
 describe('published replay demo', () => {
   it('runs the frozen plan through production with the baked agent image', async () => {
-    const { runDemo } = (await import('../../demo/run.mjs')) as {
-      runDemo: (options: {
+    const { runDemoMain } = (await import('../../demo/run.mjs')) as {
+      runDemoMain: (options: {
         mode: 'replay';
         write: (text: string) => void;
       }) => Promise<DemoResult>;
     };
     let output = '';
 
-    const result = await runDemo({
+    const result = await runDemoMain({
       mode: 'replay',
       write: (text) => {
         output += text;
@@ -87,6 +87,8 @@ describe('published replay demo', () => {
     );
     expect(output).toMatch(/ {4}summary-endpoint\/\n {6}[^\n]+\/\n {8}run-1\//);
     expect(output).toContain('agent     recorded replay; no provider was called\n');
+    expect(output).not.toContain('"finalVerification"');
+    expect(output).not.toContain('\u001b');
 
     await expect(access(result.repoPath)).resolves.toBeUndefined();
     await expect(access(join(result.stateDirectory, 'state.db'))).resolves.toBeUndefined();

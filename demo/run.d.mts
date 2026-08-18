@@ -38,3 +38,12 @@ export function runDemo(options: {
   mode: DemoMode;
   write: (text: string) => void;
 }): Promise<DemoResult>;
+
+export function runDemoMain(options: {
+  mode: string | undefined;
+  write: (text: string) => void;
+  run?: (options: {
+    mode: DemoMode;
+    write: (text: string) => void;
+  }) => Promise<DemoResult>;
+}): Promise<DemoResult | { exitCode: 1 }>;

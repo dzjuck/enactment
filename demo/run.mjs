@@ -4,6 +4,7 @@ import { chmod, cp, mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL, URL } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 
 import { execa } from 'execa';
 
@@ -152,6 +153,14 @@ async function writeTour({ mode, write, result, repoPath, stateDirectory, artifa
   );
 }
 
+function attachDemoPaths(error, demoPaths) {
+  if (demoPaths === undefined) return error;
+  if (!(error instanceof Error)) return Object.assign(new Error(String(error)), { demoPaths });
+
+  Object.defineProperty(error, 'demoPaths', { value: demoPaths, enumerable: false });
+  return error;
+}
+
 export async function runDemo({ mode, write }) {
   const selectedMode = parseDemoMode(mode);
   write(
@@ -160,6 +169,21 @@ export async function runDemo({ mode, write }) {
       : 'mode      live; real credentials and provider quota will be used\n',
   );
 
+  let demoPaths;
+  try {
+    return await runDemoWorkflow({
+      selectedMode,
+      write,
+      onPaths: (paths) => {
+        demoPaths = paths;
+      },
+    });
+  } catch (error) {
+    throw attachDemoPaths(error, demoPaths);
+  }
+}
+
+async function runDemoWorkflow({ selectedMode, write, onPaths }) {
   const [{ runPlan }, { execute }] = await Promise.all([
     import('../dist/run/coordinator.js'),
     import('../dist/run/production.js'),
@@ -177,6 +201,7 @@ export async function runDemo({ mode, write }) {
     selectedMode === 'replay' ? join(root, 'auth', 'claude', 'token') : undefined;
   const dependencyCacheDirectory = join(DEMO_ROOT, '.cache', 'deps');
   const manifestPath = join(root, 'execution-manifest.yml');
+  onPaths({ root, repoPath, stateDirectory, artifactDir, manifestPath });
 
   await cp(join(DEMO_ROOT, 'repo'), repoPath, { recursive: true });
   await git(repoPath, ['init', '--initial-branch=main']);
@@ -215,7 +240,14 @@ export async function runDemo({ mode, write }) {
     { resolveImages },
   );
   if (prepared.exitCode !== 0) {
-    throw new Error(`demo prepare failed: ${JSON.stringify(prepared.report)}`);
+    const message =
+      typeof prepared.report === 'object' &&
+      prepared.report !== null &&
+      'message' in prepared.report &&
+      typeof prepared.report.message === 'string'
+        ? `: ${prepared.report.message}`
+        : '';
+    throw new Error(`prepare failed${message}`);
   }
 
   const result = await execute(
@@ -268,23 +300,50 @@ export async function runDemo({ mode, write }) {
   };
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try {
-    const mode = parseDemoMode(process.argv.length === 3 ? process.argv[2] : undefined);
-    const result = await runDemo({
-      mode,
-      write: (text) => {
-        process.stderr.write(text);
-      },
-    });
-    process.stdout.write(`${JSON.stringify(result.report, null, 2)}\n`);
-    process.exitCode = result.exitCode;
-  } catch (error) {
-    if (error instanceof Error && error.message === DEMO_USAGE) {
-      process.stderr.write(`${DEMO_USAGE}\n`);
-      process.exitCode = 1;
-    } else {
-      throw error;
-    }
+function conciseError(error) {
+  const message = stripVTControlCharacters(error instanceof Error ? error.message : String(error));
+  return message.split(/\r?\n/, 1)[0]?.trim() || 'unknown error';
+}
+
+function writeDemoFailure(write, error) {
+  write(`demo failed  ${conciseError(error)}\n`);
+
+  const paths =
+    typeof error === 'object' && error !== null && 'demoPaths' in error
+      ? error.demoPaths
+      : undefined;
+  if (typeof paths !== 'object' || paths === null) return;
+
+  if ('root' in paths && typeof paths.root === 'string') write(`root         ${paths.root}\n`);
+  if ('repoPath' in paths && typeof paths.repoPath === 'string') {
+    write(`repo         ${paths.repoPath}\n`);
   }
+  if ('stateDirectory' in paths && typeof paths.stateDirectory === 'string') {
+    write(`state        ${paths.stateDirectory}\n`);
+  }
+  if ('artifactDir' in paths && typeof paths.artifactDir === 'string') {
+    write(`artifacts    ${join(paths.artifactDir, 'task-summary')}\n`);
+  }
+  if ('manifestPath' in paths && typeof paths.manifestPath === 'string') {
+    write(`manifest     ${paths.manifestPath}\n`);
+  }
+}
+
+export async function runDemoMain({ mode, write, run = runDemo }) {
+  try {
+    return await run({ mode, write });
+  } catch (error) {
+    writeDemoFailure(write, error);
+    return { exitCode: 1 };
+  }
+}
+
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const result = await runDemoMain({
+    mode: process.argv.length === 3 ? process.argv[2] : undefined,
+    write: (text) => {
+      process.stderr.write(text);
+    },
+  });
+  process.exitCode = result.exitCode;
 }
