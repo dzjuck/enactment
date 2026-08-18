@@ -12,12 +12,16 @@ import {
   resolveImageId,
   resolveRuntimeImages,
 } from '../dist/docker/images.js';
-import { runPlan } from '../dist/run/coordinator.js';
-import { execute } from '../dist/run/production.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DEMO_ROOT = fileURLToPath(new URL('.', import.meta.url));
 const DEMO_AGENT_TAG = 'enactment/demo-agent:latest';
+const DEMO_USAGE = 'usage: node demo/run.mjs <replay|live>';
+
+export function parseDemoMode(value) {
+  if (value !== 'replay' && value !== 'live') throw new Error(DEMO_USAGE);
+  return value;
+}
 
 async function git(repoPath, args) {
   const { stdout } = await execa('git', ['-C', repoPath, ...args]);
@@ -45,6 +49,39 @@ async function buildDemoAgent() {
   );
 
   return resolveImageId(DEMO_AGENT_TAG);
+}
+
+export async function resolveDemoMode(
+  mode,
+  { buildReplayImage = buildDemoAgent, resolveImages = resolveRuntimeImages } = {},
+) {
+  const selectedMode = parseDemoMode(mode);
+  const productionImages = await resolveImages();
+
+  if (selectedMode === 'live') {
+    return {
+      images: productionImages,
+      injection: undefined,
+      credentials: 'production',
+      demoImageId: undefined,
+      productionImages,
+    };
+  }
+
+  const demoImageId = await buildReplayImage();
+  const images = {
+    ...productionImages,
+    codex: { role: 'codex', id: demoImageId },
+    claude: { role: 'claude', id: demoImageId },
+  };
+
+  return {
+    images,
+    injection: { codex: images.codex, claude: images.claude },
+    credentials: 'placeholder',
+    demoImageId,
+    productionImages,
+  };
 }
 
 function indent(text) {
@@ -77,7 +114,7 @@ async function artifactTree(root, maxDepth = 4) {
   return lines.join('\n');
 }
 
-async function writeTour({ write, result, repoPath, stateDirectory, artifactDir, baseCommit }) {
+async function writeTour({ mode, write, result, repoPath, stateDirectory, artifactDir, baseCommit }) {
   const planRoot = join(artifactDir, 'task-summary');
 
   if (result.exitCode !== 0) {
@@ -108,30 +145,36 @@ async function writeTour({ write, result, repoPath, stateDirectory, artifactDir,
   write(`\ncommits\n${indent(commits)}\n`);
   write(`\ndiffstat\n${indent(diffstat)}\n`);
   write(`\nartifacts\n${await artifactTree(planRoot)}\n`);
-  write('agent     recorded replay; no provider was called\n');
+  write(
+    mode === 'replay'
+      ? 'agent     recorded replay; no provider was called\n'
+      : 'agent     live providers; results are nondeterministic\n',
+  );
 }
 
-export async function runDemo({ write }) {
-  const demoImageId = await buildDemoAgent();
-  const productionImages = await resolveRuntimeImages();
-  const resolvedImages = {
-    ...productionImages,
-    codex: { role: 'codex', id: demoImageId },
-    claude: { role: 'claude', id: demoImageId },
-  };
-  const resolveImages = () => Promise.resolve(resolvedImages);
-  const injection = {
-    codex: resolvedImages.codex,
-    claude: resolvedImages.claude,
-  };
+export async function runDemo({ mode, write }) {
+  const selectedMode = parseDemoMode(mode);
+  write(
+    selectedMode === 'replay'
+      ? 'mode      replay; recorded answers; no provider will be called\n'
+      : 'mode      live; real credentials and provider quota will be used\n',
+  );
+
+  const [{ runPlan }, { execute }] = await Promise.all([
+    import('../dist/run/coordinator.js'),
+    import('../dist/run/production.js'),
+  ]);
+  const modeRuntime = await resolveDemoMode(selectedMode);
+  const resolveImages = () => Promise.resolve(modeRuntime.images);
 
   const root = await mkdtemp(join(tmpdir(), 'enactment-demo-'));
   const repoPath = join(root, 'repo');
   const stateDirectory = join(root, 'state');
   const artifactDir = join(root, 'artifacts');
-  const storeDirectory = join(root, 'store');
-  const sourceCodexHome = join(root, 'auth', 'codex');
-  const claudeTokenFile = join(root, 'auth', 'claude', 'token');
+  const storeDirectory = selectedMode === 'replay' ? join(root, 'store') : undefined;
+  const sourceCodexHome = selectedMode === 'replay' ? join(root, 'auth', 'codex') : undefined;
+  const claudeTokenFile =
+    selectedMode === 'replay' ? join(root, 'auth', 'claude', 'token') : undefined;
   const dependencyCacheDirectory = join(DEMO_ROOT, '.cache', 'deps');
   const manifestPath = join(root, 'execution-manifest.yml');
 
@@ -143,19 +186,21 @@ export async function runDemo({ write }) {
   await git(repoPath, ['commit', '-m', 'Initial task board']);
   const baseCommit = await git(repoPath, ['rev-parse', 'HEAD']);
 
-  await mkdir(sourceCodexHome, { recursive: true, mode: 0o700 });
-  const codexAuthFile = join(sourceCodexHome, 'auth.json');
-  await writeFile(
-    codexAuthFile,
-    `${JSON.stringify({ tokens: { access_token: 'demo-placeholder-token' } })}\n`,
-    { mode: 0o600 },
-  );
-  await chmod(codexAuthFile, 0o600);
+  if (sourceCodexHome !== undefined && claudeTokenFile !== undefined) {
+    await mkdir(sourceCodexHome, { recursive: true, mode: 0o700 });
+    const codexAuthFile = join(sourceCodexHome, 'auth.json');
+    await writeFile(
+      codexAuthFile,
+      `${JSON.stringify({ tokens: { access_token: 'demo-placeholder-token' } })}\n`,
+      { mode: 0o600 },
+    );
+    await chmod(codexAuthFile, 0o600);
 
-  await mkdir(dirname(claudeTokenFile), { recursive: true, mode: 0o700 });
-  await chmod(dirname(claudeTokenFile), 0o700);
-  await writeFile(claudeTokenFile, 'demo-placeholder-token\n', { mode: 0o600 });
-  await chmod(claudeTokenFile, 0o600);
+    await mkdir(dirname(claudeTokenFile), { recursive: true, mode: 0o700 });
+    await chmod(dirname(claudeTokenFile), 0o700);
+    await writeFile(claudeTokenFile, 'demo-placeholder-token\n', { mode: 0o600 });
+    await chmod(claudeTokenFile, 0o600);
+  }
 
   const prepared = await execute(
     {
@@ -164,7 +209,7 @@ export async function runDemo({ write }) {
       repoPath,
       output: manifestPath,
       stateDirectory,
-      storeDirectory,
+      ...(storeDirectory === undefined ? {} : { storeDirectory }),
       dependencyCacheDirectory,
     },
     { resolveImages },
@@ -180,23 +225,35 @@ export async function runDemo({ write }) {
       repoPath,
       artifactDir,
       stateDirectory,
-      sourceCodexHome,
-      storeDirectory,
+      ...(sourceCodexHome === undefined ? {} : { sourceCodexHome }),
+      ...(storeDirectory === undefined ? {} : { storeDirectory }),
       dependencyCacheDirectory,
     },
     {
       resolveImages,
       progress: write,
-      coordinate: (options) =>
-        runPlan({
-          ...options,
-          claudeTokenFile,
-          injection,
-        }),
+      ...(modeRuntime.injection === undefined
+        ? {}
+        : {
+            coordinate: (options) =>
+              runPlan({
+                ...options,
+                claudeTokenFile,
+                injection: modeRuntime.injection,
+              }),
+          }),
     },
   );
 
-  await writeTour({ write, result, repoPath, stateDirectory, artifactDir, baseCommit });
+  await writeTour({
+    mode: selectedMode,
+    write,
+    result,
+    repoPath,
+    stateDirectory,
+    artifactDir,
+    baseCommit,
+  });
 
   return {
     ...result,
@@ -206,17 +263,28 @@ export async function runDemo({ write }) {
     artifactDir,
     manifestPath,
     baseCommit,
-    demoImageId,
-    productionImages,
+    ...(modeRuntime.demoImageId === undefined ? {} : { demoImageId: modeRuntime.demoImageId }),
+    productionImages: modeRuntime.productionImages,
   };
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const result = await runDemo({
-    write: (text) => {
-      process.stderr.write(text);
-    },
-  });
-  process.stdout.write(`${JSON.stringify(result.report, null, 2)}\n`);
-  process.exitCode = result.exitCode;
+  try {
+    const mode = parseDemoMode(process.argv.length === 3 ? process.argv[2] : undefined);
+    const result = await runDemo({
+      mode,
+      write: (text) => {
+        process.stderr.write(text);
+      },
+    });
+    process.stdout.write(`${JSON.stringify(result.report, null, 2)}\n`);
+    process.exitCode = result.exitCode;
+  } catch (error) {
+    if (error instanceof Error && error.message === DEMO_USAGE) {
+      process.stderr.write(`${DEMO_USAGE}\n`);
+      process.exitCode = 1;
+    } else {
+      throw error;
+    }
+  }
 }

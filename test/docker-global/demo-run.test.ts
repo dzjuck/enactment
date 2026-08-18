@@ -31,11 +31,15 @@ afterAll(async () => {
 describe('published replay demo', () => {
   it('runs the frozen plan through production with the baked agent image', async () => {
     const { runDemo } = (await import('../../demo/run.mjs')) as {
-      runDemo: (options: { write: (text: string) => void }) => Promise<DemoResult>;
+      runDemo: (options: {
+        mode: 'replay';
+        write: (text: string) => void;
+      }) => Promise<DemoResult>;
     };
     let output = '';
 
     const result = await runDemo({
+      mode: 'replay',
       write: (text) => {
         output += text;
       },
