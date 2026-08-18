@@ -2,6 +2,25 @@
 
 This demo runs the published two-step plan against a fresh copy of `demo/repo`.
 
+## Plan
+
+The plan adds a task-summary function, then exposes it over HTTP:
+
+```yaml
+version: 1
+id: task-summary
+steps:
+  - type: code_behavior
+    id: summarize-tasks
+    implementation_paths: [src/summary.js]
+    test_paths: [test/summary.test.js]
+  - type: task
+    id: summary-endpoint
+    implementation_paths: [src/server.js]
+```
+
+The complete plan is in [`plan.yml`](plan.yml).
+
 ## Recorded replay
 
 Prerequisites:

@@ -33,58 +33,16 @@ engines inside it.
 
 ## How a plan runs
 
-Enactment runs the steps in the written order. Each step starts at the commit that the step before
-it made. Code-behavior steps must support a test-first red/green cycle. Operational `task` steps do
-not require TDD. A code-behavior step follows this path:
+You approve an ordered plan once. Enactment runs each step from the previous accepted commit. It
+commits a step only after its gates pass. If a gate fails, execution stops and keeps the evidence.
 
 ![Plan execution flow](docs/plan-flow.svg)
 
-The agents only write tests and implementation. Enactment owns every gate, the plan branch, and the
-commits. Any failed gate stops the plan with evidence. A `task` step skips the test-specific path.
-An eligible failure gets one policy-controlled retry.
+When all steps pass, you review the completed `enactment/<plan-id>` branch.
 
-## Example
+## Try the demo
 
-The published demo adds a task-summary function, then exposes it over HTTP:
-
-```yaml
-version: 1
-id: task-summary
-steps:
-  - type: code_behavior
-    id: summarize-tasks
-    implementation_paths: [src/summary.js]
-    test_paths: [test/summary.test.js]
-    # complexity, risk, behavior, expected tests and verification are in demo/plan.yml
-  - type: task
-    id: summary-endpoint
-    implementation_paths: [src/server.js]
-    # includes a live HTTP runtime check
-```
-
-It creates `enactment/task-summary`. Each commit records its origin:
-
-```text
-summarize-tasks: apply enactment-verified changes
-
-Enactment-Plan: task-summary
-Enactment-Step: summarize-tasks
-Enactment-Attempt: <attempt-id>
-Enactment-Idempotency-Key: sha256:<hash>
-```
-
-Evidence is separate from the Git branch:
-
-```text
-artifacts/task-summary/
-  final/run-1/
-  reports/invocation-1.json
-  steps/
-    summarize-tasks/<attempt-id>/run-1/
-    summary-endpoint/<attempt-id>/run-1/
-```
-
-Run the credential-free replay:
+Run the published two-step plan with recorded agent answers:
 
 ```sh
 npm ci
@@ -92,12 +50,8 @@ npm run images:build
 npm run demo:replay
 ```
 
-The replay uses recorded answers. It proves the control plane, not model capability. See
-[`demo/README.md`](demo/README.md). Demo output is human-readable. The complete report remains at
-the printed `artifacts/task-summary/reports/invocation-<n>.json` path.
-
-Measured from a clean clone on the development host with `npm run demo:replay`: the first replay
-took 31.29 seconds; the second, with the dependency cache warm, took 27.14 seconds.
+The replay calls no model provider and prints the completed branch and evidence locations. See
+[demo/README.md](demo/README.md) for details.
 
 ## Compared to an interactive coding agent
 
@@ -182,23 +136,6 @@ npm run demo
 
 This command uses real credentials and provider quota. Results are nondeterministic. It keeps the
 temporary repository, plan database, artifacts, and detailed report, then prints their locations.
-
-For lower-level operator control, prepare and run a repository directly:
-
-```sh
-repo=$(mktemp -d)
-cp -R demo/repo/. "$repo/"
-git -C "$repo" init -q -b main
-git -C "$repo" add -A
-git -C "$repo" -c user.name=Demo -c user.email=demo@enactment.invalid \
-  commit -q -m 'Initial task board'
-
-node dist/cli.js prepare demo/plan.yml --repo "$repo" --output "$repo/manifest.yml"
-node dist/cli.js run "$repo/manifest.yml" --repo "$repo"
-```
-
-`prepare` writes the approval. Running the manifest is the approval. Direct CLI commands write
-JSON to stdout; demo commands write a human-readable progress and evidence tour.
 
 ## Documentation
 

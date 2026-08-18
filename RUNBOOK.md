@@ -16,10 +16,8 @@ crash. Nothing here uses the test suites.
 * Node.js ≥ 22.13 — the harness stores plan state in `node:sqlite`, which is available
   without an opt-in flag from that release. Node prints an experimental warning for it on
   stderr; stdout stays valid JSON.
-* `codex login` run once on the host. The harness reads `~/.codex/auth.json` exactly once to
-  seed its own store, then never writes to your Codex home again. Once that store exists it is
-  the source of truth for the refresh chain and a later `codex login` does **not** replace it —
-  see "Re-authenticating".
+* `codex login` run once on the host. The harness keeps its own credential copy and imports
+  `~/.codex/auth.json` again when that file is newer. It never writes to your Codex home.
 * A Claude Pro, Max, Team or Enterprise subscription when any medium-complexity step may run.
   Run `claude setup-token` once, then store the printed token as described below. Claude Code
   subscription calls consume the plan's separate Agent SDK credit; inspect that allowance before
@@ -422,6 +420,15 @@ replaced.
 Commits land on `enactment/<plan-id>` — one stable branch per plan, advanced linearly — with
 hooks disabled and the `Enactment-Plan`, `Enactment-Step`, `Enactment-Attempt` and
 `Enactment-Idempotency-Key` trailers. Nothing is merged and nothing is pushed:
+
+```text
+summarize-tasks: apply enactment-verified changes
+
+Enactment-Plan: task-summary
+Enactment-Step: summarize-tasks
+Enactment-Attempt: <attempt-id>
+Enactment-Idempotency-Key: sha256:<hash>
+```
 
 ```sh
 git log --oneline main..enactment/<plan-id>
