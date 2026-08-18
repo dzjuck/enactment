@@ -146,12 +146,10 @@ describe('progress writer', () => {
     );
   });
 
-  it('renders the completed summary, branch head, and artifacts', () => {
+  it('renders the completed summary from the report, branch head, and artifacts', () => {
     const progress = harness();
 
     progress.event(plan);
-    progress.event({ kind: 'stepDone', status: 'committed', commit: '8b3d0f1123456789' });
-    progress.event({ kind: 'stepDone', status: 'committed', commit: 'c91ee40123456789' });
     progress.advance(318_000);
     progress.finish(report());
 

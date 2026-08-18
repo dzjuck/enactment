@@ -24,7 +24,6 @@ export function createProgressWriter(options: ProgressWriterOptions): ProgressWr
   const startedAt = options.now();
   let artifactsRoot: string | undefined;
   let openPhase: { name: string; startedAt: number } | undefined;
-  let commits = 0;
   let finished = false;
 
   const closePhase = (endedAt = options.now()): void => {
@@ -66,7 +65,6 @@ export function createProgressWriter(options: ProgressWriterOptions): ProgressWr
 
     closePhase();
     if (progress.status === 'committed') {
-      commits += 1;
       options.write(
         `      committed${progress.commit === undefined ? '' : ` ${short(progress.commit)}`}\n\n`,
       );
@@ -88,6 +86,7 @@ export function createProgressWriter(options: ProgressWriterOptions): ProgressWr
     closePhase(endedAt);
 
     if (report?.state === 'completed') {
+      const commits = report.steps.filter((step) => step.commit !== undefined).length;
       options.write(
         `completed  ${String(report.steps.length)} steps  ${String(commits)} commits` +
           `  ${duration(endedAt - startedAt)}\n`,
